@@ -183,10 +183,18 @@ pub const App = struct {
                 .next = &[_]anim.NodeTransition{
                     anim.NodeTransition{
                         .node = 1,
-                        .condition = anim.TransitionCondition{ .Variable = .{
+                        .condition = anim.TransitionCondition{ .Float = .{
                             .variable_id = anim.AnimController.hash_variable("character speed"),
                             .comparison = .GreaterThan,
                             .value = 0.05,
+                        } },
+                        .transition_duration = 0.1,
+                        .transition_easing = es.Easing.OutLinear,
+                    },
+                    anim.NodeTransition{
+                        .node = 2,
+                        .condition = anim.TransitionCondition{ .Event = .{
+                            .variable_id = anim.AnimController.hash_variable("character node 2"),
                         } },
                         .transition_duration = 0.1,
                         .transition_easing = es.Easing.OutLinear,
@@ -197,18 +205,32 @@ pub const App = struct {
                 .node = .{ .Blend1D = .{
                     .left_animation = character_animation_walk_id,
                     .right_animation = character_animation_run_id,
-                    .variable = anim.AnimController.hash_variable("character speed norm"),
-                    .left_value = 0.5,
-                    .right_value = 1.0,
+                    .variable = anim.AnimController.hash_variable("character speed"),
+                    .left_value = 4.0,
+                    .right_value = 8.0,
+                    .left_strength_variable = anim.AnimController.hash_variable("character walk speed norm"),
                 } },
                 .next = &[_]anim.NodeTransition{
                     anim.NodeTransition{
                         .node = 0,
-                        .condition = anim.TransitionCondition{ .Variable = .{
+                        .condition = anim.TransitionCondition{ .Float = .{
                             .variable_id = anim.AnimController.hash_variable("character speed"),
                             .comparison = .LessThan,
                             .value = 0.05,
                         } },
+                        .transition_duration = 0.1,
+                        .transition_easing = es.Easing.OutLinear,
+                    },
+                },
+            },
+            .{
+                .node = .{ .Basic = .{
+                    .animation = character_animation_run_id,
+                } },
+                .next = &[_]anim.NodeTransition{
+                    anim.NodeTransition{
+                        .node = 0,
+                        .condition = anim.TransitionCondition.Always,
                         .transition_duration = 0.1,
                         .transition_easing = es.Easing.OutLinear,
                     },
@@ -367,7 +389,7 @@ pub const App = struct {
             eng.general_allocator.allocator(),
             2000,
             .{
-                .alignment = .{ .VelocityAligned = 200.0 },
+                .alignment = .{ .VelocityAligned = 150.0 },
                 .shape = .Circle,
                 .spawn_origin = zm.f32x4(0.0, -4.0, 0.0, 0.0),
                 .spawn_offset = zm.f32x4s(0.0),
@@ -378,14 +400,16 @@ pub const App = struct {
                 .particle_lifetime = 10.0,
                 .initial_velocity = zm.f32x4(0.0, 0.0, 0.0, 0.0),
                 .scale = .{
-                    .{ .value = zm.f32x4s(0.03), .key_time = 0.0, },
-                    .{ .value = zm.f32x4s(0.03), .key_time = 0.95, },
+                    .{ .value = zm.f32x4s(0.02), .key_time = 0.0, },
+                    .{ .value = zm.f32x4s(0.02), .key_time = 0.95, },
                     .{ .value = zm.f32x4s(0.0), .key_time = 1.0, },
                     null
                 },
                 .colour = .{
-                    .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 0.0)) * zm.f32x4(10.0, 10.0, 10.0, 1.0), .key_time = 0.0, },
-                    .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 1.0)) * zm.f32x4(10.0, 10.0, 10.0, 1.0), .key_time = 0.05, },
+                    // .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 0.0)) * zm.f32x4(1.0, 1.0, 1.0, 1.0), .key_time = 0.0, },
+                    // .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 1.0)) * zm.f32x4(1.0, 1.0, 1.0, 1.0), .key_time = 0.05, },
+                    .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 0.0)) * zm.f32x4(60.0, 60.0, 60.0, 1.0), .key_time = 0.0, },
+                    .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 1.0)) * zm.f32x4(60.0, 60.0, 60.0, 1.0), .key_time = 0.05, },
                     null,
                     null,
                 },
@@ -679,32 +703,27 @@ pub const App = struct {
             }
 
             const character = character_entity.physics.?.CharacterVirtual.virtual;
-            var current_movement = zm.loadArr3(character.getLinearVelocity());
-
-            var current_movement_direction = current_movement;
-            current_movement_direction[1] = 0.0;
+            var character_velocity = zm.loadArr3(character.getLinearVelocity());
 
             if (character_is_supported(character)) {
                 // remove any gravity
-                current_movement[1] = 0.0;
+                character_velocity[1] = 0.0;
 
                 const character_movement_speed = 4.0;
-                const ramp_speed = 10.0;
+                const friction = 8.0;
 
-                // apply supported movement
-                current_movement += movement_direction * 
-                    zm.f32x4s(character_movement_speed * ramp_speed * self.engine.time.delta_time_f32());
-
-                // apply friction
-                current_movement -=
-                    current_movement_direction * zm.f32x4s(ramp_speed * self.engine.time.delta_time_f32());
+                character_velocity = character_velocity
+                    // apply supported movement
+                    + movement_direction * zm.f32x4s(character_movement_speed * friction * self.engine.time.delta_time_f32())
+                    // apply friction
+                    - character_velocity * zm.f32x4s(friction * self.engine.time.delta_time_f32());
             } else {
                 // if not supported then apply gravity
-                current_movement = current_movement
+                character_velocity = character_velocity
                     + zm.loadArr3(self.engine.physics.zphy.getGravity()) * zm.f32x4s(self.engine.time.delta_time_f32());
             }
 
-            character.setLinearVelocity(zm.vecToArr3(current_movement));
+            character.setLinearVelocity(zm.vecToArr3(character_velocity));
 
             // Rotate character model to match the input desired direction
             // If no input desired direction (normalized to nan) then remain in last rotation
@@ -811,19 +830,48 @@ pub const App = struct {
                 self.imui.push_layout_id(anim_debug_layout);
                 defer self.imui.pop_layout();
                 var anim_name: [128]u8 = [_]u8{0} ** 128;
-                _ = std.fmt.bufPrint(anim_name[0..], "Active: {d}", .{self.anim_controller.active_node}) catch unreachable;
-                _ = self.imui.label(anim_name[0..]);
-                for (character_model.animations, 0..) |*animation, i| {
-                    _ = self.imui.label(animation.name);
-                    _ = self.imui.slider(@floatCast(animation.current_tick / animation.duration), 0.0, 1.0, .{@src(), i});
+                _ = self.imui.label("Anim controller debug:");
+                const default_anim = self.engine.asset_manager.get_animation(self.anim_controller.nodes[0].node.Basic.animation) catch unreachable;
+                const default_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Default Animation: {s}", .{default_anim.name}) catch unreachable;
+                _ = self.imui.label(default_anim_name_string);
+                _ = self.imui.slider(@floatCast(default_anim.current_tick / default_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+                const active_node_string = std.fmt.bufPrint(anim_name[0..], "Active Node: {d}", .{self.anim_controller.active_node}) catch unreachable;
+                _ = self.imui.label(active_node_string);
+                switch (self.anim_controller.nodes[self.anim_controller.active_node].node) {
+                    .Blend1D => |*b1d| {
+                        _ = self.imui.label("Blend1D Node");
+                        _ = self.imui.label("blend amount:");
+                        _ = self.imui.slider(@floatCast((self.anim_controller.get_variable_by_id(b1d.variable.?).? - b1d.left_value) / (b1d.right_value - b1d.left_value)), 0.0, 1.0, .{@src(), 0});
+                        const left_anim = self.engine.asset_manager.get_animation(b1d.left_animation) catch unreachable;
+                        const right_anim = self.engine.asset_manager.get_animation(b1d.right_animation) catch unreachable;
+                        const left_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Left Animation: {s}", .{left_anim.name}) catch unreachable;
+                        _ = self.imui.label(left_anim_name_string);
+                        _ = self.imui.slider(@floatCast(left_anim.current_tick / left_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+                        _ = self.imui.label("Left animation strength:");
+                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.left_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
+                        const right_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Right Animation: {s}", .{right_anim.name}) catch unreachable;
+                        _ = self.imui.label(right_anim_name_string);
+                        _ = self.imui.slider(@floatCast(right_anim.current_tick / right_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+                        _ = self.imui.label("Right animation strength:");
+                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.right_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
+                    },
+                    .Basic => |*b| {
+                        _ = self.imui.label("Basic Node");
+                        _ = self.imui.label("animation strength:");
+                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b.strength_variable orelse 0) orelse 1.0), 1.0, 1.0, .{@src(), 0});
+                    },
                 }
             }
 
             const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
-            self.anim_controller.set_variable(anim.AnimController.hash_variable("character speed"), zm.length3(character_velocity)[0]);
-            self.anim_controller.set_variable(anim.AnimController.hash_variable("character speed norm"), std.math.clamp(zm.length3(character_velocity)[0] / 8.0, 0.0, 1.0));
+            self.anim_controller.set_variable("character speed", zm.length3(character_velocity)[0]);
+            self.anim_controller.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
 
-            self.anim_controller.update(&self.engine.time);
+            if (self.engine.input.get_key_down(KeyCode.O)) {
+                self.anim_controller.trigger_event("character node 2");
+            }
+
+            self.anim_controller.update(&self.engine.asset_manager, &self.engine.time);
 
             const bone_transforms = self.anim_controller.calculate_bone_transforms(
                 &self.engine.asset_manager,
