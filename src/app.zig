@@ -35,9 +35,12 @@ pub const App = struct {
 
     pub const EntityData = struct {
         health_points: ?i32 = null,
+        anim_controller: ?anim.AnimController = null,
 
         pub fn deinit(self: *EntityData) void {
-            _ = self;
+            if (self.anim_controller) |*anim_controller| {
+                anim_controller.deinit();
+            }
         }
     };
 
@@ -56,14 +59,13 @@ pub const App = struct {
 
     model_buffer: gfx.Buffer,
     character_idx: gen.GenerationalIndex,
+    opponent_idx: gen.GenerationalIndex,
     character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
 
     bone_matrix_buffer: gfx.Buffer,
 
     app_life_asset_pack_id: assets.AssetPackId,
     turntable_model_id: assets.ModelAssetId,
-
-    anim_controller: anim.AnimController,
 
     imui: ui.Imui,
 
@@ -84,8 +86,6 @@ pub const App = struct {
         self.imui.deinit();
         self.zero_particle_system.deinit();
         self.player_attack_particle_system.deinit();
-
-        self.anim_controller.deinit();
 
         self.engine.asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
             catch unreachable;
@@ -156,14 +156,16 @@ pub const App = struct {
         var asset_pack = assets.AssetPack.init(eng.general_allocator.allocator());
         defer asset_pack.deinit();
 
-        try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
+        //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
+        try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "KayKit_Adventure/Characters/gltf/Rogue.glb" });
         try asset_pack.add_model("model", assets.AssetPack.ModelAsset{ .Path = "sea_house.glb" });
         try asset_pack.add_model("terrain", assets.AssetPack.ModelAsset{ .Plane = .{ .slices = 1, .stacks = 1, } });
         try asset_pack.add_model("cone", assets.AssetPack.ModelAsset{ .Cone = .{ .slices = 8, } });
 
-        try asset_pack.define_animation("character idle", "character", 0);
-        try asset_pack.define_animation("character run", "character", 1);
-        try asset_pack.define_animation("character walk", "character", 2);
+        try asset_pack.define_animation("character idle", "character", 36);
+        try asset_pack.define_animation("character run", "character", 48);
+        try asset_pack.define_animation("character walk", "character", 72);
+        try asset_pack.define_animation("character attack", "character", 3);
 
         const asset_pack_id = try eng.asset_manager.load_asset_pack(eng.general_allocator.allocator(), &asset_pack, &eng.gfx);
         
@@ -174,6 +176,13 @@ pub const App = struct {
         const character_animation_idle_id = eng.asset_manager.find_animation_id("character idle").?;
         const character_animation_walk_id = eng.asset_manager.find_animation_id("character walk").?;
         const character_animation_run_id = eng.asset_manager.find_animation_id("character run").?;
+        const character_animation_attack_id = eng.asset_manager.find_animation_id("character attack").?;
+
+        const character_model = eng.asset_manager.get_model(character_model_id) catch unreachable;
+        std.log.info("character model animations:", .{});
+        for (character_model.animations, 0..) |*animation, i| {
+            std.log.info("{}. anim: {s}", .{i, animation.name});
+        }
 
         var anim_controller = try anim.AnimController.init(eng.general_allocator.allocator(), &[_]anim.Node{
             .{
@@ -194,7 +203,7 @@ pub const App = struct {
                     anim.NodeTransition{
                         .node = 2,
                         .condition = anim.TransitionCondition{ .Event = .{
-                            .variable_id = anim.AnimController.hash_variable("character node 2"),
+                            .variable_id = anim.AnimController.hash_variable("character attack"),
                         } },
                         .transition_duration = 0.1,
                         .transition_easing = es.Easing.OutLinear,
@@ -221,11 +230,19 @@ pub const App = struct {
                         .transition_duration = 0.1,
                         .transition_easing = es.Easing.OutLinear,
                     },
+                    anim.NodeTransition{
+                        .node = 2,
+                        .condition = anim.TransitionCondition{ .Event = .{
+                            .variable_id = anim.AnimController.hash_variable("character attack"),
+                        } },
+                        .transition_duration = 0.1,
+                        .transition_easing = es.Easing.OutLinear,
+                    },
                 },
             },
             .{
                 .node = .{ .Basic = .{
-                    .animation = character_animation_run_id,
+                    .animation = character_animation_attack_id,
                 } },
                 .next = &[_]anim.NodeTransition{
                     anim.NodeTransition{
@@ -334,6 +351,7 @@ pub const App = struct {
             } },
             .app = .{
                 .health_points = 100,
+                .anim_controller = anim_controller,
             },
         });
         const chara_body_id_character = eng.entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.character.?.getBodyId();
@@ -356,7 +374,7 @@ pub const App = struct {
             .gravity_factor = 1.0,
         };
 
-        _ = try eng.entities.new_entity(Engine.EntityDescriptor {
+        const opponent_idx = try eng.entities.new_entity(Engine.EntityDescriptor {
             .name = "opponent entity",
             .model = character_model_id,
             .transform = chara_transform,
@@ -369,8 +387,11 @@ pub const App = struct {
             } },
             .app = .{
                 .health_points = 100,
+                .anim_controller = try anim_controller.clone(eng.general_allocator.allocator()),
             },
         });
+        var rand = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+        eng.entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
 
         const model_buffer = try gfx.Buffer.init(
             @sizeOf(zm.Mat),
@@ -486,6 +507,7 @@ pub const App = struct {
             .camera_idx = camera_transform_idx,
 
             .character_idx = chara_root_idx,
+            .opponent_idx = opponent_idx,
             .model_buffer = model_buffer,
 
             .character_ignore_self_filter = character_ignore_self_filter,
@@ -494,7 +516,6 @@ pub const App = struct {
 
             .app_life_asset_pack_id = asset_pack_id,
             .turntable_model_id = turntable_model_id,
-            .anim_controller = anim_controller,
 
             .imui = imui,
             .zero_particle_system = zero_particle_system,
@@ -755,6 +776,14 @@ pub const App = struct {
                         .position = shape_position
                     }).generate_model_matrix());
 
+                if (self.engine.input.get_key(KeyCode.Shift)) {
+                    if (self.engine.entities.get(self.opponent_idx)) |opponent_entity| {
+                        opponent_entity.app.anim_controller.?.trigger_event("character attack");
+                    }
+                } else {
+                    character_entity.app.anim_controller.?.trigger_event("character attack");
+                }
+
                 // particles!
                 self.player_attack_particle_system.settings.spawn_origin = shape_position;
                 self.player_attack_particle_system.settings.spawn_offset = camera_right;
@@ -824,66 +853,48 @@ pub const App = struct {
                 mapped_buffer.data().projection = self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect());
             }
 
-            const character_model = self.engine.asset_manager.get_model(character_entity.model.?) catch unreachable;
+            //const character_model = self.engine.asset_manager.get_model(character_entity.model.?) catch unreachable;
 
-            {
-                self.imui.push_layout_id(anim_debug_layout);
-                defer self.imui.pop_layout();
-                var anim_name: [128]u8 = [_]u8{0} ** 128;
-                _ = self.imui.label("Anim controller debug:");
-                const default_anim = self.engine.asset_manager.get_animation(self.anim_controller.nodes[0].node.Basic.animation) catch unreachable;
-                const default_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Default Animation: {s}", .{default_anim.name}) catch unreachable;
-                _ = self.imui.label(default_anim_name_string);
-                _ = self.imui.slider(@floatCast(default_anim.current_tick / default_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
-                const active_node_string = std.fmt.bufPrint(anim_name[0..], "Active Node: {d}", .{self.anim_controller.active_node}) catch unreachable;
-                _ = self.imui.label(active_node_string);
-                switch (self.anim_controller.nodes[self.anim_controller.active_node].node) {
-                    .Blend1D => |*b1d| {
-                        _ = self.imui.label("Blend1D Node");
-                        _ = self.imui.label("blend amount:");
-                        _ = self.imui.slider(@floatCast((self.anim_controller.get_variable_by_id(b1d.variable.?).? - b1d.left_value) / (b1d.right_value - b1d.left_value)), 0.0, 1.0, .{@src(), 0});
-                        const left_anim = self.engine.asset_manager.get_animation(b1d.left_animation) catch unreachable;
-                        const right_anim = self.engine.asset_manager.get_animation(b1d.right_animation) catch unreachable;
-                        const left_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Left Animation: {s}", .{left_anim.name}) catch unreachable;
-                        _ = self.imui.label(left_anim_name_string);
-                        _ = self.imui.slider(@floatCast(left_anim.current_tick / left_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
-                        _ = self.imui.label("Left animation strength:");
-                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.left_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
-                        const right_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Right Animation: {s}", .{right_anim.name}) catch unreachable;
-                        _ = self.imui.label(right_anim_name_string);
-                        _ = self.imui.slider(@floatCast(right_anim.current_tick / right_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
-                        _ = self.imui.label("Right animation strength:");
-                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.right_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
-                    },
-                    .Basic => |*b| {
-                        _ = self.imui.label("Basic Node");
-                        _ = self.imui.label("animation strength:");
-                        _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b.strength_variable orelse 0) orelse 1.0), 1.0, 1.0, .{@src(), 0});
-                    },
-                }
-            }
+            // {
+            //     self.imui.push_layout_id(anim_debug_layout);
+            //     defer self.imui.pop_layout();
+            //     var anim_name: [128]u8 = [_]u8{0} ** 128;
+            //     _ = self.imui.label("Anim controller debug:");
+            //     const default_anim = self.engine.asset_manager.get_animation(self.anim_controller.nodes[0].node.Basic.animation) catch unreachable;
+            //     const default_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Default Animation: {s}", .{default_anim.name}) catch unreachable;
+            //     _ = self.imui.label(default_anim_name_string);
+            //     _ = self.imui.slider(@floatCast(default_anim.current_tick / default_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+            //     const active_node_string = std.fmt.bufPrint(anim_name[0..], "Active Node: {d}", .{self.anim_controller.active_node}) catch unreachable;
+            //     _ = self.imui.label(active_node_string);
+            //     switch (self.anim_controller.nodes[self.anim_controller.active_node].node) {
+            //         .Blend1D => |*b1d| {
+            //             _ = self.imui.label("Blend1D Node");
+            //             _ = self.imui.label("blend amount:");
+            //             _ = self.imui.slider(@floatCast((self.anim_controller.get_variable_by_id(b1d.variable.?).? - b1d.left_value) / (b1d.right_value - b1d.left_value)), 0.0, 1.0, .{@src(), 0});
+            //             const left_anim = self.engine.asset_manager.get_animation(b1d.left_animation) catch unreachable;
+            //             const right_anim = self.engine.asset_manager.get_animation(b1d.right_animation) catch unreachable;
+            //             const left_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Left Animation: {s}", .{left_anim.name}) catch unreachable;
+            //             _ = self.imui.label(left_anim_name_string);
+            //             _ = self.imui.slider(@floatCast(left_anim.current_tick / left_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+            //             _ = self.imui.label("Left animation strength:");
+            //             _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.left_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
+            //             const right_anim_name_string = std.fmt.bufPrint(anim_name[0..], "Right Animation: {s}", .{right_anim.name}) catch unreachable;
+            //             _ = self.imui.label(right_anim_name_string);
+            //             _ = self.imui.slider(@floatCast(right_anim.current_tick / right_anim.duration_ticks), 0.0, 1.0, .{@src(), 0});
+            //             _ = self.imui.label("Right animation strength:");
+            //             _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b1d.right_strength_variable orelse 0) orelse 1.0), 0.0, 1.0, .{@src(), 0});
+            //         },
+            //         .Basic => |*b| {
+            //             _ = self.imui.label("Basic Node");
+            //             _ = self.imui.label("animation strength:");
+            //             _ = self.imui.slider(@floatCast(self.anim_controller.get_variable_by_id(b.strength_variable orelse 0) orelse 1.0), 1.0, 1.0, .{@src(), 0});
+            //         },
+            //     }
+            // }
 
             const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
-            self.anim_controller.set_variable("character speed", zm.length3(character_velocity)[0]);
-            self.anim_controller.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
-
-            if (self.engine.input.get_key_down(KeyCode.O)) {
-                self.anim_controller.trigger_event("character node 2");
-            }
-
-            self.anim_controller.update(&self.engine.asset_manager, &self.engine.time);
-
-            const bone_transforms = self.anim_controller.calculate_bone_transforms(
-                &self.engine.asset_manager,
-                character_model
-            );
-
-            { // Update bone matrix buffer
-                const mapped_buffer = self.bone_matrix_buffer.map([ms.MAX_BONES]zm.Mat, &self.engine.gfx) catch unreachable;
-                defer mapped_buffer.unmap();
-
-                @memcpy(mapped_buffer.data().*[0..], bone_transforms[0..]);
-            }
+            character_entity.app.anim_controller.?.set_variable("character speed", zm.length3(character_velocity)[0]);
+            character_entity.app.anim_controller.?.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
         }
         }
 
@@ -920,12 +931,40 @@ pub const App = struct {
 
         self.engine.gfx.cmd_set_topology(.TriangleList);
 
+        var bone_transforms: [ms.MAX_BONES]zm.Mat = undefined;
+        var null_bone_transforms: [ms.MAX_BONES]zm.Mat = [_]zm.Mat{zm.identity()} ** ms.MAX_BONES;
         // Iterate through all entities finding those which contain a mesh to be rendered
         for (self.engine.entities.list.data.items) |*it| {
             if (it.item_data) |*entity| {
                 // Find the transform of the entity to be rendered taking into account it's parent
                 if (entity.model) |mid| {
                     const m = self.engine.asset_manager.get_model(mid) catch unreachable;
+
+                    var pose: []zm.Mat = &null_bone_transforms;
+                    if (entity.app.anim_controller) |*anim_controller| {
+                        anim_controller.update(&self.engine.asset_manager, &self.engine.time);
+                        anim_controller.calculate_bone_transforms(
+                            &self.engine.asset_manager,
+                            m,
+                            &bone_transforms
+                        );
+
+                        { // Update bone matrix buffer
+                            const mapped_buffer = self.bone_matrix_buffer.map([ms.MAX_BONES]zm.Mat, &self.engine.gfx) catch unreachable;
+                            defer mapped_buffer.unmap();
+
+                            @memcpy(mapped_buffer.data().*[0..], bone_transforms[0..]);
+                        }
+
+                        pose = &bone_transforms;
+                    } else {
+                        { // Update bone matrix buffer
+                            const mapped_buffer = self.bone_matrix_buffer.map([ms.MAX_BONES]zm.Mat, &self.engine.gfx) catch unreachable;
+                            defer mapped_buffer.unmap();
+
+                            @memset(mapped_buffer.data().*[0..], zm.identity());
+                        }
+                    }
 
                     self.engine.gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
                         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
@@ -941,31 +980,31 @@ pub const App = struct {
                     self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
 
                     // Finally, render the model
-                    self.recursive_render_model(m, &m.nodes_list[m.root_nodes[0]], entity.transform.generate_model_matrix());
+                    self.recursive_render_model(m, pose, &entity.transform.generate_model_matrix(), &m.nodes_list[m.root_nodes[0]], entity.transform.generate_model_matrix());
                 }
             }
         }
 
-        // render sea house scene
-        {
-            const m = self.engine.asset_manager.get_model(self.turntable_model_id) catch unreachable;
-
-            self.engine.gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
-                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
-                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
-                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
-            });
-
-            self.engine.gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-
-            // Set model constant buffer
-            self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
-
-            // Finally, render the model
-            self.recursive_render_model(m, &m.nodes_list[m.root_nodes[0]], (Transform{ .scale = zm.f32x4s(0.05) }).generate_model_matrix());
-        }
+        // // render sea house scene
+        // {
+        //     const m = self.engine.asset_manager.get_model(self.turntable_model_id) catch unreachable;
+        //
+        //     self.engine.gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
+        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
+        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
+        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
+        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
+        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
+        //     });
+        //
+        //     self.engine.gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
+        //
+        //     // Set model constant buffer
+        //     self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
+        //
+        //     // Finally, render the model
+        //     self.recursive_render_model(m, null, &m.nodes_list[m.root_nodes[0]], (Transform{ .scale = zm.f32x4s(0.05) }).generate_model_matrix());
+        // }
 
         self.zero_particle_system.update(&self.engine.time);
         self.zero_particle_system.draw(
@@ -1104,8 +1143,19 @@ pub const App = struct {
         return;
     }
 
-    pub fn recursive_render_model(self: *Self, model: *const ms.Model, model_node: *const ms.ModelNode, mat: zm.Mat) void {
-        const node_model_matrix = zm.mul(model_node.transform.generate_model_matrix(), mat);
+    pub fn recursive_render_model(self: *Self, model: *const ms.Model, pose: ?[]const zm.Mat, root_mat: *const zm.Mat, model_node: *const ms.ModelNode, mat: zm.Mat) void {
+        var node_model_matrix = zm.mul(model_node.transform.generate_model_matrix(), mat);
+
+        // Apply pose
+        if (pose) |p| {
+            if (model_node.name) |node_name| {
+                if (model.bone_mapping.get(node_name)) |bone_id| {
+                    const bone_data = &model.bone_info.items[@intCast(bone_id)];
+                    // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
+                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset), p[@intCast(bone_id)]), root_mat.*);
+                }
+            }
+        }
 
         if (model_node.mesh) |*mesh_set| {
             { // Setup model buffer from transform
@@ -1149,7 +1199,7 @@ pub const App = struct {
         }
 
         for (model_node.children) |c| {
-            self.recursive_render_model(model, &model.nodes_list[c], node_model_matrix);
+            self.recursive_render_model(model, pose, root_mat, &model.nodes_list[c], node_model_matrix);
         }
     }
 
@@ -1177,6 +1227,7 @@ pub const App = struct {
 
                     self.recursive_render_model(
                         render_model, 
+                        null,
                         &render_model.nodes_list[render_model.root_nodes[0]], 
                         zm.mul(render_model_transform.*, node_model_matrix_transformed)
                     );
