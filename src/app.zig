@@ -76,6 +76,7 @@ pub const App = struct {
 
     checkbox_bool: bool = false,
     slider_float: f32 = 0.0,
+    text_input_state: ui.Imui.TextInputState,
 
     pub fn deinit(self: *Self) void {
         std.log.info("App deinit!", .{});
@@ -99,6 +100,8 @@ pub const App = struct {
 
         self.vertex_shader.deinit();
         self.pixel_shader.deinit();
+
+        self.text_input_state.deinit();
     }
 
     pub fn init(eng: *engine.Engine(Self)) !Self {
@@ -157,7 +160,7 @@ pub const App = struct {
         defer asset_pack.deinit();
 
         //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
-        try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "KayKit_Adventure/Characters/gltf/Rogue.glb" });
+        try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "KayKit_Adventure/Characters/gltf/Knight.glb" });
         try asset_pack.add_model("model", assets.AssetPack.ModelAsset{ .Path = "sea_house.glb" });
         try asset_pack.add_model("terrain", assets.AssetPack.ModelAsset{ .Plane = .{ .slices = 1, .stacks = 1, } });
         try asset_pack.add_model("cone", assets.AssetPack.ModelAsset{ .Cone = .{ .slices = 8, } });
@@ -165,7 +168,12 @@ pub const App = struct {
         try asset_pack.define_animation("character idle", "character", 36);
         try asset_pack.define_animation("character run", "character", 48);
         try asset_pack.define_animation("character walk", "character", 72);
-        try asset_pack.define_animation("character attack", "character", 3);
+        try asset_pack.define_animation("character attack", "character", 1);
+
+        // try asset_pack.define_animation("character idle", "character", 0);
+        // try asset_pack.define_animation("character run", "character", 1);
+        // try asset_pack.define_animation("character walk", "character", 2);
+        // try asset_pack.define_animation("character attack", "character", 2);
 
         const asset_pack_id = try eng.asset_manager.load_asset_pack(eng.general_allocator.allocator(), &asset_pack, &eng.gfx);
         
@@ -520,6 +528,8 @@ pub const App = struct {
             .imui = imui,
             .zero_particle_system = zero_particle_system,
             .player_attack_particle_system = player_attack_particle_system,
+
+            .text_input_state = ui.Imui.TextInputState.init(eng.general_allocator.allocator()),
         };
     }
 
@@ -542,7 +552,7 @@ pub const App = struct {
     }
 
     fn update(self: *Self) void {
-        const top_layout = self.imui.push_floating_layout(.X, 500, 100, .{@src()});
+        const top_layout = self.imui.push_floating_layout(.Y, 500, 100, .{@src()});
         if (self.imui.get_widget(top_layout)) |top_widget| {
             top_widget.flags.render = true;
             top_widget.background_colour = self.imui.palette().background;
@@ -560,7 +570,11 @@ pub const App = struct {
                 .bottom_left = 10,
                 .bottom_right = 10,
             };
-            top_widget.children_gap = 20.0;
+            top_widget.children_gap = 5.0;
+        }
+        const columns_layout = self.imui.push_layout(.X, .{@src()});
+        if (self.imui.get_widget(columns_layout)) |columns_widget| {
+            columns_widget.children_gap = 20.0;
         }
 
         const labels_layout = self.imui.push_layout(.Y, .{@src()});
@@ -618,6 +632,8 @@ pub const App = struct {
             std.log.info("button clicked!", .{});
         }
         self.imui.pop_layout();
+        self.imui.pop_layout();
+        _ = self.imui.text_input(&self.text_input_state, &self.engine.input, .{@src()});
         self.imui.pop_layout();
 
         const anim_debug_layout = self.imui.push_floating_layout(.Y, 10.0, 100.0, .{@src()});
@@ -723,6 +739,11 @@ pub const App = struct {
                 movement_direction *= zm.f32x4s(2.0);
             }
 
+            // disable movement when attacking
+            if (character_entity.app.anim_controller.?.active_node == 2) {
+                movement_direction *= zm.f32x4s(0.0);
+            }
+
             const character = character_entity.physics.?.CharacterVirtual.virtual;
             var character_velocity = zm.loadArr3(character.getLinearVelocity());
 
@@ -776,7 +797,7 @@ pub const App = struct {
                         .position = shape_position
                     }).generate_model_matrix());
 
-                if (self.engine.input.get_key(KeyCode.Shift)) {
+                if (self.engine.input.get_key(KeyCode.Control)) {
                     if (self.engine.entities.get(self.opponent_idx)) |opponent_entity| {
                         opponent_entity.app.anim_controller.?.trigger_event("character attack");
                     }
@@ -980,31 +1001,44 @@ pub const App = struct {
                     self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
 
                     // Finally, render the model
-                    self.recursive_render_model(m, pose, &entity.transform.generate_model_matrix(), &m.nodes_list[m.root_nodes[0]], entity.transform.generate_model_matrix());
+                    self.recursive_render_model(
+                        m, 
+                        pose,
+                        &entity.transform.generate_model_matrix(), 
+                        &m.nodes_list[m.root_nodes[0]],
+                        entity.transform.generate_model_matrix()
+                    );
                 }
             }
         }
 
-        // // render sea house scene
-        // {
-        //     const m = self.engine.asset_manager.get_model(self.turntable_model_id) catch unreachable;
-        //
-        //     self.engine.gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
-        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
-        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
-        //         .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
-        //     });
-        //
-        //     self.engine.gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-        //
-        //     // Set model constant buffer
-        //     self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
-        //
-        //     // Finally, render the model
-        //     self.recursive_render_model(m, null, &m.nodes_list[m.root_nodes[0]], (Transform{ .scale = zm.f32x4s(0.05) }).generate_model_matrix());
-        // }
+        // render sea house scene
+        {
+            const m = self.engine.asset_manager.get_model(self.turntable_model_id) catch unreachable;
+
+            self.engine.gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
+                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
+                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
+                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
+                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
+                .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
+            });
+
+            self.engine.gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
+
+            // Set model constant buffer
+            self.engine.gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
+
+            // Finally, render the model
+            const tt = Transform{ .scale = zm.f32x4s(0.05) };
+            self.recursive_render_model(
+                m, 
+                null,
+                &tt.generate_model_matrix(), 
+                &m.nodes_list[m.root_nodes[0]],
+                tt.generate_model_matrix()
+            );
+        }
 
         self.zero_particle_system.update(&self.engine.time);
         self.zero_particle_system.draw(
