@@ -411,7 +411,7 @@ pub const App = struct {
 
         eng.physics.zphy.optimizeBroadPhase();
 
-        var imui = try ui.Imui.init(eng.general_allocator.allocator(), &eng.input, &eng.time, &eng.gfx);
+        var imui = try ui.Imui.init(eng.general_allocator.allocator(), &eng.input, &eng.time, &eng.window, &eng.gfx);
         errdefer imui.deinit();
 
         var zero_particle_system = try particle.ParticleSystem.init(
@@ -617,9 +617,9 @@ pub const App = struct {
         const slider = self.imui.slider(self.slider_float, 0.0, 1.0, .{@src()});
         if (slider.dragged) {
             if (self.imui.get_widget_from_last_frame(slider.id.background_bar)) |b| {
-                const pixel_width = b.content_rect().width;
-                self.slider_float += self.engine.input.mouse_delta[0] / @as(f32, @floatFromInt(pixel_width));
-                self.slider_float = std.math.clamp(self.slider_float, 0.0, 1.0);
+                const pixel_width: f32 = @floatFromInt(b.content_rect().width);
+                const percent = @as(f32, @floatFromInt(self.engine.input.cursor_position[0] - b.computed.rect().left)) / pixel_width;
+                self.slider_float = std.math.clamp(percent, 0.0, 1.0);
             }
         }
         self.imui.pop_layout();
@@ -633,7 +633,7 @@ pub const App = struct {
         }
         self.imui.pop_layout();
         self.imui.pop_layout();
-        _ = self.imui.text_input(&self.text_input_state, &self.engine.input, .{@src()});
+        _ = self.imui.line_edit(&self.text_input_state, .{@src()});
         self.imui.pop_layout();
 
         const anim_debug_layout = self.imui.push_floating_layout(.Y, 10.0, 100.0, .{@src()});
