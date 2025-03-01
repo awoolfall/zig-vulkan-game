@@ -1,47 +1,60 @@
 const std = @import("std");
 
-const engine = @import("engine");
-const zphy = engine.physics.zphy;
-const zm = engine.zmath;
-const Transform = engine.Transform;
-const gfx = engine.gfx;
-const window = engine.window;
-const input = engine.input;
-const KeyCode = engine.input.KeyCode;
-const cm = engine.camera;
-const ms = engine.mesh;
-const gen = engine.gen;
-const ph = engine.physics;
-const path = engine.path;
-const particle = engine.particles;
-const es = engine.easings;
-const anim = engine.animation;
-const assets = engine.assets;
+const en = @import("engine");
+const zphy = en.physics.zphy;
+const zm = en.zmath;
+const Transform = en.Transform;
+const gfx = en.gfx;
+const window = en.window;
+const input = en.input;
+const KeyCode = en.input.KeyCode;
+const cm = en.camera;
+const ms = en.mesh;
+const gen = en.gen;
+const ph = en.physics;
+const path = en.path;
+const particle = en.particles;
+const es = en.easings;
+const anim = en.animation;
+const assets = en.assets;
 
-const ui = engine.ui;
+const ui = en.ui;
 const FontEnum = ui.FontEnum;
 
-const gitrev = engine.gitrev;
-const gitchanged = engine.gitchanged;
+const gitrev = en.gitrev;
+const gitchanged = en.gitchanged;
 
 const CameraStruct = extern struct {
     projection: [4]zm.F32x4,
     view: [4]zm.F32x4,
 };
 
-pub const Engine = engine.Engine(App);
+pub const Engine = en.Engine(App);
 pub const App = struct {
     const Self = @This();
 
     pub const EntityData = struct {
-        health_points: ?i32 = null,
-        anim_controller: ?anim.AnimController = null,
+        health_points: ?i32,
+        anim_controller: ?anim.AnimController,
 
         pub fn deinit(self: *EntityData) void {
             if (self.anim_controller) |*anim_controller| {
                 anim_controller.deinit();
             }
         }
+
+        pub fn init(desc: Descriptor, engine: *Engine) !EntityData {
+            _ = engine;
+            return EntityData {
+                .health_points = desc.health_points,
+                .anim_controller = if (desc.anim_controller) |ac| ac else null,
+            };
+        }
+
+        pub const Descriptor = struct {
+            health_points: ?i32 = null,
+            anim_controller: ?anim.AnimController = null,
+        };
     };
 
     engine: *Engine,
@@ -60,7 +73,7 @@ pub const App = struct {
     model_buffer: gfx.Buffer,
     character_idx: gen.GenerationalIndex,
     opponent_idx: gen.GenerationalIndex,
-    character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
+    //character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
 
     bone_matrix_buffer: gfx.Buffer,
 
@@ -81,7 +94,7 @@ pub const App = struct {
     pub fn deinit(self: *Self) void {
         std.log.info("App deinit!", .{});
 
-        self.engine.general_allocator.allocator().destroy(self.character_ignore_self_filter);
+        //self.engine.general_allocator.allocator().destroy(self.character_ignore_self_filter);
 
         self.engine.gfx.flush();
         self.imui.deinit();
@@ -104,15 +117,15 @@ pub const App = struct {
         self.text_input_state.deinit();
     }
 
-    pub fn init(eng: *engine.Engine(Self)) !Self {
+    pub fn init(self: *Self) !void {
         std.log.info("App init!", .{});
-        eng.time.set_target_frame_rate(140.0);
+        self.engine.time.set_target_frame_rate(140.0);
 
-        var depth_struct = try create_depth_stencil_view(eng);
+        var depth_struct = try create_depth_stencil_view(self.engine);
         errdefer { depth_struct.view.deinit(); depth_struct.view_read_only.deinit(); }
 
         const vertex_shader = try gfx.VertexShader.init_file(
-            eng.general_allocator.allocator(), 
+            self.engine.general_allocator.allocator(), 
             path.Path{.ExeRelative = "../../src/shader.hlsl"}, 
             "vs_main",
             ([_]gfx.VertexInputLayoutEntry {
@@ -122,15 +135,17 @@ pub const App = struct {
                 .{ .name = "TEXCOORD",  .index = 1, .format = .I32x4,   .per = .Vertex, .slot = 3, },
                 .{ .name = "TEXCOORD",  .index = 2, .format = .F32x4,   .per = .Vertex, .slot = 4, },
             })[0..],
-            &eng.gfx
+            .{},
+            &self.engine.gfx
         );
         errdefer vertex_shader.deinit();
 
         const pixel_shader = try gfx.PixelShader.init_file(
-            eng.general_allocator.allocator(), 
+            self.engine.general_allocator.allocator(), 
             path.Path{.ExeRelative = "../../src/shader.hlsl"}, 
             "ps_main",
-            &eng.gfx
+            .{},
+            &self.engine.gfx
         );
         errdefer pixel_shader.deinit();
 
@@ -139,24 +154,24 @@ pub const App = struct {
             @sizeOf(CameraStruct),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
-            &eng.gfx
+            &self.engine.gfx
         );
         errdefer camera_constant_buffer.deinit();
 
         // Create the camera entity
-        const camera_transform_idx = try eng.entities.new_entity(Engine.EntityDescriptor {});
-        eng.entities.get(camera_transform_idx).?.transform.position = zm.f32x4(0.0, 1.0, -1.0, 0.0);
+        const camera_transform_idx = try self.engine.entities.new_entity(Engine.EntityDescriptor {});
+        self.engine.entities.get(camera_transform_idx).?.transform.position = zm.f32x4(0.0, 1.0, -1.0, 0.0);
 
         // Create bone matrix constant buffer
         const bone_matrix_buffer = try gfx.Buffer.init(
             @sizeOf(zm.Mat) * ms.MAX_BONES,
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
-            &eng.gfx
+            &self.engine.gfx
         );
         errdefer bone_matrix_buffer.deinit();
 
-        var asset_pack = assets.AssetPack.init(eng.general_allocator.allocator());
+        var asset_pack = try assets.AssetPack.init(self.engine.general_allocator.allocator(), "default");
         defer asset_pack.deinit();
 
         //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
@@ -175,24 +190,24 @@ pub const App = struct {
         // try asset_pack.define_animation("character walk", "character", 2);
         // try asset_pack.define_animation("character attack", "character", 2);
 
-        const asset_pack_id = try eng.asset_manager.load_asset_pack(eng.general_allocator.allocator(), &asset_pack, &eng.gfx);
+        const asset_pack_id = try self.engine.asset_manager.load_asset_pack(&asset_pack, &self.engine.gfx);
         
-        const character_model_id = eng.asset_manager.find_model_id("character").?;
-        const terrain_model_id = eng.asset_manager.find_model_id("terrain").?;
-        const turntable_model_id = eng.asset_manager.find_model_id("model").?;
+        const character_model_id = self.engine.asset_manager.find_model_id("character").?;
+        const terrain_model_id = self.engine.asset_manager.find_model_id("terrain").?;
+        const turntable_model_id = self.engine.asset_manager.find_model_id("model").?;
 
-        const character_animation_idle_id = eng.asset_manager.find_animation_id("character idle").?;
-        const character_animation_walk_id = eng.asset_manager.find_animation_id("character walk").?;
-        const character_animation_run_id = eng.asset_manager.find_animation_id("character run").?;
-        const character_animation_attack_id = eng.asset_manager.find_animation_id("character attack").?;
+        const character_animation_idle_id = self.engine.asset_manager.find_animation_id("character idle").?;
+        const character_animation_walk_id = self.engine.asset_manager.find_animation_id("character walk").?;
+        const character_animation_run_id = self.engine.asset_manager.find_animation_id("character run").?;
+        const character_animation_attack_id = self.engine.asset_manager.find_animation_id("character attack").?;
 
-        const character_model = eng.asset_manager.get_model(character_model_id) catch unreachable;
+        const character_model = self.engine.asset_manager.get_model(character_model_id) catch unreachable;
         std.log.info("character model animations:", .{});
         for (character_model.animations, 0..) |*animation, i| {
             std.log.info("{}. anim: {s}", .{i, animation.name});
         }
 
-        var anim_controller = try anim.AnimController.init(eng.general_allocator.allocator(), &[_]anim.Node{
+        var anim_controller = try anim.AnimController.init(self.engine.general_allocator.allocator(), &[_]anim.Node{
             .{
                 .node = .{ .Basic = .{
                     .animation = character_animation_idle_id,
@@ -266,7 +281,7 @@ pub const App = struct {
         errdefer anim_controller.deinit();
 
         // Use the model as a 'prefab' of sorts and create a number of entities from its nodes
-        const terrain_shape = try eng.physics.create_shape(ph.ShapeSettings {
+        const terrain_shape = try self.engine.physics.create_shape(ph.ShapeSettings {
             // .shape = .{ .Box = .{
             //     .width = 100.0,
             //     .height = 0.5,
@@ -282,18 +297,22 @@ pub const App = struct {
         });
         defer terrain_shape.release();
 
-        _ = try eng.entities.new_entity(Engine.EntityDescriptor {
+        _ = try self.engine.entities.new_entity(Engine.EntityDescriptor {
             .name = "ground entity",
-            .model = terrain_model_id,
-            .physics = .{ .Body = 
-                try eng.physics.zphy.getBodyInterfaceMut().createAndAddBody(zphy.BodyCreationSettings {
-                    .position = zm.f32x4(-50.0, -5.0, 50.0, 1.0),
-                    .rotation = zm.qidentity(),
-                    .shape = terrain_shape,
-                    .motion_type = .static,
-                    .object_layer = ph.object_layers.non_moving,
-                }, .activate)
-            },
+            .model = "default|terrain",
+            .physics = .{ .Body = .{
+                .settings = .{
+                    .shape = .{ .Box = .{
+                        .width = 100.0,
+                        .height = 0.5,
+                        .depth = 100.0,
+                    }, },
+                    .offset_transform = .{
+                        .position = zm.f32x4(-50.0, -5.0, 50.0, 1.0),
+                    },
+                },
+                .is_static = true,
+            }, },
             .transform = Transform {
                 .scale = zm.f32x4s(100.0),
             },
@@ -302,18 +321,6 @@ pub const App = struct {
         const chara_transform = Transform {
             .position = zm.f32x4(-0.5, -3.0, 0.5, 1.0),
         };
-
-        const chara_shape = try eng.physics.create_shape(ph.ShapeSettings {
-            .shape = .{ .Capsule = .{
-                .half_height = 0.7,
-                .radius = 0.2,
-            } },
-            .offset_transform = Transform {
-                .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
-                .rotation = zm.qidentity(),
-            },
-        });
-        defer chara_shape.release();
 
         // const chara_shape_settings = try zphy.CapsuleShapeSettings.create(0.7, 0.2);
         // defer chara_shape_settings.release();
@@ -328,7 +335,7 @@ pub const App = struct {
         // const chara_shape = try chara_offset_shape_settings.createShape();
         // defer chara_shape.release();
 
-        // if (eng.physics.init_body_write_lock(chara_ent.physics..?)) |write_lock| {
+        // if (self.engine.physics.init_body_write_lock(chara_ent.physics..?)) |write_lock| {
         //     defer write_lock.deinit();
         //
         //     write_lock.body.getMotionPropertiesMut().setInverseMass(1.0 / 70.0);
@@ -336,6 +343,17 @@ pub const App = struct {
         //     write_lock.body.getMotionPropertiesMut().setInverseInertia([3]f32{0.0, 0.0, 0.0}, zm.qidentity());
         //     write_lock.body.setFriction(0.0);
         // } else |_| {}
+        
+        const chara_shape = ph.ShapeSettings {
+            .shape = .{ .Capsule = .{
+                .half_height = 0.7,
+                .radius = 0.2,
+            } },
+            .offset_transform = Transform {
+                .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
+                .rotation = zm.qidentity(),
+            },
+        };
 
         const character_virtual_settings = ph.CharacterVirtualSettings {
             .base = ph.CharacterBaseSettings {
@@ -347,28 +365,28 @@ pub const App = struct {
             .character_padding = 0.02,
         };
 
-        const chara_root_idx = try eng.entities.new_entity(Engine.EntityDescriptor {
+        const chara_root_idx = try self.engine.entities.new_entity(Engine.EntityDescriptor {
             .name = "character entity",
-            .model = character_model_id,
-            .transform = chara_transform,
+            .model = "default|character",
+            .transform = Transform {
+                .position = zm.f32x4(-0.5, -3.0, 0.5, 1.0),
+            },
             .physics = .{ .CharacterVirtual = .{
                 .settings = character_virtual_settings,
-                .transform = chara_transform,
                 .create_character = true,
-                .extended_update_settings = .{},
             } },
             .app = .{
                 .health_points = 100,
                 .anim_controller = anim_controller,
             },
         });
-        const chara_body_id_character = eng.entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.character.?.getBodyId();
-
-        // @TODO this body filter needs to be stored on the entity alongside character/virtual character...
-        const character_ignore_self_filter = try eng.general_allocator.allocator().create(ph.IgnoreIdsBodyFilter);
-        errdefer eng.general_allocator.allocator().destroy(character_ignore_self_filter);
-        character_ignore_self_filter.* = ph.IgnoreIdsBodyFilter.init(&[1]zphy.BodyId{chara_body_id_character});
-        eng.entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.body_filter = @ptrCast(character_ignore_self_filter);
+        // const chara_body_id_character = self.engine.entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.character.?.getBodyId();
+        //
+        // // @TODO this body filter needs to be stored on the entity alongside character/virtual character...
+        // const character_ignore_self_filter = try self.engine.general_allocator.allocator().create(ph.IgnoreIdsBodyFilter);
+        // errdefer self.engine.general_allocator.allocator().destroy(character_ignore_self_filter);
+        // character_ignore_self_filter.* = ph.IgnoreIdsBodyFilter.init(&[1]zphy.BodyId{chara_body_id_character});
+        // self.engine.entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.body_filter = @ptrCast(character_ignore_self_filter);
 
         const character_settings = ph.CharacterSettings {
             .base = ph.CharacterBaseSettings {
@@ -382,40 +400,36 @@ pub const App = struct {
             .gravity_factor = 1.0,
         };
 
-        const opponent_idx = try eng.entities.new_entity(Engine.EntityDescriptor {
+        const opponent_idx = try self.engine.entities.new_entity(Engine.EntityDescriptor {
             .name = "opponent entity",
-            .model = character_model_id,
+            .model = "default|character",
             .transform = chara_transform,
             .physics = .{ .Character = .{
                 .settings = character_settings,
-                .transform = Transform {
-                    .position = zm.f32x4(0.0, 0.0, 0.0, 0.0),
-                    .rotation = zm.qidentity(),
-                },
             } },
             .app = .{
                 .health_points = 100,
-                .anim_controller = try anim_controller.clone(eng.general_allocator.allocator()),
+                .anim_controller = try anim_controller.clone(self.engine.general_allocator.allocator()),
             },
         });
-        var rand = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-        eng.entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
+        var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+        self.engine.entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
 
         const model_buffer = try gfx.Buffer.init(
             @sizeOf(zm.Mat),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
-            &eng.gfx
+            &self.engine.gfx
         );
         errdefer model_buffer.deinit();
 
-        eng.physics.zphy.optimizeBroadPhase();
+        self.engine.physics.zphy.optimizeBroadPhase();
 
-        var imui = try ui.Imui.init(eng.general_allocator.allocator(), &eng.input, &eng.time, &eng.window, &eng.gfx);
+        var imui = try ui.Imui.init(self.engine.general_allocator.allocator(), &self.engine.input, &self.engine.time, &self.engine.window, &self.engine.gfx);
         errdefer imui.deinit();
 
         var zero_particle_system = try particle.ParticleSystem.init(
-            eng.general_allocator.allocator(),
+            self.engine.general_allocator.allocator(),
             2000,
             .{
                 .alignment = .{ .VelocityAligned = 150.0 },
@@ -450,12 +464,12 @@ pub const App = struct {
                     null,
                 },
             },
-            &eng.gfx
+            &self.engine.gfx
         );
         errdefer zero_particle_system.deinit();
 
         var player_attack_particle_system = try particle.ParticleSystem.init(
-            eng.general_allocator.allocator(),
+            self.engine.general_allocator.allocator(),
             60,
             .{
                 .alignment = .{ .VelocityAligned = 5.0 },
@@ -490,12 +504,12 @@ pub const App = struct {
                     null,
                 },
             },
-            &eng.gfx
+            &self.engine.gfx
         );
         errdefer player_attack_particle_system.deinit();
 
-        return Self {
-            .engine = eng,
+        self.* = Self {
+            .engine = self.engine,
             .depth_stencil_view = depth_struct.view,
             .depth_stencil_view_read_only_depth = depth_struct.view_read_only,
             .vertex_shader = vertex_shader,
@@ -518,7 +532,7 @@ pub const App = struct {
             .opponent_idx = opponent_idx,
             .model_buffer = model_buffer,
 
-            .character_ignore_self_filter = character_ignore_self_filter,
+            //.character_ignore_self_filter = character_ignore_self_filter,
 
             .bone_matrix_buffer = bone_matrix_buffer,
 
@@ -529,7 +543,7 @@ pub const App = struct {
             .zero_particle_system = zero_particle_system,
             .player_attack_particle_system = player_attack_particle_system,
 
-            .text_input_state = ui.Imui.TextInputState.init(eng.general_allocator.allocator()),
+            .text_input_state = ui.Imui.TextInputState.init(self.engine.general_allocator.allocator()),
         };
     }
 
@@ -939,7 +953,7 @@ pub const App = struct {
         self.engine.gfx.cmd_set_viewport(viewport);
 
         self.engine.gfx.cmd_set_pixel_shader(&self.pixel_shader);
-        self.engine.gfx.cmd_set_render_target(&rtv, &self.depth_stencil_view);
+        self.engine.gfx.cmd_set_render_target(&.{&rtv}, &self.depth_stencil_view);
 
         self.engine.gfx.cmd_set_blend_state(null);
 
@@ -1137,7 +1151,7 @@ pub const App = struct {
             _ = self.imui.push_floating_layout(
                 .Y, 
                 5.0, 
-                5.0 - self.imui.ui.fonts[@intFromEnum(FontEnum.GeistMono)].font_metrics.descender * 12.0, 
+                5.0 - self.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
                 .{@src()}
             );
             const l = self.imui.label(fps_text);
@@ -1155,7 +1169,7 @@ pub const App = struct {
         }) catch unreachable;
         {
             _ = self.imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(self.engine.gfx.swapchain_size.height)) - 
-                self.imui.ui.fonts[@intFromEnum(FontEnum.GeistMono)].font_metrics.line_height * 12.0, .{@src()});
+                self.imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
             const l = self.imui.label(rev_text);
             if (self.imui.get_widget(l.id)) |tw| {
                 tw.text_content.?.font = .GeistMono;
@@ -1270,7 +1284,7 @@ pub const App = struct {
         }
     }
 
-    pub fn create_depth_stencil_view(eng: *engine.Engine(Self)) !struct{view: gfx.DepthStencilView, view_read_only: gfx.DepthStencilView} {
+    pub fn create_depth_stencil_view(eng: *en.Engine(Self)) !struct{view: gfx.DepthStencilView, view_read_only: gfx.DepthStencilView} {
         const depth_texture = try gfx.Texture2D.init(
             gfx.Texture2D.Descriptor {
                 .width = @intCast(eng.gfx.swapchain_size.width),

@@ -27,10 +27,7 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
-    const engine = b.dependency("engine", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    const engine = b.dependency("engine", .{});
     exe.root_module.addImport("engine", engine.module("root"));
     //exe.linkLibrary(engine);
 
