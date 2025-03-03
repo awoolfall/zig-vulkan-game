@@ -67,8 +67,8 @@ pub const App = struct {
     
     camera_data_buffer: gfx.Buffer,
     camera: cm.Camera,
+    camera_transform: Transform,
     target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
-    camera_idx: gen.GenerationalIndex,
 
     model_buffer: gfx.Buffer,
     character_idx: gen.GenerationalIndex,
@@ -119,7 +119,6 @@ pub const App = struct {
 
     pub fn init(self: *Self) !void {
         std.log.info("App init!", .{});
-        self.engine.time.set_target_frame_rate(140.0);
 
         var depth_struct = try create_depth_stencil_view(self.engine);
         errdefer { depth_struct.view.deinit(); depth_struct.view_read_only.deinit(); }
@@ -157,10 +156,6 @@ pub const App = struct {
             &self.engine.gfx
         );
         errdefer camera_constant_buffer.deinit();
-
-        // Create the camera entity
-        const camera_transform_idx = try self.engine.entities.new_entity(Engine.EntityDescriptor {});
-        self.engine.entities.get(camera_transform_idx).?.transform.position = zm.f32x4(0.0, 1.0, -1.0, 0.0);
 
         // Create bone matrix constant buffer
         const bone_matrix_buffer = try gfx.Buffer.init(
@@ -304,11 +299,11 @@ pub const App = struct {
                 .settings = .{
                     .shape = .{ .Box = .{
                         .width = 100.0,
-                        .height = 0.5,
+                        .height = 1.0,
                         .depth = 100.0,
                     }, },
                     .offset_transform = .{
-                        .position = zm.f32x4(-50.0, -5.0, 50.0, 1.0),
+                        //.position = zm.f32x4(-50.0, -5.0, 50.0, 1.0),
                     },
                 },
                 .is_static = true,
@@ -369,7 +364,7 @@ pub const App = struct {
             .name = "character entity",
             .model = "default|character",
             .transform = Transform {
-                .position = zm.f32x4(-0.5, -3.0, 0.5, 1.0),
+                .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
             },
             .physics = .{ .CharacterVirtual = .{
                 .settings = character_virtual_settings,
@@ -396,8 +391,8 @@ pub const App = struct {
             },
             .layer = ph.object_layers.moving,
             .mass = 70.0,
-            .friction = 1.0,
-            .gravity_factor = 1.0,
+            .friction = 0.0,
+            .gravity_factor = 0.0,
         };
 
         const opponent_idx = try self.engine.entities.new_entity(Engine.EntityDescriptor {
@@ -520,13 +515,15 @@ pub const App = struct {
                 .field_of_view_y = 20.0,
                 .near_field = 0.3,
                 .far_field = 1000.0,
-                .move_speed = 2.0,
+                .move_speed = 10.0,
                 .mouse_sensitivity = 0.001,
                 .max_orbit_distance = 10.0,
                 .min_orbit_distance = 1.0,
                 .orbit_distance = 5.0,
             },
-            .camera_idx = camera_transform_idx,
+            .camera_transform = .{
+                .position = zm.f32x4(0.0, 0.0, -1.0, 0.0),
+            },
 
             .character_idx = chara_root_idx,
             .opponent_idx = opponent_idx,
@@ -700,21 +697,13 @@ pub const App = struct {
             };
         }
         if (self.imui.badge("Set camera pos to scene", .{@src()}).clicked) {
-            self.camera.view_matrix = zm.Mat {
-                zm.f32x4(0.7, 0.2, 0.7, 0.0),
-                zm.f32x4(0.0, 1.0, -0.3, 0.0),
-                zm.f32x4(-0.7, 0.2, 0.7, 0.0),
-                zm.f32x4(-1.2, -2.9, 10.0, 1.0),
-            };
         }
         _ = self.imui.label("Camera view matrix:");
         _ = self.imui.push_layout(.X, .{@src()});
         var camera_pos_text: [256]u8 = [_]u8{0} ** 256;
-        _ = std.fmt.bufPrint(camera_pos_text[0..], "{d:.1}\n{d:.1}\n{d:.1}\n{d:.1}", .{
-            self.camera.view_matrix[0],
-            self.camera.view_matrix[1],
-            self.camera.view_matrix[2],
-            self.camera.view_matrix[3]
+        _ = std.fmt.bufPrint(camera_pos_text[0..], "{d:.1}\n{d:.1}", .{
+            self.camera_transform.position,
+            self.camera_transform.rotation,
         }) catch unreachable;
         const cam_pos_lbl = self.imui.label(camera_pos_text[0..]);
         if (self.imui.get_widget(cam_pos_lbl.id)) |ww| {
@@ -739,7 +728,7 @@ pub const App = struct {
                 movement_direction[0] -= 1.0;
             }
 
-            const camera_right = self.camera.right_direction();
+            const camera_right = self.camera_transform.right_direction();
             const camera_forward_no_pitch = zm.cross3(camera_right, zm.f32x4(0.0, 1.0, 0.0, 0.0));
 
             movement_direction = 
@@ -801,7 +790,7 @@ pub const App = struct {
                 const box_shape = box_shape_settings.createShape() catch unreachable;
                 defer box_shape.release();
 
-                var camera_forward_2d = self.camera.forward_direction();
+                var camera_forward_2d = self.camera_transform.forward_direction();
                 camera_forward_2d[1] = 0.0;
                 camera_forward_2d = zm.normalize3(camera_forward_2d);
 
@@ -869,26 +858,9 @@ pub const App = struct {
         // @TODO: It is most likely we loaded something in and caused a spike... Fix this permanently 
         // by adding async loads and/or loading screens.
 
-        // Camera input and buffer data management
-        if (self.engine.entities.get(self.camera_idx)) |camera_entity| {
+        var target_pos = zm.f32x4s(0.0);
         if (self.engine.entities.get(self.character_idx)) |character_entity| {
-            self.target_old_pos = zm.lerpVOverTime(
-                self.target_old_pos,
-                character_entity.transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0),
-                zm.f32x4s(10.0),
-                zm.f32x4s(self.engine.time.delta_time_f32())
-            );
-            self.camera.update(&camera_entity.transform, self.target_old_pos, &self.engine.window, &self.engine.input, &self.engine.time);
-
-            { // Update camera buffer
-                const mapped_buffer = self.camera_data_buffer.map(CameraStruct, &self.engine.gfx) catch unreachable;
-                defer mapped_buffer.unmap();
-
-                mapped_buffer.data().view = self.camera.view_matrix;
-                mapped_buffer.data().projection = self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect());
-            }
-
-            //const character_model = self.engine.asset_manager.get_model(character_entity.model.?) catch unreachable;
+            target_pos = character_entity.transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
 
             // {
             //     self.imui.push_layout_id(anim_debug_layout);
@@ -926,11 +898,30 @@ pub const App = struct {
             //         },
             //     }
             // }
-
+            
             const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
             character_entity.app.anim_controller.?.set_variable("character speed", zm.length3(character_velocity)[0]);
             character_entity.app.anim_controller.?.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
         }
+
+        // Generate camera view matrix
+        const camera_view_matrix = blk: {
+            // update camera transform around origin
+            self.camera.update(&self.camera_transform, zm.f32x4s(0.0), &self.engine.window, &self.engine.input, &self.engine.time);
+
+            // reposition camera to the target position
+            var t = self.camera_transform;
+            t.position += target_pos;
+
+            break :blk t.generate_view_matrix();
+        };
+
+        { // Update camera buffer
+            const mapped_buffer = self.camera_data_buffer.map(CameraStruct, &self.engine.gfx) catch unreachable;
+            defer mapped_buffer.unmap();
+
+            mapped_buffer.data().view = camera_view_matrix;
+            mapped_buffer.data().projection = self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect());
         }
 
         // Draw frame
@@ -940,7 +931,7 @@ pub const App = struct {
         };
 
         self.engine.gfx.cmd_clear_render_target(&rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
-        self.engine.gfx.cmd_clear_depth_stencil_view(&self.depth_stencil_view, 1.0, null);
+        self.engine.gfx.cmd_clear_depth_stencil_view(&self.depth_stencil_view, 0.0, null);
 
         const viewport = gfx.Viewport {
             .width = @floatFromInt(self.engine.gfx.swapchain_size.width),
@@ -952,9 +943,9 @@ pub const App = struct {
         };
         self.engine.gfx.cmd_set_viewport(viewport);
 
-        self.engine.gfx.cmd_set_pixel_shader(&self.pixel_shader);
         self.engine.gfx.cmd_set_render_target(&.{&rtv}, &self.depth_stencil_view);
 
+        self.engine.gfx.cmd_set_pixel_shader(&self.pixel_shader);
         self.engine.gfx.cmd_set_blend_state(null);
 
         self.engine.gfx.cmd_set_vertex_shader(&self.vertex_shader);
@@ -1056,7 +1047,7 @@ pub const App = struct {
 
         self.zero_particle_system.update(&self.engine.time);
         self.zero_particle_system.draw(
-            self.camera.view_matrix, 
+            camera_view_matrix,
             self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect()), 
             &rtv,
             &self.depth_stencil_view_read_only_depth,
@@ -1065,7 +1056,7 @@ pub const App = struct {
 
         self.player_attack_particle_system.update(&self.engine.time);
         self.player_attack_particle_system.draw(
-            self.camera.view_matrix, 
+            camera_view_matrix,
             self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect()), 
             &rtv,
             &self.depth_stencil_view_read_only_depth,
@@ -1105,16 +1096,13 @@ pub const App = struct {
 
         // Draw Physics Debug Wireframes
         if (self.engine.input.get_key(KeyCode.C)) {
-            if (self.engine.entities.get(self.camera_idx)) |camera_entity| {
-                _ = camera_entity;
-                self.engine.physics.debug_draw_bodies(
-                    &rtv, 
-                    self.engine.gfx.swapchain_size.width,
-                    self.engine.gfx.swapchain_size.height,
-                    zm.matToArr(self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect())),
-                    zm.matToArr(self.camera.view_matrix),
-                );
-            }
+            self.engine.physics.debug_draw_bodies(
+                &rtv, 
+                self.engine.gfx.swapchain_size.width,
+                self.engine.gfx.swapchain_size.height,
+                zm.matToArr(self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect())),
+                zm.matToArr(camera_view_matrix),
+            );
         }
 
         var vel_buf: [128]u8 = [_]u8{0} ** 128;
@@ -1225,7 +1213,7 @@ pub const App = struct {
                     if (material.double_sided) {
                         self.engine.gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
                     } else {
-                        self.engine.gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
+                        self.engine.gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
                     }
 
                     var diffuse = &self.engine.gfx.default.diffuse;
