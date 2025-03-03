@@ -18,6 +18,8 @@ const es = en.easings;
 const anim = en.animation;
 const assets = en.assets;
 
+const Terrain = @import("terrain.zig");
+
 const ui = en.ui;
 const FontEnum = ui.FontEnum;
 
@@ -91,6 +93,8 @@ pub const App = struct {
     slider_float: f32 = 0.0,
     text_input_state: ui.Imui.TextInputState,
 
+    terrain: Terrain,
+
     pub fn deinit(self: *Self) void {
         std.log.info("App deinit!", .{});
 
@@ -115,6 +119,8 @@ pub const App = struct {
         self.pixel_shader.deinit();
 
         self.text_input_state.deinit();
+
+        self.terrain.deinit();
     }
 
     pub fn init(self: *Self) !void {
@@ -503,6 +509,9 @@ pub const App = struct {
         );
         errdefer player_attack_particle_system.deinit();
 
+        const terrain = try Terrain.init(self.engine.general_allocator.allocator(), &self.engine.physics, &self.engine.gfx);
+        errdefer terrain.deinit();
+
         self.* = Self {
             .engine = self.engine,
             .depth_stencil_view = depth_struct.view,
@@ -541,6 +550,8 @@ pub const App = struct {
             .player_attack_particle_system = player_attack_particle_system,
 
             .text_input_state = ui.Imui.TextInputState.init(self.engine.general_allocator.allocator()),
+
+            .terrain = terrain,
         };
     }
 
