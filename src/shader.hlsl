@@ -7,6 +7,7 @@ cbuffer camera_data : register(b0)
 cbuffer instance_data : register(b1)
 {
     row_major float4x4 model_matrix;
+    unsigned int entity_id;
 }
 
 cbuffer bone_data : register(b2)
@@ -107,11 +108,21 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     return output;
 }
 
-float4 ps_main(vs_out input) : SV_TARGET
+struct ps_out
 {
-    float4 diffuse = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
-    return diffuse;
+    float4 colour : SV_TARGET0;
+    unsigned int entity_id : SV_TARGET1;
+};
 
-    // display world normals
-    //return (input.colour / 2.0) + 0.5;
+ps_out ps_main(vs_out input)
+{
+    ps_out output = (ps_out) 0;
+
+    float4 diffuse = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
+
+    output.colour = diffuse;
+
+    output.entity_id = entity_id;
+
+    return output;
 }

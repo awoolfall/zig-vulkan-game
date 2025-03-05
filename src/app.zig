@@ -18,7 +18,7 @@ const es = en.easings;
 const anim = en.animation;
 const assets = en.assets;
 
-const Terrain = @import("terrain.zig");
+const Terrain = @import("terrain/terrain.zig");
 
 const ui = en.ui;
 const FontEnum = ui.FontEnum;
@@ -29,6 +29,11 @@ const gitchanged = en.gitchanged;
 const CameraStruct = extern struct {
     projection: [4]zm.F32x4,
     view: [4]zm.F32x4,
+};
+
+const InstanceStruct = extern struct {
+    model_matrix: zm.Mat,
+    entity_id: u32,
 };
 
 pub const Engine = en.Engine(App);
@@ -61,8 +66,8 @@ pub const App = struct {
 
     engine: *Engine,
 
-    depth_stencil_view: gfx.DepthStencilView,
-    depth_stencil_view_read_only_depth: gfx.DepthStencilView,
+    depth_textures: DepthTextures,
+    selection_textures: SelectionTextures,
 
     vertex_shader: gfx.VertexShader,
     pixel_shader: gfx.PixelShader,
@@ -112,8 +117,8 @@ pub const App = struct {
         self.camera_data_buffer.deinit();
         self.model_buffer.deinit();
 
-        self.depth_stencil_view.deinit();
-        self.depth_stencil_view_read_only_depth.deinit();
+        self.depth_textures.deinit();
+        self.selection_textures.deinit();
 
         self.vertex_shader.deinit();
         self.pixel_shader.deinit();
@@ -126,8 +131,11 @@ pub const App = struct {
     pub fn init(self: *Self) !void {
         std.log.info("App init!", .{});
 
-        var depth_struct = try create_depth_stencil_view(self.engine);
-        errdefer { depth_struct.view.deinit(); depth_struct.view_read_only.deinit(); }
+        var depth_textures = try DepthTextures.init(&self.engine.gfx);
+        errdefer depth_textures.deinit();
+
+        var selection_textures = try SelectionTextures.init(&self.engine.gfx);
+        errdefer selection_textures.deinit();
 
         const vertex_shader = try gfx.VertexShader.init_file(
             self.engine.general_allocator.allocator(), 
@@ -417,7 +425,7 @@ pub const App = struct {
         self.engine.entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
 
         const model_buffer = try gfx.Buffer.init(
-            @sizeOf(zm.Mat),
+            @sizeOf(InstanceStruct),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
             &self.engine.gfx
@@ -514,8 +522,8 @@ pub const App = struct {
 
         self.* = Self {
             .engine = self.engine,
-            .depth_stencil_view = depth_struct.view,
-            .depth_stencil_view_read_only_depth = depth_struct.view_read_only,
+            .depth_textures = depth_textures,
+            .selection_textures = selection_textures,
             .vertex_shader = vertex_shader,
             .pixel_shader = pixel_shader,
 
@@ -942,7 +950,8 @@ pub const App = struct {
         };
 
         self.engine.gfx.cmd_clear_render_target(&rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
-        self.engine.gfx.cmd_clear_depth_stencil_view(&self.depth_stencil_view, 0.0, null);
+        self.engine.gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
+        self.engine.gfx.cmd_clear_depth_stencil_view(&self.depth_textures.dsv, 0.0, null);
 
         const viewport = gfx.Viewport {
             .width = @floatFromInt(self.engine.gfx.swapchain_size.width),
@@ -954,7 +963,7 @@ pub const App = struct {
         };
         self.engine.gfx.cmd_set_viewport(viewport);
 
-        self.engine.gfx.cmd_set_render_target(&.{&rtv}, &self.depth_stencil_view);
+        self.engine.gfx.cmd_set_render_target(&.{&rtv, &self.selection_textures.rtv}, &self.depth_textures.dsv);
 
         self.engine.gfx.cmd_set_pixel_shader(&self.pixel_shader);
         self.engine.gfx.cmd_set_blend_state(null);
@@ -965,13 +974,17 @@ pub const App = struct {
             &self.camera_data_buffer, // slot 1 will be overwritten by later
             &self.bone_matrix_buffer,
         });
+        self.engine.gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
+            &self.camera_data_buffer,
+            &self.model_buffer, // slot 1 will be overwritten by later
+        });
 
         self.engine.gfx.cmd_set_topology(.TriangleList);
 
         var bone_transforms: [ms.MAX_BONES]zm.Mat = undefined;
         var null_bone_transforms: [ms.MAX_BONES]zm.Mat = [_]zm.Mat{zm.identity()} ** ms.MAX_BONES;
         // Iterate through all entities finding those which contain a mesh to be rendered
-        for (self.engine.entities.list.data.items) |*it| {
+        for (self.engine.entities.list.data.items, 0..) |*it, entity_id| {
             if (it.item_data) |*entity| {
                 // Find the transform of the entity to be rendered taking into account it's parent
                 if (entity.model) |mid| {
@@ -1018,6 +1031,7 @@ pub const App = struct {
 
                     // Finally, render the model
                     self.recursive_render_model(
+                        @truncate(entity_id),
                         m, 
                         pose,
                         &entity.transform.generate_model_matrix(), 
@@ -1048,6 +1062,7 @@ pub const App = struct {
             // Finally, render the model
             const tt = Transform{ .scale = zm.f32x4s(0.05) };
             self.recursive_render_model(
+                0,
                 m, 
                 null,
                 &tt.generate_model_matrix(), 
@@ -1056,12 +1071,14 @@ pub const App = struct {
             );
         }
 
+        self.terrain.render(&self.camera_data_buffer, &self.engine.gfx);
+
         self.zero_particle_system.update(&self.engine.time);
         self.zero_particle_system.draw(
             camera_view_matrix,
             self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect()), 
             &rtv,
-            &self.depth_stencil_view_read_only_depth,
+            &self.depth_textures.dsv_read_only,
             &self.engine.gfx
         );
 
@@ -1070,7 +1087,7 @@ pub const App = struct {
             camera_view_matrix,
             self.camera.generate_perspective_matrix(self.engine.gfx.swapchain_aspect()), 
             &rtv,
-            &self.depth_stencil_view_read_only_depth,
+            &self.depth_textures.dsv_read_only,
             &self.engine.gfx
         );
 
@@ -1187,10 +1204,35 @@ pub const App = struct {
             std.log.err("unable to present frame: {}", .{err});
             return;
         };
+
+        if (self.engine.input.get_key_down(KeyCode.MouseLeft) and self.engine.input.get_key(KeyCode.Shift)) {
+            const selection_entity_id = self.selection_textures.get_value_at_position(@intCast(self.engine.input.cursor_position[0]), @intCast(self.engine.input.cursor_position[1]), &self.engine.gfx) catch |err| {
+                std.log.err("cannot get value at position: {}", .{err});
+                return;
+            };
+
+            std.log.info("selected entity: {}", .{selection_entity_id});
+            if (selection_entity_id != 0) {
+                const entity = self.engine.entities.get_dont_check_generation(selection_entity_id);
+                if (entity) |ent| {
+                    std.log.info("entity name: {s}", .{ent.name orelse "unnamed"});
+                } else {
+                    std.log.info("entity not found!", .{});
+                }
+            }
+        }
         return;
     }
 
-    pub fn recursive_render_model(self: *Self, model: *const ms.Model, pose: ?[]const zm.Mat, root_mat: *const zm.Mat, model_node: *const ms.ModelNode, mat: zm.Mat) void {
+    pub fn recursive_render_model(
+        self: *Self, 
+        entity_id: u32,
+        model: *const ms.Model, 
+        pose: ?[]const zm.Mat, 
+        root_mat: *const zm.Mat,
+        model_node: *const ms.ModelNode, 
+        mat: zm.Mat
+    ) void {
         var node_model_matrix = zm.mul(model_node.transform.generate_model_matrix(), mat);
 
         // Apply pose
@@ -1206,10 +1248,13 @@ pub const App = struct {
 
         if (model_node.mesh) |*mesh_set| {
             { // Setup model buffer from transform
-                const mapped_buffer = self.model_buffer.map(zm.Mat, &self.engine.gfx) catch unreachable;
+                const mapped_buffer = self.model_buffer.map(InstanceStruct, &self.engine.gfx) catch unreachable;
                 defer mapped_buffer.unmap();
 
-                mapped_buffer.data().* = node_model_matrix;
+                mapped_buffer.data().* = .{
+                    .model_matrix = node_model_matrix,
+                    .entity_id = entity_id,
+                };
             }
 
             for (mesh_set.primitives) |maybe_prim| {
@@ -1234,6 +1279,7 @@ pub const App = struct {
                         if (d.sampler) |*s| { diffuse_sampler = s; }
                     }
                     self.engine.gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
+                    self.engine.gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
                     self.engine.gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
 
                     if (p.has_indices()) {
@@ -1246,7 +1292,7 @@ pub const App = struct {
         }
 
         for (model_node.children) |c| {
-            self.recursive_render_model(model, pose, root_mat, &model.nodes_list[c], node_model_matrix);
+            self.recursive_render_model(entity_id, model, pose, root_mat, &model.nodes_list[c], node_model_matrix);
         }
     }
 
@@ -1283,35 +1329,24 @@ pub const App = struct {
         }
     }
 
-    pub fn create_depth_stencil_view(eng: *en.Engine(Self)) !struct{view: gfx.DepthStencilView, view_read_only: gfx.DepthStencilView} {
-        const depth_texture = try gfx.Texture2D.init(
-            gfx.Texture2D.Descriptor {
-                .width = @intCast(eng.gfx.swapchain_size.width),
-                .height = @intCast(eng.gfx.swapchain_size.height),
-                .format = .D24S8_Unorm_Uint,
-            },
-            .{ .DepthStencil = true, },
-            .{ .GpuWrite = true, },
-            null,
-            &eng.gfx
-        );
-        defer depth_texture.deinit();
-
-        const view = try gfx.DepthStencilView.init_from_texture2d(&depth_texture, .{}, &eng.gfx);
-        const view_read_only = try gfx.DepthStencilView.init_from_texture2d(&depth_texture, .{ .read_only_depth = true, }, &eng.gfx);
-        return .{ .view = view, .view_read_only = view_read_only, };
-    }
-    
     pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void {
         switch (event.*) {
             .EVENTS_CLEARED => { self.update(); },
             .RESIZED => |new_size| {
                 if (new_size.width > 0 and new_size.height > 0) {
-                    self.depth_stencil_view.deinit();
-                    self.depth_stencil_view_read_only_depth.deinit();
-                    const d = create_depth_stencil_view(self.engine) catch unreachable;
-                    self.depth_stencil_view = d.view;
-                    self.depth_stencil_view_read_only_depth = d.view_read_only;
+                    const new_depth_textures = DepthTextures.init(&self.engine.gfx) catch |err| {
+                        std.log.err("unable to create depth textures: {}", .{err});
+                        return;
+                    };
+                    self.depth_textures.deinit();
+                    self.depth_textures = new_depth_textures;
+
+                    const new_selection_textures = SelectionTextures.init(&self.engine.gfx) catch |err| {
+                        std.log.err("unable to create selection textures: {}", .{err});
+                        return;
+                    };
+                    self.selection_textures.deinit();
+                    self.selection_textures = new_selection_textures;
                 }
             },
             else => {},
@@ -1320,6 +1355,117 @@ pub const App = struct {
 
     fn character_is_supported(chr: *zphy.CharacterVirtual) bool {
         return chr.getGroundState() == zphy.CharacterGroundState.on_ground;
+    }
+};
+
+const DepthTextures = struct {
+    texture: gfx.Texture2D,
+    dsv: gfx.DepthStencilView,
+    dsv_read_only: gfx.DepthStencilView,
+
+    pub fn deinit(self: *DepthTextures) void {
+        self.texture.deinit();
+        self.dsv.deinit();
+        self.dsv_read_only.deinit();
+    }
+
+    pub fn init(gf: *gfx.GfxState) !DepthTextures {
+        const texture = try gfx.Texture2D.init(
+            .{
+                .width = @intCast(gf.swapchain_size.width),
+                .height = @intCast(gf.swapchain_size.height),
+                .format = .D24S8_Unorm_Uint,
+            },
+            .{ .DepthStencil = true, },
+            .{ .GpuWrite = true, },
+            null,
+            gf
+        );
+        errdefer texture.deinit();
+
+        const dsv = try gfx.DepthStencilView.init_from_texture2d(&texture, .{}, gf);
+        errdefer dsv.deinit();
+
+        const view_read_only = try gfx.DepthStencilView.init_from_texture2d(&texture, .{ .read_only_depth = true, }, gf);
+        errdefer view_read_only.deinit();
+
+        return DepthTextures {
+            .texture = texture,
+            .dsv = dsv,
+            .dsv_read_only = view_read_only,
+        };
+    }
+};
+
+const SelectionTextures = struct {
+    texture: gfx.Texture2D,
+    rtv: gfx.RenderTargetView,
+    staging_texture: gfx.Texture2D,
+
+    width: usize = 0,
+    height: usize = 0,
+
+    pub fn deinit(self: *SelectionTextures) void {
+        self.texture.deinit();
+        self.rtv.deinit();
+        self.staging_texture.deinit();
+    }
+
+    pub fn init(gf: *gfx.GfxState) !SelectionTextures {
+        const texture = try gfx.Texture2D.init(
+            .{
+                .width = @intCast(gf.swapchain_size.width),
+                .height = @intCast(gf.swapchain_size.height),
+                .format = .R32_Uint,
+            },
+            .{ .RenderTarget = true, },
+            .{ .GpuWrite = true, },
+            null,
+            gf
+        );
+        errdefer texture.deinit();
+
+        const rtv = try gfx.RenderTargetView.init_from_texture2d(&texture, gf);
+        errdefer rtv.deinit();
+
+        const staging_texture = try gfx.Texture2D.init(
+            .{
+                .width = @intCast(gf.swapchain_size.width),
+                .height = @intCast(gf.swapchain_size.height),
+                .format = .R32_Uint,
+            },
+            .{},
+            .{ .CpuRead = true, .CpuWrite = true, .GpuWrite = true, },
+            null,
+            gf
+        );
+        errdefer texture.deinit();
+
+        return SelectionTextures {
+            .texture = texture,
+            .rtv = rtv,
+            .staging_texture = staging_texture,
+            .width = @intCast(gf.swapchain_size.width),
+            .height = @intCast(gf.swapchain_size.height),
+        };
+    }
+
+    pub fn get_value_at_position(self: *SelectionTextures, x: usize, y: usize, gf: *gfx.GfxState) !u32 {
+        if (x >= self.width or y >= self.height) {
+            return error.OutOfBounds;
+        }
+
+        gf.flush();
+        gf.cmd_copy_texture_to_texture(&self.staging_texture, &self.texture);
+
+        const mapped_texture = self.staging_texture.map(u32, gf) catch |err| {
+            std.log.err("cannot map: {}", .{err});
+            return error.CannotMapStagingTexture;
+        };
+        defer mapped_texture.unmap();
+
+        const idx: usize = @intCast(y * self.width + x);
+        return mapped_texture.data()[idx];
     }
 };
 
