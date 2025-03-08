@@ -1,12 +1,14 @@
 const Self = @This();
 
 const std = @import("std");
-const engine = @import("engine");
-const zm = engine.zmath;
-const zmesh = engine.zmesh;
-const gf = engine.gfx;
-const input = engine.input;
-const Transform = engine.Transform;
+const en = @import("engine");
+const engine = en.engine;
+
+const zm = en.zmath;
+const zmesh = en.zmesh;
+const gf = en.gfx;
+const input = en.input;
+const Transform = en.Transform;
 const SelectionTextures = @import("../selection_textures.zig");
 
 const InstanceInfoStruct = extern struct {
@@ -18,6 +20,7 @@ const InstanceInfoStruct = extern struct {
 const RED = zm.srgbToRgb(zm.f32x4(0xF5, 0x6B, 0x4E, 0xFF) / zm.f32x4s(0xFF));
 const GREEN = zm.srgbToRgb(zm.f32x4(0xB7, 0xF5, 0x4E, 0xFF) / zm.f32x4s(0xFF));
 const BLUE = zm.srgbToRgb(zm.f32x4(0x4F, 0x80, 0xF5, 0xFF) / zm.f32x4s(0xFF));
+const WHITE = zm.f32x4(1.0, 1.0, 1.0, 1.0);
 
 torus_vertex_buffer: gf.Buffer,
 torus_index_buffer: gf.Buffer,
@@ -27,15 +30,27 @@ cylinder_vertex_buffer: gf.Buffer,
 cylinder_index_buffer: gf.Buffer,
 cylinder_index_count: usize,
 
+sphere_vertex_buffer: gf.Buffer,
+sphere_index_buffer: gf.Buffer,
+sphere_index_count: usize,
+
 vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
 
 instance_data_buffer: gf.Buffer,
 selection_textures: SelectionTextures,
 
+selected_control: ?GizmoControl = null,
+
 pub fn deinit(self: *Self) void {
     self.torus_vertex_buffer.deinit();
     self.torus_index_buffer.deinit();
+
+    self.cylinder_vertex_buffer.deinit();
+    self.cylinder_index_buffer.deinit();
+
+    self.sphere_vertex_buffer.deinit();
+    self.sphere_index_buffer.deinit();
 
     self.vertex_shader.deinit();
     self.pixel_shader.deinit();
@@ -64,8 +79,9 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     );
     errdefer torus_index_buffer.deinit();
 
-    const cylinder_shape = zmesh.Shape.initCylinder(16, 2);
+    var cylinder_shape = zmesh.Shape.initCylinder(16, 2);
     defer cylinder_shape.deinit();
+    cylinder_shape.scale(0.05, 0.05, 1.0);
 
     const cylinder_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(cylinder_shape.positions),
@@ -83,6 +99,26 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     );
     errdefer cylinder_index_buffer.deinit();
 
+    var sphere_shape = zmesh.Shape.initParametricSphere(16, 16);
+    defer sphere_shape.deinit();
+    sphere_shape.scale(0.1, 0.1, 0.1);
+
+    const sphere_vertex_buffer = try gf.Buffer.init_with_data(
+        std.mem.sliceAsBytes(sphere_shape.positions),
+        .{ .VertexBuffer = true, },
+        .{},
+        gfx
+    );
+    errdefer sphere_vertex_buffer.deinit();
+
+    const sphere_index_buffer = try gf.Buffer.init_with_data(
+        std.mem.sliceAsBytes(sphere_shape.indices),
+        .{ .IndexBuffer = true, },
+        .{},
+        gfx
+    );
+    errdefer sphere_index_buffer.deinit();
+
     const instance_data_buffer = try gf.Buffer.init(
         @sizeOf(InstanceInfoStruct),
         .{ .ConstantBuffer = true, },
@@ -98,9 +134,15 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
         .torus_vertex_buffer = torus_vertex_buffer,
         .torus_index_buffer = torus_index_buffer,
         .torus_index_count = torus_shape.indices.len,
+
         .cylinder_vertex_buffer = cylinder_vertex_buffer,
         .cylinder_index_buffer = cylinder_index_buffer,
         .cylinder_index_count = cylinder_shape.indices.len,
+
+        .sphere_vertex_buffer = sphere_vertex_buffer,
+        .sphere_index_buffer = sphere_index_buffer,
+        .sphere_index_count = sphere_shape.indices.len,
+
         .instance_data_buffer = instance_data_buffer,
         .selection_textures = selection_textures,
         .vertex_shader = undefined,
@@ -170,7 +212,7 @@ const GizmoControl = enum(u32) {
 fn sub_rotation(control: GizmoControl, base_rot: *const zm.Mat, base_translation: *const zm.Mat) zm.Mat {
     const subrot = switch (control) {
         .TranslateX, .RotateX => zm.rotationY(std.math.pi * 0.5),
-        .TranslateY, .RotateY => zm.rotationX(std.math.pi * 0.5),
+        .TranslateY, .RotateY => zm.rotationX(-std.math.pi * 0.5),
         .TranslateZ, .RotateZ, .None => zm.identity(),
     };
     
@@ -180,23 +222,151 @@ fn sub_rotation(control: GizmoControl, base_rot: *const zm.Mat, base_translation
     );
 }
 
-pub fn update_and_render(self: *Self, transform: *Transform, camera_buffer: *gf.Buffer, rtv: *gf.RenderTargetView, dsv: *gf.DepthStencilView, gfx: *gf.GfxState, in: *input.InputState) void {
-    if (in.get_key(input.KeyCode.MouseLeft)) {
-        if (self.selection_textures.get_value_at_position(@intCast(in.cursor_position[0]), @intCast(in.cursor_position[1]), gfx)) |s| {
+const Ray = struct {
+    origin: zm.F32x4,
+    direction: zm.F32x4,
+};
+
+fn ray_out_cursor(inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
+    var ndc_cursor = zm.f32x4(@floatFromInt(engine().input.cursor_position[0]), @floatFromInt(engine().input.cursor_position[1]), 1.0, 1.0);
+    ndc_cursor /= zm.f32x4(@floatFromInt(engine().gfx.swapchain_size.width), @floatFromInt(engine().gfx.swapchain_size.height), 1.0, 1.0);
+    ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
+    ndc_cursor -= zm.f32x4(1.0, -1.0, -1.0, 0.0);
+    std.log.info("ndc cursor: {d}", .{ndc_cursor});
+
+    const near_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 1.0, 1.0);
+    const far_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 0.0, 1.0);
+
+    var near_view = zm.mul(near_ndc, inv_perspective);
+    near_view /= zm.f32x4s(near_view[3]);
+    var far_view = zm.mul(far_ndc, inv_perspective);
+    far_view /= zm.f32x4s(far_view[3]);
+
+    const near_world = zm.mul(near_view, inv_view);
+    const far_world = zm.mul(far_view, inv_view);
+
+    return .{
+        .origin = near_world,
+        .direction = zm.normalize3(far_world - near_world),
+    };
+}
+
+const ClosestPointsResult = struct {
+    point_on_ray1: zm.F32x4,
+    point_on_ray2: zm.F32x4,
+    distance: f32,
+};
+
+/// Calculates the closest points between two 3D rays in world space
+pub fn closest_points_between_rays(ray1: Ray, ray2: Ray) ClosestPointsResult {
+    // Ensure direction vectors are normalized
+    const dir1 = zm.normalize3(ray1.direction);
+    const dir2 = zm.normalize3(ray2.direction);
+    
+    // Calculate values needed for the solution
+    const a = zm.dot3(dir1, dir1)[0]; // Should be 1.0 if normalized
+    const b = zm.dot3(dir1, dir2)[0];
+    const c = zm.dot3(dir2, dir2)[0]; // Should be 1.0 if normalized
+    
+    // Vector connecting the two ray origins
+    const r = ray1.origin - ray2.origin;
+    
+    const d = zm.dot3(dir1, r)[0];
+    const e = zm.dot3(dir2, r)[0];
+    
+    // Calculate denominator for the solution
+    const denominator = a * c - b * b;
+    
+    // If denominator is close to 0, rays are nearly parallel
+    if (@abs(denominator) < 0.0001) {
+        // For parallel rays, we'll use a different approach
+        // Project ray2's origin onto ray1 to find closest point on ray1
+        const t1 = d / a;
+        const point_on_ray1 = ray1.origin + (dir1 * zm.f32x4s(t1));
+        
+        // For the second point, project ray1's point onto ray2's direction
+        const point_to_origin2 = point_on_ray1 - ray2.origin;
+        const t2 = zm.dot3(point_to_origin2, dir2)[0];
+        const point_on_ray2 = ray2.origin + (dir2 * zm.f32x4s(t2));
+        
+        // Calculate the distance between these points
+        const diff = point_on_ray1 - point_on_ray2;
+        const distance = zm.length3(diff)[0];
+        
+        return ClosestPointsResult{
+            .point_on_ray1 = point_on_ray1,
+            .point_on_ray2 = point_on_ray2,
+            .distance = distance,
+        };
+    }
+    
+    // Calculate the parameters t1 and t2 that give the closest points
+    const t1 = (b * e - c * d) / denominator;
+    const t2 = (a * e - b * d) / denominator;
+    
+    // Calculate the closest points on each ray
+    const point_on_ray1 = (ray1.origin + (dir1 * zm.f32x4s(t1)));
+    const point_on_ray2 = (ray2.origin + (dir2 * zm.f32x4s(t2)));
+    
+    // Calculate the distance between these points
+    const diff = point_on_ray1 - point_on_ray2;
+    const distance = zm.length3(diff)[0];
+    
+    return ClosestPointsResult{
+        .point_on_ray1 = point_on_ray1,
+        .point_on_ray2 = point_on_ray2,
+        .distance = distance,
+    };
+}
+
+fn translate_with_cursor(transform: *Transform, cursor_ray: Ray, translation_dir: zm.F32x4) void {
+    const closest_points = closest_points_between_rays(cursor_ray, Ray{
+        .origin = transform.position,
+        .direction = translation_dir,
+    });
+    transform.position = closest_points.point_on_ray2;
+}
+
+pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat) void {
+    if (engine().input.get_key_down(input.KeyCode.MouseLeft)) {
+        self.selected_control = null;
+        if (self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx)) |s| {
             std.log.info("selection: {}", .{s});
-            switch (@as(GizmoControl, @enumFromInt(s))) {
+            self.selected_control = @as(GizmoControl, @enumFromInt(s));
+        } else |_| {}
+    }
+    if (engine().input.get_key_up(input.KeyCode.MouseLeft)) {
+        self.selected_control = null;
+    }
+    if (engine().input.get_key(input.KeyCode.MouseLeft)) {
+        if (self.selected_control) |s| {
+            const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+            engine().debug.draw_line(.{
+                .p0 = cursor_ray.origin + cursor_ray.direction,
+                .p1 = transform.position,
+                .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
+            });
+            switch (s) {
                 .None => {},
-                .TranslateX => transform.position += transform.right_direction() * zm.f32x4s(in.mouse_delta[0]),
-                .TranslateY => {},
-                .TranslateZ => {},
+                .TranslateX => {
+                    translate_with_cursor(transform, cursor_ray, transform.right_direction());
+                },
+                .TranslateY => {
+                    translate_with_cursor(transform, cursor_ray, transform.up_direction());
+                },
+                .TranslateZ => {
+                    translate_with_cursor(transform, cursor_ray, transform.forward_direction());
+                },
                 .RotateX => {},
                 .RotateY => {},
                 .RotateZ => {},
             }
-        } else |err| {
-            std.log.err("cannot get value at position: {}", .{err});
         }
     }
+}
+
+pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffer, rtv: *gf.RenderTargetView, dsv: *gf.DepthStencilView, camera_rot: zm.Quat) void {
+    const gfx = &engine().gfx;
 
     // recreate selection textures if size has changed
     if (self.selection_textures.texture.desc.width != gfx.swapchain_size.width or self.selection_textures.texture.desc.height != gfx.swapchain_size.height) {
@@ -234,6 +404,24 @@ pub fn update_and_render(self: *Self, transform: *Transform, camera_buffer: *gf.
 
     const base_rot = zm.matFromQuat(transform.rotation);
     const base_tra = zm.translationV(transform.position);
+
+    // render white torus
+    {
+        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        defer mapped_buffer.unmap();
+
+        mapped_buffer.data().* = .{
+            .model_matrix = zm.mul(
+                zm.matFromQuat(camera_rot), 
+                base_tra
+            ),
+            .colour = WHITE,
+            .id = @intFromEnum(GizmoControl.None),
+        };
+    }
+    gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
+
+    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
 
     // render red torus
     {
@@ -281,15 +469,13 @@ pub fn update_and_render(self: *Self, transform: *Transform, camera_buffer: *gf.
     });
     gfx.cmd_set_index_buffer(&self.cylinder_index_buffer, .U32, 0);
 
-    const scale_mat = zm.scalingV(zm.f32x4(0.05, 0.05, 1.0, 1.0));
-
     // render red cylinder
     {
         const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data().* = .{
-            .model_matrix = zm.mul(scale_mat, sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra)),
+            .model_matrix = sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra),
             .colour = RED,
             .id = @intFromEnum(GizmoControl.TranslateX),
         };
@@ -302,7 +488,7 @@ pub fn update_and_render(self: *Self, transform: *Transform, camera_buffer: *gf.
         defer mapped_buffer.unmap();
 
         mapped_buffer.data().* = .{
-            .model_matrix = zm.mul(scale_mat, sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra)),
+            .model_matrix = sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra),
             .colour = GREEN,
             .id = @intFromEnum(GizmoControl.TranslateY),
         };
@@ -315,10 +501,32 @@ pub fn update_and_render(self: *Self, transform: *Transform, camera_buffer: *gf.
         defer mapped_buffer.unmap();
 
         mapped_buffer.data().* = .{
-            .model_matrix = zm.mul(scale_mat, sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra)),
+            .model_matrix = sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra),
             .colour = BLUE,
             .id = @intFromEnum(GizmoControl.TranslateZ),
         };
     }
     gfx.cmd_draw_indexed(@intCast(self.cylinder_index_count), 0, 0);
+
+
+    // set sphere vertex and index buffers
+    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
+        .{ .buffer = &self.sphere_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
+    });
+    gfx.cmd_set_index_buffer(&self.sphere_index_buffer, .U32, 0);
+
+    // render white sphere
+    {
+        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        defer mapped_buffer.unmap();
+
+        mapped_buffer.data().* = .{
+            .model_matrix = 
+                base_tra
+            ,
+            .colour = WHITE,
+            .id = @intFromEnum(GizmoControl.None),
+        };
+    }
+    gfx.cmd_draw_indexed(@intCast(self.sphere_index_count), 0, 0);
 }

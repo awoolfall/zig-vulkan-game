@@ -930,12 +930,6 @@ fn update(self: *Self) void {
         const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
         character_entity.app.anim_controller.?.set_variable("character speed", zm.length3(character_velocity)[0]);
         character_entity.app.anim_controller.?.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
-
-        engine().debug.draw_line(.{
-            .p0 = zm.f32x4s(0.0),
-            .p1 = character_entity.transform.position,
-            .colour = zm.f32x4(1.0, 0.7, 0.7, 1.0),
-        });
     }
 
     // Generate camera view matrix
@@ -1214,7 +1208,8 @@ fn update(self: *Self) void {
     if (self.selected_entity) |s| {
         if (engine().entities.get(s)) |entity| {
             engine().gfx.cmd_set_viewport(viewport);
-            self.gizmo.update_and_render(&entity.transform, &self.camera_data_buffer, engine().gfx.get_framebuffer(), &self.depth_textures.dsv, &engine().gfx, &engine().input);
+            self.gizmo.update(&entity.transform, zm.inverse(self.camera.generate_perspective_matrix(engine().gfx.swapchain_aspect())), zm.inverse(camera_view_matrix));
+            self.gizmo.render(&entity.transform, &self.camera_data_buffer, engine().gfx.get_framebuffer(), &self.depth_textures.dsv, self.camera_transform.rotation);
         } 
     }
 
