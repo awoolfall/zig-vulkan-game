@@ -7,8 +7,11 @@ cbuffer camera_data : register(b0)
 cbuffer instance_data : register(b1)
 {
     row_major float4x4 model_matrix;
+    float time;
     unsigned int entity_id;
+    unsigned int flags;
 }
+#define IS_SELECTED_BIT 0x1
 
 cbuffer bone_data : register(b2)
 {
@@ -123,6 +126,10 @@ ps_out ps_main(vs_out input)
     output.colour = diffuse;
 
     output.entity_id = entity_id;
+
+    if (flags & IS_SELECTED_BIT) {
+        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), step(0.5, sin(time * 10.0 + (input.position.x + input.position.y) * 0.05)));
+    }
 
     return output;
 }

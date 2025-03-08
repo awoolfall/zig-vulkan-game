@@ -22,14 +22,33 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const app_module = b.addModule("app", .{
+        .root_source_file = b.path("src/app.zig"),
+    });
+    exe.root_module.addImport("app", app_module);
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
     b.installArtifact(exe);
 
+    // create engine module
     const engine = b.dependency("engine", .{});
-    exe.root_module.addImport("engine", engine.module("root"));
-    //exe.linkLibrary(engine);
+
+    // perform a circular dependency juggle with app, engine, and the exe
+    {
+        // add app module as a dependency to engine module
+        // so that App is accessible from engine
+        engine.module("root").addImport("app", app_module);
+
+        // add engine module to app module
+        // so that Engine is accessible from app
+        app_module.addImport("engine", engine.module("root"));
+
+        // add engine module to exe
+        // so that we can call engine run() from main.zig (and main is still owned by the user)
+        exe.root_module.addImport("engine", engine.module("root"));
+    }
 
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
