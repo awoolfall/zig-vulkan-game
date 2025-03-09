@@ -61,7 +61,9 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
-    const torus_shape = zmesh.Shape.initTorus(16, 64, 0.05);
+    const line_width = 0.05;
+
+    const torus_shape = zmesh.Shape.initTorus(16, 64, line_width);
     defer torus_shape.deinit();
 
     const torus_vertex_buffer = try gf.Buffer.init_with_data(
@@ -82,7 +84,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
 
     var cylinder_shape = zmesh.Shape.initCylinder(16, 2);
     defer cylinder_shape.deinit();
-    cylinder_shape.scale(0.05, 0.05, 1.0);
+    cylinder_shape.scale(line_width, line_width, 1.0);
 
     const cylinder_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(cylinder_shape.positions),
@@ -102,7 +104,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
 
     var sphere_shape = zmesh.Shape.initParametricSphere(16, 16);
     defer sphere_shape.deinit();
-    sphere_shape.scale(0.1, 0.1, 0.1);
+    sphere_shape.scale(line_width * 2.0, line_width * 2.0, line_width * 2.0);
 
     const sphere_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(sphere_shape.positions),
@@ -200,6 +202,8 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
     }
 }
 
+const CoordSpace = enum { local, world, };
+
 const GizmoControl = enum(u32) {
     None = 0,
     TranslateX,
@@ -221,6 +225,12 @@ const GizmoControl = enum(u32) {
             .TranslateX, .RotateX => transform.right_direction(),
             .TranslateY, .RotateY => transform.up_direction(),
             .TranslateZ, .RotateZ, .None => transform.forward_direction(),
+        };
+    }
+    pub inline fn direction(self: GizmoControl, transform: *const Transform, space: CoordSpace) zm.F32x4 {
+        return switch (space) {
+            .local => self.direction_local(transform),
+            .world => self.direction_world(),
         };
     }
 };
@@ -412,7 +422,34 @@ fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: R
     transform.position = closest_points.point_on_ray2 - self.selected_offset;
 }
 
+inline fn non_orthogonalized_plane_up_direction(normal: zm.F32x4) zm.F32x4 {
+    return if (zm.dot3(normal, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 1.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0);
+}
+
+fn rotate_with_cursor(self: *Self, transform: *Transform, cursor_ray: Ray, rotation_normal: zm.F32x4) void {
+    const plane = Plane {
+        .point = transform.position,
+        .normal = rotation_normal,
+        .up = non_orthogonalized_plane_up_direction(rotation_normal),
+    };
+    const intersection = ray_plane_intersection(cursor_ray, plane);
+    if (intersection.hit) {
+        const normalized_plane_coords = zm.normalize3(intersection.plane_coords);
+        var angle = std.math.atan2(normalized_plane_coords[1], normalized_plane_coords[0]);
+        if (std.math.isNan(angle)) {
+            angle = 0.0;
+        }
+        transform.rotation = zm.qmul(transform.rotation, zm.quatFromAxisAngle(rotation_normal, angle - self.selected_offset[0]));
+        self.selected_offset[0] = angle;
+    }
+}
+
+inline fn get_coord_space() CoordSpace {
+    return if (engine().input.get_key(input.KeyCode.Control)) .local else .world;
+}
+
 pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat) void {
+    const coord_space = get_coord_space();
     if (engine().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
         if (self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx)) |s| {
@@ -422,21 +459,25 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
                     const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
                     const closest_points = closest_points_between_rays(cursor_ray, Ray{
                         .origin = transform.position,
-                        .direction = self.selected_control.?.direction_local(transform),
+                        .direction = self.selected_control.?.direction(transform, coord_space),
                     });
                     self.selected_offset = closest_points.point_on_ray2 - transform.position;
                 },
                 .RotateX, .RotateY, .RotateZ => {
                     const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
-                    const local_direction = self.selected_control.?.direction_local(transform);
+                    const local_direction = self.selected_control.?.direction(transform, coord_space);
                     const plane = Plane {
                         .point = transform.position,
                         .normal = local_direction,
-                        .up = if (zm.dot3(local_direction, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 0.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0),
+                        .up = non_orthogonalized_plane_up_direction(local_direction),
                     };
                     const intersection = ray_plane_intersection(cursor_ray, plane);
                     if (intersection.hit) {
-                        self.selected_offset[0] = std.math.atan2(intersection.plane_coords[1], intersection.plane_coords[0]);
+                        const normalized_plane_coords = zm.normalize3(intersection.plane_coords);
+                        self.selected_offset[0] = std.math.atan2(normalized_plane_coords[1], normalized_plane_coords[0]);
+                        if (std.math.isNan(self.selected_offset[0])) {
+                            self.selected_offset[0] = 0.0;
+                        }
                     }
                 },
                 .None => {},
@@ -453,21 +494,10 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
             switch (s) {
                 .None => {},
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    self.translate_with_cursor(transform, cursor_ray, s.direction_local(transform));
+                    self.translate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
                 },
                 .RotateX, .RotateY, .RotateZ => {
-                    const local_direction = s.direction_local(transform);
-                    const plane = Plane {
-                        .point = transform.position,
-                        .normal = local_direction,
-                        .up = if (zm.dot3(local_direction, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 0.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0),
-                    };
-                    const intersection = ray_plane_intersection(cursor_ray, plane);
-                    if (intersection.hit) {
-                        const angle = std.math.atan2(intersection.plane_coords[1], intersection.plane_coords[0]);
-                        transform.rotation = zm.qmul(transform.rotation, zm.quatFromAxisAngle(local_direction, angle - self.selected_offset[0]));
-                        self.selected_offset[0] = angle;
-                    }
+                    self.rotate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
                 }
             }
         }
@@ -511,7 +541,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffe
     });
     gfx.cmd_set_index_buffer(&self.torus_index_buffer, .U32, 0);
 
-    const base_rot = zm.matFromQuat(transform.rotation);
+    const base_rot = if (get_coord_space() == .local) zm.matFromQuat(transform.rotation) else zm.identity();
     const base_tra = zm.translationV(transform.position);
 
     // render white torus
