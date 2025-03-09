@@ -41,6 +41,7 @@ instance_data_buffer: gf.Buffer,
 selection_textures: SelectionTextures,
 
 selected_control: ?GizmoControl = null,
+selected_offset: zm.F32x4 = zm.f32x4s(0.0),
 
 pub fn deinit(self: *Self) void {
     self.torus_vertex_buffer.deinit();
@@ -207,6 +208,21 @@ const GizmoControl = enum(u32) {
     RotateX,
     RotateY,
     RotateZ,
+
+    pub fn direction_world(self: GizmoControl) zm.F32x4 {
+        return switch (self) {
+            .TranslateX, .RotateX => zm.f32x4(1.0, 0.0, 0.0, 0.0),
+            .TranslateY, .RotateY => zm.f32x4(0.0, 1.0, 0.0, 0.0),
+            .TranslateZ, .RotateZ, .None => zm.f32x4(0.0, 0.0, 1.0, 0.0),
+        };
+    }
+    pub fn direction_local(self: GizmoControl, transform: *const Transform) zm.F32x4 {
+        return switch (self) {
+            .TranslateX, .RotateX => transform.right_direction(),
+            .TranslateY, .RotateY => transform.up_direction(),
+            .TranslateZ, .RotateZ, .None => transform.forward_direction(),
+        };
+    }
 };
 
 fn sub_rotation(control: GizmoControl, base_rot: *const zm.Mat, base_translation: *const zm.Mat) zm.Mat {
@@ -231,8 +247,7 @@ fn ray_out_cursor(inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
     var ndc_cursor = zm.f32x4(@floatFromInt(engine().input.cursor_position[0]), @floatFromInt(engine().input.cursor_position[1]), 1.0, 1.0);
     ndc_cursor /= zm.f32x4(@floatFromInt(engine().gfx.swapchain_size.width), @floatFromInt(engine().gfx.swapchain_size.height), 1.0, 1.0);
     ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
-    ndc_cursor -= zm.f32x4(1.0, -1.0, -1.0, 0.0);
-    std.log.info("ndc cursor: {d}", .{ndc_cursor});
+    ndc_cursor -= zm.f32x4(1.0, -1.0, 0.0, 0.0);
 
     const near_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 1.0, 1.0);
     const far_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 0.0, 1.0);
@@ -319,43 +334,38 @@ pub fn closest_points_between_rays(ray1: Ray, ray2: Ray) ClosestPointsResult {
     };
 }
 
-fn translate_with_cursor(transform: *Transform, cursor_ray: Ray, translation_dir: zm.F32x4) void {
+fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: Ray, translation_dir: zm.F32x4) void {
     const closest_points = closest_points_between_rays(cursor_ray, Ray{
         .origin = transform.position,
         .direction = translation_dir,
     });
-    transform.position = closest_points.point_on_ray2;
+    transform.position = closest_points.point_on_ray2 - self.selected_offset;
 }
 
 pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat) void {
     if (engine().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
         if (self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx)) |s| {
-            std.log.info("selection: {}", .{s});
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
+            const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+            const closest_points = closest_points_between_rays(cursor_ray, Ray{
+                .origin = transform.position,
+                .direction = self.selected_control.?.direction_local(transform),
+            });
+            self.selected_offset = closest_points.point_on_ray2 - transform.position;
         } else |_| {}
     }
     if (engine().input.get_key_up(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
+        self.selected_offset = zm.f32x4s(0.0);
     }
     if (engine().input.get_key(input.KeyCode.MouseLeft)) {
         if (self.selected_control) |s| {
             const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
-            engine().debug.draw_line(.{
-                .p0 = cursor_ray.origin + cursor_ray.direction,
-                .p1 = transform.position,
-                .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
-            });
             switch (s) {
                 .None => {},
-                .TranslateX => {
-                    translate_with_cursor(transform, cursor_ray, transform.right_direction());
-                },
-                .TranslateY => {
-                    translate_with_cursor(transform, cursor_ray, transform.up_direction());
-                },
-                .TranslateZ => {
-                    translate_with_cursor(transform, cursor_ray, transform.forward_direction());
+                .TranslateX, .TranslateY, .TranslateZ => {
+                    self.translate_with_cursor(transform, cursor_ray, s.direction_local(transform));
                 },
                 .RotateX => {},
                 .RotateY => {},
@@ -421,6 +431,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffe
     }
     gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
 
+    // clear depth buffer so that all following controls are drawn on top of the white torus
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
 
     // render red torus
