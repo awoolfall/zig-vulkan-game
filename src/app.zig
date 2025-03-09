@@ -430,6 +430,14 @@ pub fn init(self: *Self) !void {
     var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
     engine().entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
 
+    _ = try engine().entities.new_entity(Engine.EntityDescriptor {
+        .name = "cone entity",
+        .model = "default|cone",
+        .transform = .{
+            .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
+        },
+    });
+
     const model_buffer = try gfx.Buffer.init(
         @sizeOf(InstanceStruct),
         .{ .ConstantBuffer = true, },

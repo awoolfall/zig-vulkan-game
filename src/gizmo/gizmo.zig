@@ -334,6 +334,76 @@ pub fn closest_points_between_rays(ray1: Ray, ray2: Ray) ClosestPointsResult {
     };
 }
 
+const Plane = struct {
+    point: zm.F32x4,
+    normal: zm.F32x4,
+    up: zm.F32x4,
+};
+
+
+const RayPlaneIntersectionResult = struct {
+    world_position: zm.F32x4,
+    plane_coords: zm.F32x4, // x,y are coordinates in plane space, z,w unused
+    hit: bool,
+};
+
+/// Calculates the intersection between a ray and a plane
+pub fn ray_plane_intersection(ray: Ray, plane: Plane) RayPlaneIntersectionResult {
+    // 1. Calculate if the ray and plane intersect
+    const normal = zm.normalize3(plane.normal);
+    const denominator = zm.dot3(normal, ray.direction)[0];
+    
+    // If denominator is close to 0, ray is parallel to the plane
+    if (@abs(denominator) < 0.0001) {
+        return RayPlaneIntersectionResult{
+            .world_position = zm.f32x4(0, 0, 0, 0),
+            .plane_coords = zm.f32x4(0, 0, 0, 0),
+            .hit = false,
+        };
+    }
+    
+    // 2. Calculate distance from ray origin to the intersection point
+    const p0_to_origin = (ray.origin - plane.point);
+    const t = -zm.dot3(normal, p0_to_origin)[0] / denominator;
+    
+    // If t is negative, the intersection is behind the ray origin
+    if (t < 0) {
+        return RayPlaneIntersectionResult {
+            .world_position = zm.f32x4(0, 0, 0, 0),
+            .plane_coords = zm.f32x4(0, 0, 0, 0),
+            .hit = false,
+        };
+    }
+    
+    // 3. Calculate the world position of the intersection
+    const scaled_direction = (ray.direction * zm.f32x4s(t));
+    const world_position = (ray.origin + scaled_direction);
+    
+    // 4. Calculate the plane's coordinate system
+    // Normalize the up vector
+    const up = zm.normalize3(plane.up);
+    
+    // Calculate the right vector (perpendicular to both normal and up)
+    const right = zm.normalize3(zm.cross3(up, normal));
+    
+    // Recalculate up to ensure orthogonality (normal, right, and up form an orthogonal basis)
+    const corrected_up = zm.normalize3(zm.cross3(normal, right));
+    
+    // 5. Calculate the plane coordinates
+    // Vector from plane origin point to intersection
+    const vector_to_intersection = (world_position - plane.point);
+    
+    // Project this vector onto the plane basis vectors
+    const x_coord = zm.dot3(vector_to_intersection, right)[0];
+    const y_coord = zm.dot3(vector_to_intersection, corrected_up)[0];
+    
+    return RayPlaneIntersectionResult {
+        .world_position = world_position,
+        .plane_coords = zm.f32x4(x_coord, y_coord, 0, 0),
+        .hit = true,
+    };
+}
+
 fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: Ray, translation_dir: zm.F32x4) void {
     const closest_points = closest_points_between_rays(cursor_ray, Ray{
         .origin = transform.position,
@@ -347,12 +417,30 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
         self.selected_control = null;
         if (self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx)) |s| {
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
-            const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
-            const closest_points = closest_points_between_rays(cursor_ray, Ray{
-                .origin = transform.position,
-                .direction = self.selected_control.?.direction_local(transform),
-            });
-            self.selected_offset = closest_points.point_on_ray2 - transform.position;
+            switch (self.selected_control.?) {
+                .TranslateX, .TranslateY, .TranslateZ => {
+                    const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+                    const closest_points = closest_points_between_rays(cursor_ray, Ray{
+                        .origin = transform.position,
+                        .direction = self.selected_control.?.direction_local(transform),
+                    });
+                    self.selected_offset = closest_points.point_on_ray2 - transform.position;
+                },
+                .RotateX, .RotateY, .RotateZ => {
+                    const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+                    const local_direction = self.selected_control.?.direction_local(transform);
+                    const plane = Plane {
+                        .point = transform.position,
+                        .normal = local_direction,
+                        .up = if (zm.dot3(local_direction, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 0.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0),
+                    };
+                    const intersection = ray_plane_intersection(cursor_ray, plane);
+                    if (intersection.hit) {
+                        self.selected_offset[0] = std.math.atan2(intersection.plane_coords[1], intersection.plane_coords[0]);
+                    }
+                },
+                .None => {},
+            }
         } else |_| {}
     }
     if (engine().input.get_key_up(input.KeyCode.MouseLeft)) {
@@ -367,9 +455,20 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
                 .TranslateX, .TranslateY, .TranslateZ => {
                     self.translate_with_cursor(transform, cursor_ray, s.direction_local(transform));
                 },
-                .RotateX => {},
-                .RotateY => {},
-                .RotateZ => {},
+                .RotateX, .RotateY, .RotateZ => {
+                    const local_direction = s.direction_local(transform);
+                    const plane = Plane {
+                        .point = transform.position,
+                        .normal = local_direction,
+                        .up = if (zm.dot3(local_direction, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 0.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0),
+                    };
+                    const intersection = ray_plane_intersection(cursor_ray, plane);
+                    if (intersection.hit) {
+                        const angle = std.math.atan2(intersection.plane_coords[1], intersection.plane_coords[0]);
+                        transform.rotation = zm.qmul(transform.rotation, zm.quatFromAxisAngle(local_direction, angle - self.selected_offset[0]));
+                        self.selected_offset[0] = angle;
+                    }
+                }
             }
         }
     }
