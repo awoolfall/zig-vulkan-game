@@ -22,6 +22,7 @@ const particle = en.particles;
 const es = en.easings;
 const anim = en.animation;
 const assets = en.assets;
+const sr = en.serialize;
 
 const Terrain = @import("terrain/terrain.zig");
 const Gizmo = @import("gizmo/gizmo.zig");
@@ -62,13 +63,20 @@ pub const EntityData = struct {
     pub fn init(desc: Descriptor) !EntityData {
         return EntityData {
             .health_points = desc.health_points,
-            .anim_controller = if (desc.anim_controller) |ac| ac else null,
+            .anim_controller = if (desc.anim_nodes) |nodes| try anim.AnimController.init(engine().general_allocator.allocator(), nodes) else null,
+        };
+    }
+
+    pub fn descriptor(self: *const EntityData, alloc: std.mem.Allocator) !Descriptor {
+        return Descriptor {
+            .health_points = self.health_points,
+            .anim_nodes = if (self.anim_controller) |ac| try alloc.dupe(anim.Node, ac.nodes) else null,
         };
     }
 
     pub const Descriptor = struct {
         health_points: ?i32 = null,
-        anim_controller: ?anim.AnimController = null,
+        anim_nodes: ?[]anim.Node = null,
     };
 };
 
@@ -293,7 +301,7 @@ pub fn init(self: *Self) !void {
         },
     });
     anim_controller.base_animation = character_animation_idle_id;
-    errdefer anim_controller.deinit();
+    defer anim_controller.deinit();
 
     // Use the model as a 'prefab' of sorts and create a number of entities from its nodes
     const terrain_shape = try engine().physics.create_shape(ph.ShapeSettings {
@@ -314,6 +322,7 @@ pub fn init(self: *Self) !void {
 
     _ = try engine().entities.new_entity(Engine.EntityDescriptor {
         .name = "ground entity",
+        .should_serialize = true,
         .model = "default|terrain",
         .physics = .{ .Body = .{
             .settings = .{
@@ -382,6 +391,7 @@ pub fn init(self: *Self) !void {
 
     const chara_root_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
         .name = "character entity",
+        .should_serialize = true,
         .model = "default|character",
         .transform = Transform {
             .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
@@ -392,9 +402,12 @@ pub fn init(self: *Self) !void {
         } },
         .app = .{
             .health_points = 100,
-            .anim_controller = anim_controller,
+            .anim_nodes = anim_controller.nodes,
         },
     });
+    if (engine().entities.get(chara_root_idx)) |character_entity| {
+        character_entity.app.anim_controller.?.base_animation = character_animation_idle_id;
+    }
     // const chara_body_id_character = engine().entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.character.?.getBodyId();
     //
     // // @TODO this body filter needs to be stored on the entity alongside character/virtual character...
@@ -417,6 +430,7 @@ pub fn init(self: *Self) !void {
 
     const opponent_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
         .name = "opponent entity",
+        .should_serialize = true,
         .model = "default|character",
         .transform = chara_transform,
         .physics = .{ .Character = .{
@@ -424,14 +438,18 @@ pub fn init(self: *Self) !void {
         } },
         .app = .{
             .health_points = 100,
-            .anim_controller = try anim_controller.clone(engine().general_allocator.allocator()),
+            .anim_nodes = anim_controller.nodes,
         },
     });
-    var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-    engine().entities.get(chara_root_idx).?.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
+    if (engine().entities.get(opponent_idx)) |op| {
+        op.app.anim_controller.?.base_animation = character_animation_idle_id;
+        var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+        op.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
+    }
 
     _ = try engine().entities.new_entity(Engine.EntityDescriptor {
         .name = "cone entity",
+        .should_serialize = true,
         .model = "default|cone",
         .transform = .{
             .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
@@ -746,6 +764,21 @@ fn update(self: *Self) void {
         ww.text_content.?.font = .GeistMono;
     }
     self.imui.pop_layout();
+    self.imui.pop_layout();
+
+    _ = self.imui.push_floating_layout(.Y, 300, 0, .{@src()});
+    const save_scene_button = self.imui.button("Save Scene", .{@src()});
+    if (save_scene_button.clicked) {
+        save_entities_to_scene("scene") catch |err| {
+            std.log.err("Failed to save scene entities: {}", .{err});
+        };
+    }
+    const load_scene_button = self.imui.button("Load Scene", .{@src()});
+    if (load_scene_button.clicked) {
+        create_scene_entities("scene") catch |err| {
+            std.log.err("Failed to create scene entities: {}", .{err});
+        };
+    }
     self.imui.pop_layout();
 
     // Input to move the model around
@@ -1425,6 +1458,112 @@ const CollideShapeCollector = extern struct {
     }
 };
 
-fn custom_easing(_: f32) f32 {
-    return 1.0;
+fn create_scene_entities(scene_name: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    defer arena.deinit();
+
+    var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        _ = arena.reset(.retain_capacity);
+        if (entry.kind == .file) {
+            const ent_file = dir.openFile(entry.name, .{}) catch |err| {
+                std.log.err("Failed to open file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            defer ent_file.close();
+
+            const ent_str = ent_file.readToEndAlloc(arena.allocator(), 1024 * 1024) catch |err| {
+                std.log.err("Failed to read file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            defer arena.allocator().free(ent_str);
+
+            const ent_s = std.json.parseFromSliceLeaky(
+                sr.Serializable(Engine.EntityDescriptor),
+                arena.allocator(),
+                ent_str,
+                .{ .ignore_unknown_fields = true, }
+            ) catch |err| {
+                std.log.err("Failed to parse file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+
+            const ent = sr.deserialize(Engine.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
+                std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
+                continue;
+            };
+
+            const loaded_entity = engine().entities.new_entity(ent) catch |err| {
+                std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            std.log.info("Loaded entity: {}", .{engine().entities.get(loaded_entity).?});
+        }
+    }
+}
+
+fn save_entities_to_scene(scene_name: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    defer arena.deinit();
+
+    std.fs.cwd().deleteTree(scene_name) catch |err| {
+        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+    };
+
+    var scene_dir: std.fs.Dir = undefined;
+    scene_dir = std.fs.cwd().openDir(scene_name, .{.iterate = true,}) catch blk: {
+        try std.fs.cwd().makeDir(scene_name);
+        break :blk try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    };
+    defer scene_dir.close();
+
+    var it = engine().entities.list.iterator();
+
+    var largest_serialize_id: u32 = 0;
+    while (it.next()) |entity| {
+        if (!entity.should_serialize) continue;
+        largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
+    }
+
+    it.reset();
+    while (it.next()) |entity| {
+        if (!entity.should_serialize) continue;
+        _ = arena.reset(.retain_capacity);
+
+        entity.serialize_id = entity.serialize_id orelse blk: {
+            largest_serialize_id += 1;
+            break :blk largest_serialize_id;
+        };
+
+        const entity_descriptor = entity.descriptor(arena.allocator()) catch |err| {
+            std.log.err("unable to produce descriptor for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        const entity_s = sr.serialize(Engine.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
+            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        const res = std.json.stringifyAlloc(arena.allocator(), entity_s, .{.whitespace = .indent_2}) catch |err| {
+            std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity.serialize_id.?}) catch |err| {
+            std.log.err("unable to produce file path for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        scene_dir.writeFile(.{
+            .sub_path = file_path,
+            .data = res,
+            .flags = .{ .read = false, .truncate = true, },
+        }) catch |err| {
+            std.log.err("unable to write file for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+    }
 }
