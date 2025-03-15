@@ -50,6 +50,12 @@ const InstanceStruct = extern struct {
     },
 };
 
+const InstanceIdx = extern struct {
+    instance_idx: u32,
+    bone_start_idx: u32 = 0,
+    pad: [2]u32 = .{ 0, 0 },
+};
+
 pub const EntityData = struct {
     health_points: ?i32,
     anim_controller: ?anim.AnimController,
@@ -63,22 +69,28 @@ pub const EntityData = struct {
     pub fn init(desc: Descriptor) !EntityData {
         return EntityData {
             .health_points = desc.health_points,
-            .anim_controller = if (desc.anim_nodes) |nodes| try anim.AnimController.init(engine().general_allocator.allocator(), nodes) else null,
+            .anim_controller = if (desc.anim_controller_desc) |anim_desc| try anim.AnimController.init(engine().general_allocator.allocator(), anim_desc) else null,
         };
     }
 
     pub fn descriptor(self: *const EntityData, alloc: std.mem.Allocator) !Descriptor {
+        const anim_desc = if (self.anim_controller) |ac| try ac.descriptor(alloc) else null;
+        errdefer if (anim_desc) |ad| alloc.free(ad);
+
         return Descriptor {
             .health_points = self.health_points,
-            .anim_nodes = if (self.anim_controller) |ac| try alloc.dupe(anim.Node, ac.nodes) else null,
+            .anim_controller_desc = anim_desc,
         };
     }
 
     pub const Descriptor = struct {
         health_points: ?i32 = null,
-        anim_nodes: ?[]anim.Node = null,
+        anim_controller_desc: ?anim.AnimController.Descriptor = null,
     };
 };
+
+const model_buffer_size: usize = 128;
+const bone_matrix_buffer_size: usize = 1024;
 
 depth_textures: DepthTextures,
 selection_textures: SelectionTextures,
@@ -93,6 +105,10 @@ camera_transform: Transform,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
 model_buffer: gfx.Buffer,
+
+instance_index_buffers: [3]gfx.Buffer,
+instance_index_active_buffer: usize = 0,
+
 character_idx: gen.GenerationalIndex,
 opponent_idx: gen.GenerationalIndex,
 //character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
@@ -116,6 +132,10 @@ text_input_state: ui.Imui.TextInputState,
 terrain: Terrain,
 gizmo: Gizmo,
 
+render_objects: std.ArrayList(StandardRenderObject),
+skeletal_render_objects: std.ArrayList(SkeletalRenderObject),
+render_bones: std.ArrayList(zm.Mat),
+
 pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
@@ -130,6 +150,9 @@ pub fn deinit(self: *Self) void {
     self.bone_matrix_buffer.deinit();
     self.camera_data_buffer.deinit();
     self.model_buffer.deinit();
+    for (&self.instance_index_buffers) |*ib| {
+        ib.deinit();
+    }
 
     self.depth_textures.deinit();
     self.selection_textures.deinit();
@@ -141,6 +164,10 @@ pub fn deinit(self: *Self) void {
 
     self.terrain.deinit();
     self.gizmo.deinit();
+
+    self.render_objects.deinit();
+    self.skeletal_render_objects.deinit();
+    self.render_bones.deinit();
 }
 
 pub fn init(self: *Self) !void {
@@ -187,7 +214,7 @@ pub fn init(self: *Self) !void {
 
     // Create bone matrix constant buffer
     const bone_matrix_buffer = try gfx.Buffer.init(
-        @sizeOf(zm.Mat) * ms.MAX_BONES,
+        @sizeOf(zm.Mat) * Self.bone_matrix_buffer_size,
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
         &engine().gfx
@@ -230,7 +257,7 @@ pub fn init(self: *Self) !void {
         std.log.info("{}. anim: {s}", .{i, animation.name});
     }
 
-    var anim_controller = try anim.AnimController.init(engine().general_allocator.allocator(), &[_]anim.Node{
+    var anim_nodes = [_]anim.Node{
         .{
             .node = .{ .Basic = .{
                 .animation = character_animation_idle_id,
@@ -299,9 +326,11 @@ pub fn init(self: *Self) !void {
                 },
             },
         },
-    });
-    anim_controller.base_animation = character_animation_idle_id;
-    defer anim_controller.deinit();
+    };
+    const anim_desc = anim.AnimController.Descriptor {
+        .nodes = anim_nodes[0..],
+        .base_animation = character_animation_idle_id,
+    };
 
     // Use the model as a 'prefab' of sorts and create a number of entities from its nodes
     const terrain_shape = try engine().physics.create_shape(ph.ShapeSettings {
@@ -402,12 +431,9 @@ pub fn init(self: *Self) !void {
         } },
         .app = .{
             .health_points = 100,
-            .anim_nodes = anim_controller.nodes,
+            .anim_controller_desc = anim_desc,
         },
     });
-    if (engine().entities.get(chara_root_idx)) |character_entity| {
-        character_entity.app.anim_controller.?.base_animation = character_animation_idle_id;
-    }
     // const chara_body_id_character = engine().entities.list.get(chara_root_idx).?.physics.?.CharacterVirtual.character.?.getBodyId();
     //
     // // @TODO this body filter needs to be stored on the entity alongside character/virtual character...
@@ -438,14 +464,31 @@ pub fn init(self: *Self) !void {
         } },
         .app = .{
             .health_points = 100,
-            .anim_nodes = anim_controller.nodes,
+            .anim_controller_desc = anim_desc,
         },
     });
-    if (engine().entities.get(opponent_idx)) |op| {
-        op.app.anim_controller.?.base_animation = character_animation_idle_id;
-        var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-        op.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
-    }
+
+    // for (0..100) |_| {
+    //     chara_transform.position += zm.f32x4(0.0, 0.5, 0.0, 0.0);
+    //     _ = try engine().entities.new_entity(Engine.EntityDescriptor {
+    //         .name = "opponent entity",
+    //         .should_serialize = true,
+    //         .model = "default|character",
+    //         .transform = chara_transform,
+    //         .physics = .{ .Character = .{
+    //             .settings = character_settings,
+    //         } },
+    //         .app = .{
+    //             .health_points = 100,
+    //             .anim_controller_desc = anim_desc,
+    //         },
+    //         });
+    // }
+    
+    // if (engine().entities.get(opponent_idx)) |op| {
+    //     var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+    //     op.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
+    // }
 
     _ = try engine().entities.new_entity(Engine.EntityDescriptor {
         .name = "cone entity",
@@ -457,12 +500,27 @@ pub fn init(self: *Self) !void {
     });
 
     const model_buffer = try gfx.Buffer.init(
-        @sizeOf(InstanceStruct),
+        @sizeOf(InstanceStruct) * Self.model_buffer_size,
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
         &engine().gfx
     );
     errdefer model_buffer.deinit();
+
+    var instance_index_buffers: [3]gfx.Buffer = undefined;
+    for (0..3) |i| {
+        instance_index_buffers[i] = try gfx.Buffer.init(
+            @sizeOf(InstanceIdx),
+            .{ .ConstantBuffer = true, },
+            .{ .CpuWrite = true, },
+            &engine().gfx
+        );
+    }
+    errdefer {
+        for (&instance_index_buffers) |*ib| {
+            ib.deinit();
+        }
+    }
 
     engine().physics.zphy.optimizeBroadPhase();
 
@@ -578,7 +636,10 @@ pub fn init(self: *Self) !void {
 
         .character_idx = chara_root_idx,
         .opponent_idx = opponent_idx,
+
         .model_buffer = model_buffer,
+
+        .instance_index_buffers = instance_index_buffers,
 
         //.character_ignore_self_filter = character_ignore_self_filter,
 
@@ -595,6 +656,10 @@ pub fn init(self: *Self) !void {
 
         .terrain = terrain,
         .gizmo = gizmo,
+
+        .render_objects = try std.ArrayList(StandardRenderObject).initCapacity(engine().general_allocator.allocator(), 128),
+        .skeletal_render_objects = try std.ArrayList(SkeletalRenderObject).initCapacity(engine().general_allocator.allocator(), 32),
+        .render_bones = try std.ArrayList(zm.Mat).initCapacity(engine().general_allocator.allocator(), bone_matrix_buffer_size),
     };
 }
 
@@ -617,6 +682,12 @@ fn forward_vector_2d(transform: *const Transform) zm.F32x4 {
 }
 
 fn update(self: *Self) void {
+    // It's pretty important we clear these so we will defer that here
+    defer self.render_objects.clearRetainingCapacity();
+    defer self.skeletal_render_objects.clearRetainingCapacity();
+    defer self.render_bones.clearRetainingCapacity();
+
+
     const top_layout = self.imui.push_floating_layout(.Y, 500, 100, .{@src()});
     if (self.imui.get_widget(top_layout)) |top_widget| {
         top_widget.flags.render = true;
@@ -812,8 +883,10 @@ fn update(self: *Self) void {
         }
 
         // disable movement when attacking
-        if (character_entity.app.anim_controller.?.active_node == 2) {
-            movement_direction *= zm.f32x4s(0.0);
+        if (character_entity.app.anim_controller) |*ac| {
+            if (ac.active_node == 2) {
+                movement_direction *= zm.f32x4s(0.0);
+            }
         }
 
         const character = character_entity.physics.?.CharacterVirtual.virtual;
@@ -850,7 +923,7 @@ fn update(self: *Self) void {
         }
 
         if (engine().input.get_key_down(KeyCode.MouseLeft)) {
-            var collector = CollideShapeCollector.init(engine().general_allocator.allocator());
+            var collector = CollideShapeCollector.init(engine().frame_allocator);
             defer collector.deinit();
 
             const box_shape_settings = zphy.BoxShapeSettings.create([3]f32{0.5, 0.5, 0.5}) catch unreachable;
@@ -871,10 +944,14 @@ fn update(self: *Self) void {
 
             if (engine().input.get_key(KeyCode.Control)) {
                 if (engine().entities.get(self.opponent_idx)) |opponent_entity| {
-                    opponent_entity.app.anim_controller.?.trigger_event("character attack");
+                    if (opponent_entity.app.anim_controller) |*ac| {
+                        ac.trigger_event("character attack");
+                    }
                 }
             } else {
-                character_entity.app.anim_controller.?.trigger_event("character attack");
+                if (character_entity.app.anim_controller) |*ac| {
+                    ac.trigger_event("character attack");
+                }
             }
 
             // particles!
@@ -969,8 +1046,10 @@ fn update(self: *Self) void {
         // }
         
         const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
-        character_entity.app.anim_controller.?.set_variable("character speed", zm.length3(character_velocity)[0]);
-        character_entity.app.anim_controller.?.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
+        if (character_entity.app.anim_controller) |*ac| {
+            ac.set_variable("character speed", zm.length3(character_velocity)[0]);
+            ac.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
+        }
     }
 
     // Generate camera view matrix
@@ -1003,36 +1082,9 @@ fn update(self: *Self) void {
     engine().gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
     engine().gfx.cmd_clear_depth_stencil_view(&self.depth_textures.dsv, 0.0, null);
 
-    const viewport = gfx.Viewport {
-        .width = @floatFromInt(engine().gfx.swapchain_size.width),
-        .height = @floatFromInt(engine().gfx.swapchain_size.height),
-        .min_depth = 0.0,
-        .max_depth = 1.0,
-        .top_left_x = 0.0,
-        .top_left_y = 0.0,
-    };
-    engine().gfx.cmd_set_viewport(viewport);
-
-    engine().gfx.cmd_set_render_target(&.{&rtv, &self.selection_textures.rtv}, &self.depth_textures.dsv);
-
-    engine().gfx.cmd_set_pixel_shader(&self.pixel_shader);
-    engine().gfx.cmd_set_blend_state(null);
-
-    engine().gfx.cmd_set_vertex_shader(&self.vertex_shader);
-    engine().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
-        &self.camera_data_buffer,
-        &self.camera_data_buffer, // slot 1 will be overwritten by later
-        &self.bone_matrix_buffer,
-    });
-    engine().gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
-        &self.camera_data_buffer,
-        &self.model_buffer, // slot 1 will be overwritten by later
-    });
-
-    engine().gfx.cmd_set_topology(.TriangleList);
-
-    var bone_transforms: [ms.MAX_BONES]zm.Mat = undefined;
-    var null_bone_transforms: [ms.MAX_BONES]zm.Mat = [_]zm.Mat{zm.identity()} ** ms.MAX_BONES;
+    var bone_transforms: []zm.Mat = engine().frame_allocator.alloc(zm.Mat, ms.MAX_BONES) catch unreachable;
+    var null_bone_transforms: []zm.Mat = engine().frame_allocator.alloc(zm.Mat, ms.MAX_BONES) catch unreachable;
+    @memset(null_bone_transforms[0..], zm.identity());
     // Iterate through all entities finding those which contain a mesh to be rendered
     for (engine().entities.list.data.items, 0..) |*it, entity_id| {
         if (it.item_data) |*entity| {
@@ -1040,50 +1092,35 @@ fn update(self: *Self) void {
             if (entity.model) |mid| {
                 const m = engine().asset_manager.get_model(mid) catch unreachable;
 
-                var pose: []zm.Mat = &null_bone_transforms;
-                if (entity.app.anim_controller) |*anim_controller| {
+                var pose: []zm.Mat = null_bone_transforms;
+                const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
                     anim_controller.update(&engine().asset_manager, &engine().time);
                     anim_controller.calculate_bone_transforms(
                         &engine().asset_manager,
                         m,
-                        &bone_transforms
+                        bone_transforms
                     );
 
-                    { // Update bone matrix buffer
-                        const mapped_buffer = self.bone_matrix_buffer.map([ms.MAX_BONES]zm.Mat, &engine().gfx) catch unreachable;
-                        defer mapped_buffer.unmap();
+                    pose = bone_transforms;
 
-                        @memcpy(mapped_buffer.data().*[0..], bone_transforms[0..]);
-                    }
+                    const bones_offset = self.render_bones.items.len;
+                    const bone_count = bone_transforms.len;
+                    self.render_bones.appendSlice(bone_transforms[0..]) catch unreachable;
 
-                    pose = &bone_transforms;
+                    break :blk SkeletalRenderObject.BoneInfo {
+                        .bone_count = bone_count,
+                        .bone_offset = bones_offset,
+                    };
                 } else {
-                    { // Update bone matrix buffer
-                        const mapped_buffer = self.bone_matrix_buffer.map([ms.MAX_BONES]zm.Mat, &engine().gfx) catch unreachable;
-                        defer mapped_buffer.unmap();
-
-                        @memset(mapped_buffer.data().*[0..], zm.identity());
-                    }
-                }
-
-                engine().gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
-                    .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-                    .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
-                    .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-                    .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
-                    .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
-                });
-
-                engine().gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-
-                // Set model constant buffer
-                engine().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
+                    break :blk null;
+                }};
 
                 // Finally, render the model
                 self.recursive_render_model(
                     @truncate(entity_id),
                     m, 
                     pose,
+                    bone_info,
                     &entity.transform.generate_model_matrix(), 
                     &m.nodes_list[m.root_nodes[0]],
                     entity.transform.generate_model_matrix()
@@ -1096,24 +1133,12 @@ fn update(self: *Self) void {
     {
         const m = engine().asset_manager.get_model(self.turntable_model_id) catch unreachable;
 
-        engine().gfx.cmd_set_vertex_buffers(0, &[_]gfx.VertexBufferInput{
-            .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-            .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
-            .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-            .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_ids), .offset = @truncate(m.buffers.offsets.bone_ids), },
-            .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.bone_weights), .offset = @truncate(m.buffers.offsets.bone_weights), },
-        });
-
-        engine().gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-
-        // Set model constant buffer
-        engine().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{&self.model_buffer});
-
         // Finally, render the model
         const tt = Transform{ .scale = zm.f32x4s(0.05) };
         self.recursive_render_model(
             0,
             m, 
+            null,
             null,
             &tt.generate_model_matrix(), 
             &m.nodes_list[m.root_nodes[0]],
@@ -1121,6 +1146,9 @@ fn update(self: *Self) void {
         );
     }
 
+    self.render_render_objects(&rtv);
+
+    // render terrain
     self.terrain.render(&self.camera_data_buffer, &engine().gfx);
 
     self.zero_particle_system.update(&engine().time);
@@ -1248,6 +1276,14 @@ fn update(self: *Self) void {
 
     if (self.selected_entity) |s| {
         if (engine().entities.get(s)) |entity| {
+            const viewport = gfx.Viewport {
+                .width = @floatFromInt(engine().gfx.swapchain_size.width),
+                .height = @floatFromInt(engine().gfx.swapchain_size.height),
+                .min_depth = 0.0,
+                .max_depth = 1.0,
+                .top_left_x = 0.0,
+                .top_left_y = 0.0,
+            };
             engine().gfx.cmd_set_viewport(viewport);
             self.gizmo.update(&entity.transform, zm.inverse(self.camera.generate_perspective_matrix(engine().gfx.swapchain_aspect())), zm.inverse(camera_view_matrix));
             self.gizmo.render(&entity.transform, &self.camera_data_buffer, engine().gfx.get_framebuffer(), &self.depth_textures.dsv, self.camera_transform.rotation);
@@ -1293,6 +1329,7 @@ pub fn recursive_render_model(
     entity_id: u32,
     model: *const ms.Model, 
     pose: ?[]const zm.Mat, 
+    bone_info: ?SkeletalRenderObject.BoneInfo,
     root_mat: *const zm.Mat,
     model_node: *const ms.ModelNode, 
     mat: zm.Mat
@@ -1311,20 +1348,6 @@ pub fn recursive_render_model(
     }
 
     if (model_node.mesh) |*mesh_set| {
-        { // Setup model buffer from transform
-            const mapped_buffer = self.model_buffer.map(InstanceStruct, &engine().gfx) catch unreachable;
-            defer mapped_buffer.unmap();
-
-            mapped_buffer.data().* = .{
-                .model_matrix = node_model_matrix,
-                .time = @floatCast(engine().time.time_since_start_of_app()),
-                .entity_id = entity_id,
-                .flags = .{
-                    .is_selected = if (self.selected_entity) |s| (entity_id == s.index) else false,
-                },
-            };
-        }
-
         for (mesh_set.primitives) |maybe_prim| {
             if (maybe_prim) |prim_idx| {
                 const p = &model.mesh_list[prim_idx];
@@ -1334,32 +1357,46 @@ pub fn recursive_render_model(
                     material = model.materials[m_idx];
                 }
 
-                if (material.double_sided) {
-                    engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
+                const indices_info = blk: { if (p.has_indices()) {
+                    break :blk StandardRenderObject.IndexInfo {
+                        .buffer_info = .{ .buffer = &model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
+                        .index_count = p.num_indices,
+                    };
                 } else {
-                    engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
-                }
+                    break :blk null;
+                } };
 
-                var diffuse = &engine().gfx.default.diffuse;
-                var diffuse_sampler = &engine().gfx.default.sampler;
-                if (material.diffuse_map) |*d| {
-                    diffuse = &d.map;
-                    if (d.sampler) |*s| { diffuse_sampler = s; }
-                }
-                engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
-                engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
+                const render_object = StandardRenderObject {
+                    .entity_id = entity_id,
+                    .transform = node_model_matrix,
+                    .vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 6).fromSlice(&[_]gfx.VertexBufferInput{
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
+                    }) catch unreachable,
+                    .vertex_count = p.num_vertices,
+                    .pos_offset = p.pos_offset,
+                    .index_buffer = indices_info,
+                    .material = material,
+                };
 
-                if (p.has_indices()) {
-                    engine().gfx.cmd_draw_indexed(@intCast(p.num_indices), @intCast(p.indices_offset), @intCast(p.pos_offset));
+                if (bone_info) |bi| {
+                    self.skeletal_render_objects.append(.{
+                        .standard = render_object,
+                        .bone_info = bi,
+                    }) catch unreachable;
                 } else {
-                    engine().gfx.cmd_draw(@intCast(p.num_vertices), @intCast(p.pos_offset));
+                    self.render_objects.append(render_object) 
+                        catch unreachable;
                 }
             }
         }
     }
 
     for (model_node.children) |c| {
-        self.recursive_render_model(entity_id, model, pose, root_mat, &model.nodes_list[c], node_model_matrix);
+        self.recursive_render_model(entity_id, model, pose, bone_info, root_mat, &model.nodes_list[c], node_model_matrix);
     }
 }
 
@@ -1392,6 +1429,203 @@ pub fn render_model_bones(
                     zm.mul(render_model_transform.*, node_model_matrix_transformed)
                 );
             }
+        }
+    }
+}
+
+pub fn render_render_objects(self: *Self, rtv: *const gfx.RenderTargetView) void {
+    // Render render objects
+    const viewport = gfx.Viewport {
+        .width = @floatFromInt(engine().gfx.swapchain_size.width),
+        .height = @floatFromInt(engine().gfx.swapchain_size.height),
+        .min_depth = 0.0,
+        .max_depth = 1.0,
+        .top_left_x = 0.0,
+        .top_left_y = 0.0,
+    };
+    engine().gfx.cmd_set_viewport(viewport);
+
+    engine().gfx.cmd_set_render_target(&.{rtv, &self.selection_textures.rtv}, &self.depth_textures.dsv);
+
+    engine().gfx.cmd_set_pixel_shader(&self.pixel_shader);
+    engine().gfx.cmd_set_blend_state(null);
+
+    engine().gfx.cmd_set_vertex_shader(&self.vertex_shader);
+    engine().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
+        &self.camera_data_buffer,
+        &self.model_buffer,
+        &self.bone_matrix_buffer, // TODO
+    });
+    engine().gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
+        &self.camera_data_buffer,
+        &self.model_buffer, // slot 1 will be overwritten by later
+    });
+
+    engine().gfx.cmd_set_topology(.TriangleList);
+
+    // render boneless objects
+    { // Update bone matrix buffer
+        const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &engine().gfx) catch unreachable;
+        defer mapped_buffer.unmap();
+
+        @memset(mapped_buffer.data().*[0..], zm.identity());
+    }
+
+    var top_bone_idx: usize = 0;
+    var start_bone_idx: usize = 0;
+    var top_model_idx: usize = 0;
+    for (self.render_objects.items, 0..) |*ro, obj_idx| {
+        if (obj_idx >= top_model_idx) {
+            @branchHint(.unlikely);
+
+            // Setup model buffer from transform
+            const time_since_start_of_app: f32 = @floatCast(engine().time.time_since_start_of_app());
+            {
+                const mapped_buffer = self.model_buffer.map(InstanceStruct, &engine().gfx) catch unreachable;
+                defer mapped_buffer.unmap();
+
+                for (0..Self.model_buffer_size) |i| {
+                    if (top_model_idx + i >= self.render_objects.items.len) break;
+                    const iro = &self.render_objects.items[top_model_idx + i];
+
+                    const entity_id = if (iro.entity_id) |e| e else 0;
+                    mapped_buffer.data_array(Self.model_buffer_size)[i] = InstanceStruct {
+                        .model_matrix = iro.transform,
+                        .time = time_since_start_of_app,
+                        .entity_id = entity_id,
+                        .flags = .{
+                            .is_selected = if (self.selected_entity) |s| (entity_id == s.index) else false,
+                        },
+                    };
+                }
+            }
+
+            top_model_idx += Self.model_buffer_size;
+        }
+
+        // Render the render object
+        const instance_idx_buffer = &self.instance_index_buffers[self.instance_index_active_buffer];
+        self.instance_index_active_buffer = (self.instance_index_active_buffer + 1) % 3;
+        {
+            const mapped_buffer = instance_idx_buffer.map(InstanceIdx, &engine().gfx) catch unreachable;
+            defer mapped_buffer.unmap();
+            mapped_buffer.data().instance_idx = @truncate(obj_idx + Self.model_buffer_size - top_model_idx);
+            mapped_buffer.data().bone_start_idx = 0;
+        }
+        engine().gfx.cmd_set_constant_buffers(.Vertex, 3, &.{instance_idx_buffer});
+        engine().gfx.cmd_set_constant_buffers(.Pixel, 3, &.{instance_idx_buffer});
+
+        engine().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+
+        if (ro.material.double_sided) {
+            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
+        } else {
+            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
+        }
+
+        var diffuse = &engine().gfx.default.diffuse;
+        var diffuse_sampler = &engine().gfx.default.sampler;
+        if (ro.material.diffuse_map) |*d| {
+            diffuse = &d.map;
+            if (d.sampler) |*s| { diffuse_sampler = s; }
+        }
+        engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
+        engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
+
+        if (ro.index_buffer) |ib| {
+            engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
+            engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
+        } else {
+            engine().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
+        }
+    }
+
+    // render skeletal objects
+    top_bone_idx = 0;
+    start_bone_idx = 0;
+    top_model_idx = 0;
+    for (self.skeletal_render_objects.items, 0..) |*sro, obj_idx| {
+        // if bones are not within the uploaded bone set, then move the window
+        if (sro.bone_info.bone_offset + sro.bone_info.bone_count > top_bone_idx) {
+            @branchHint(.unlikely);
+
+            top_bone_idx = sro.bone_info.bone_offset;
+            start_bone_idx = top_bone_idx;
+
+            // Update bone matrix buffer
+            const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &engine().gfx) catch unreachable;
+            defer mapped_buffer.unmap();
+
+            const copy_amount = @min(self.render_bones.items.len - start_bone_idx, Self.bone_matrix_buffer_size);
+            @memcpy(mapped_buffer.data().*[0..copy_amount], self.render_bones.items[start_bone_idx..][0..copy_amount]);
+
+            top_bone_idx += copy_amount;
+        }
+
+        var ro = &sro.standard;
+
+        if (obj_idx >= top_model_idx) {
+            @branchHint(.unlikely);
+
+            // Setup model buffer from transform
+            const time_since_start_of_app: f32 = @floatCast(engine().time.time_since_start_of_app());
+            {
+                const mapped_buffer = self.model_buffer.map(InstanceStruct, &engine().gfx) catch unreachable;
+                defer mapped_buffer.unmap();
+
+                for (0..Self.model_buffer_size) |i| {
+                    if (top_model_idx + i >= self.skeletal_render_objects.items.len) break;
+                    const iro = &self.skeletal_render_objects.items[top_model_idx + i].standard;
+
+                    const entity_id = if (iro.entity_id) |e| e else 0;
+                    mapped_buffer.data_array(Self.model_buffer_size)[i] = InstanceStruct {
+                        .model_matrix = iro.transform,
+                        .time = time_since_start_of_app,
+                        .entity_id = entity_id,
+                        .flags = .{
+                            .is_selected = if (self.selected_entity) |s| (entity_id == s.index) else false,
+                        },
+                    };
+                }
+            }
+
+            top_model_idx += Self.model_buffer_size;
+        }
+
+        // Render the render object
+        const instance_idx_buffer = &self.instance_index_buffers[self.instance_index_active_buffer];
+        self.instance_index_active_buffer = (self.instance_index_active_buffer + 1) % 3;
+        {
+            const mapped_buffer = instance_idx_buffer.map(InstanceIdx, &engine().gfx) catch unreachable;
+            defer mapped_buffer.unmap();
+            mapped_buffer.data().instance_idx = @truncate(obj_idx + Self.model_buffer_size - top_model_idx);
+            mapped_buffer.data().bone_start_idx = @truncate(sro.bone_info.bone_offset - start_bone_idx);
+        }
+        engine().gfx.cmd_set_constant_buffers(.Vertex, 3, &.{instance_idx_buffer});
+        engine().gfx.cmd_set_constant_buffers(.Pixel, 3, &.{instance_idx_buffer});
+
+        engine().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+
+        if (ro.material.double_sided) {
+            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
+        } else {
+            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
+        }
+
+        var diffuse = &engine().gfx.default.diffuse;
+        var diffuse_sampler = &engine().gfx.default.sampler;
+        if (ro.material.diffuse_map) |*d| {
+            diffuse = &d.map;
+            if (d.sampler) |*s| { diffuse_sampler = s; }
+        }
+        engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
+        engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
+
+        if (ro.index_buffer) |ib| {
+            engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
+            engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
+        } else {
+            engine().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
         }
     }
 }
@@ -1567,3 +1801,28 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
         };
     }
 }
+
+pub const StandardRenderObject = struct {
+    entity_id: ?u32,
+    transform: zm.Mat,
+    vertex_buffers: std.BoundedArray(gfx.VertexBufferInput, 6),
+    vertex_count: usize,
+    pos_offset: usize,
+    index_buffer: ?IndexInfo,
+    material: ms.MaterialTemplate,
+
+    pub const IndexInfo = struct {
+        buffer_info: gfx.VertexBufferInput,
+        index_count: usize,
+    };
+};
+
+pub const SkeletalRenderObject = struct {
+    standard: StandardRenderObject,
+    bone_info: BoneInfo,
+
+    pub const BoneInfo = struct {
+        bone_count: usize,
+        bone_offset: usize,
+    };
+};
