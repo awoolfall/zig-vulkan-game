@@ -99,6 +99,8 @@ terrain: Terrain,
 gizmo: Gizmo,
 standard_renderer: StandardRenderer,
 
+entity_editor_ui_data: EntityEditorUiData,
+
 pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
@@ -118,6 +120,8 @@ pub fn deinit(self: *Self) void {
     self.terrain.deinit();
     self.gizmo.deinit();
     self.standard_renderer.deinit();
+
+    self.entity_editor_ui_data.deinit();
 }
 
 pub fn init(self: *Self) !void {
@@ -136,7 +140,7 @@ pub fn init(self: *Self) !void {
     try asset_pack.add_model("model", assets.AssetPack.ModelAsset{ .Path = "sea_house.glb" });
     try asset_pack.add_model("terrain", assets.AssetPack.ModelAsset{ .Plane = .{ .slices = 1, .stacks = 1, } });
     try asset_pack.add_model("cone", assets.AssetPack.ModelAsset{ .Cone = .{ .slices = 8, } });
-    try asset_pack.add_model("sphere", assets.AssetPack.ModelAsset{ .Sphere = .{ .subdivisions = 2, } });
+    try asset_pack.add_model("sphere", assets.AssetPack.ModelAsset{ .Sphere = .{  } });
 
     try asset_pack.define_animation("character idle", "character", 36);
     try asset_pack.define_animation("character run", "character", 48);
@@ -530,6 +534,8 @@ pub fn init(self: *Self) !void {
         .terrain = terrain,
         .gizmo = gizmo,
         .standard_renderer = try StandardRenderer.init(),
+
+        .entity_editor_ui_data = try EntityEditorUiData.init(),
     };
 }
 
@@ -1175,6 +1181,8 @@ fn update(self: *Self) void {
 
     engine().debug.render(&self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer());
 
+    self.entity_editor_ui(&self.entity_editor_ui_data, .{@src()});
+
     self.imui.compute_widget_rects();
     self.imui.render_imui(engine().gfx.get_framebuffer(), &engine().gfx);
     self.imui.end_frame(&engine().gfx);
@@ -1200,6 +1208,7 @@ fn update(self: *Self) void {
                     .index = selection_entity_id,
                     .generation = engine().entities.list.data.items[selection_entity_id].generation,
                 };
+                self.entity_editor_ui_data.inited = false;
             } else {
                 std.log.info("entity not found!", .{});
             }
@@ -1252,9 +1261,11 @@ pub fn recursive_render_model(
                 const render_object = StandardRenderer.RenderObject {
                     .entity_id = entity_id,
                     .transform = node_model_matrix,
-                    .vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 6).fromSlice(&[_]gfx.VertexBufferInput{
+                    .vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.tangents), .offset = @truncate(model.buffers.offsets.tangents), },
+                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bitangents), .offset = @truncate(model.buffers.offsets.bitangents), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
@@ -1486,4 +1497,77 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             continue;
         };
     }
+}
+
+const EntityEditorUiData = struct {
+    inited: bool = false,
+    position: [2]f32 = .{ 400.0, 100.0 },
+    model_input_state: ui.Imui.TextInputState,
+
+    pub fn deinit(self: *EntityEditorUiData) void {
+        self.model_input_state.deinit();
+    }
+
+    pub fn init() !EntityEditorUiData {
+        return EntityEditorUiData {
+            .model_input_state = ui.Imui.TextInputState.init(engine().general_allocator.allocator()),
+        };
+    }
+};
+
+fn entity_editor_ui(
+    self: *Self, 
+    data: *EntityEditorUiData,
+    key: anytype,
+) void {
+    if (self.selected_entity == null) return;
+    const entity = engine().entities.get(self.selected_entity.?) orelse return;
+    
+    var arena = std.heap.ArenaAllocator.init(engine().frame_allocator);
+    defer arena.deinit();
+
+    const imui = &self.imui;
+
+    const background_box = imui.push_floating_layout(.Y, data.position[0], data.position[1], key ++ .{@src()});
+    defer imui.pop_layout();
+    if (imui.get_widget(background_box)) |background_widget| {
+        background_widget.flags.render = true;
+        background_widget.background_colour = imui.palette().background;
+        background_widget.border_colour = imui.palette().border;
+        background_widget.border_width_px = 2;
+        background_widget.padding_px = .{
+            .left = 4,
+            .right = 4,
+            .top = 4,
+            .bottom = 4,
+        };
+        background_widget.children_gap = 2;
+    }
+
+    _ = imui.label("Entity Editor");
+    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "name: \"{s}\"", .{ entity.name orelse "unnamed" }) catch return);
+    _ = arena.reset(.retain_capacity);
+    _ = imui.label("Transform");
+    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "position: {d:.2}", .{ entity.transform.position }) catch return);
+    _ = arena.reset(.retain_capacity);
+    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "rotation: {d:.2}", .{ entity.transform.rotation }) catch return);
+    _ = arena.reset(.retain_capacity);
+
+    _ = imui.push_layout(.X, .{@src()});
+    _ = imui.label("model: ");
+    const set_model_button = imui.button("set", .{@src()});
+    set_model: { if (set_model_button.clicked) {
+        const model_id = sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_input_state.text.items) catch { std.log.err("Failed to deserialize model id!", .{}); break :set_model; };
+        _ = arena.reset(.retain_capacity);
+        entity.model = model_id;
+    } }
+    _ = imui.pop_layout();
+    if (!data.inited) {
+        data.model_input_state.text.clearRetainingCapacity();
+        data.model_input_state.text.appendSlice((sr.serialize(assets.ModelAssetId, arena.allocator(), entity.model.?) catch unreachable)) catch unreachable;
+    }
+    _ = imui.line_edit(&data.model_input_state, .{@src()});
+    _ = arena.reset(.retain_capacity);
+
+    data.inited = true;
 }

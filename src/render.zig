@@ -19,7 +19,7 @@ const CameraStruct = extern struct {
 pub const RenderObject = struct {
     entity_id: ?u32,
     transform: zm.Mat,
-    vertex_buffers: std.BoundedArray(gfx.VertexBufferInput, 6),
+    vertex_buffers: std.BoundedArray(gfx.VertexBufferInput, 8),
     vertex_count: usize,
     pos_offset: usize,
     index_buffer: ?IndexInfo,
@@ -99,9 +99,11 @@ pub fn init() !Self {
         ([_]gfx.VertexInputLayoutEntry {
             .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
             .{ .name = "NORMAL",                .format = .F32x3,   .per = .Vertex, .slot = 1, },
-            .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 2, },
-            .{ .name = "TEXCOORD",  .index = 1, .format = .I32x4,   .per = .Vertex, .slot = 3, },
-            .{ .name = "TEXCOORD",  .index = 2, .format = .F32x4,   .per = .Vertex, .slot = 4, },
+            .{ .name = "TANGENT",               .format = .F32x3,   .per = .Vertex, .slot = 2, },
+            .{ .name = "BITANGENT",             .format = .F32x3,   .per = .Vertex, .slot = 3, },
+            .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
+            .{ .name = "TEXCOORD",  .index = 1, .format = .I32x4,   .per = .Vertex, .slot = 5, },
+            .{ .name = "TEXCOORD",  .index = 2, .format = .F32x4,   .per = .Vertex, .slot = 6, },
         })[0..],
         .{},
         &engine().gfx
