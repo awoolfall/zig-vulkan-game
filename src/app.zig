@@ -94,6 +94,7 @@ exposure: f32 = 2.0,
 checkbox_bool: bool = false,
 slider_float: f32 = 0.0,
 text_input_state: ui.Imui.TextInputState,
+combo_data: ui.Imui.ComboBoxData,
 
 terrain: Terrain,
 gizmo: Gizmo,
@@ -530,12 +531,16 @@ pub fn init(self: *Self) !void {
         .player_attack_particle_system = player_attack_particle_system,
 
         .text_input_state = ui.Imui.TextInputState.init(engine().general_allocator.allocator()),
+        .combo_data = ui.Imui.ComboBoxData {
+            .default_text = "default",
+            .options = &[_][]const u8{"option 1", "option 2", "option 3"},
+        },
 
         .terrain = terrain,
         .gizmo = gizmo,
         .standard_renderer = try StandardRenderer.init(),
 
-        .entity_editor_ui_data = try EntityEditorUiData.init(),
+        .entity_editor_ui_data = try EntityEditorUiData.init(engine().general_allocator.allocator()),
     };
 }
 
@@ -644,6 +649,7 @@ fn update(self: *Self) void {
     self.imui.pop_layout();
     self.imui.pop_layout();
     _ = self.imui.line_edit(&self.text_input_state, .{@src()});
+    _ = self.imui.combobox(&self.combo_data, .{@src()});
     self.imui.pop_layout();
 
     const anim_debug_layout = self.imui.push_floating_layout(.Y, 10.0, 100.0, .{@src()});
@@ -1500,17 +1506,41 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
 }
 
 const EntityEditorUiData = struct {
+    arena: std.heap.ArenaAllocator,
     inited: bool = false,
     position: [2]f32 = .{ 400.0, 100.0 },
-    model_input_state: ui.Imui.TextInputState,
+    model_combobox_data: ui.Imui.ComboBoxData,
 
     pub fn deinit(self: *EntityEditorUiData) void {
-        self.model_input_state.deinit();
+        self.arena.deinit();
     }
 
-    pub fn init() !EntityEditorUiData {
+    pub fn init(alloc: std.mem.Allocator) !EntityEditorUiData {
+        var arena = std.heap.ArenaAllocator.init(alloc);
+        errdefer arena.deinit();
+
+        var model_names = std.ArrayList([]u8).init(alloc);
+        defer model_names.deinit();
+
+        var asset_packs_iter = engine().asset_manager.loaded_asset_packs.iterator();
+        while (asset_packs_iter.next()) |pack| {
+            var models_iter = pack.models.keyIterator();
+            while (models_iter.next()) |k| {
+                try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}|{s}", .{pack.unique_name, pack.get_asset_name(k.*).?}));
+            }
+        }
+
+        const options = arena.allocator().alloc([]u8, model_names.items.len) catch unreachable;
+        for (model_names.items, 0..) |name, i| {
+            options[i] = name;
+        }
+
         return EntityEditorUiData {
-            .model_input_state = ui.Imui.TextInputState.init(engine().general_allocator.allocator()),
+            .arena = arena,
+            .model_combobox_data = ui.Imui.ComboBoxData {
+                .default_text = "select a model...",
+                .options = options,
+            },
         };
     }
 };
@@ -1557,16 +1587,14 @@ fn entity_editor_ui(
     _ = imui.label("model: ");
     const set_model_button = imui.button("set", .{@src()});
     set_model: { if (set_model_button.clicked) {
-        const model_id = sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_input_state.text.items) catch { std.log.err("Failed to deserialize model id!", .{}); break :set_model; };
-        _ = arena.reset(.retain_capacity);
-        entity.model = model_id;
+        if (data.model_combobox_data.selected_index) |si| {
+            const model_id = sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_combobox_data.options[si]) catch { std.log.err("Failed to deserialize model id!", .{}); break :set_model; };
+            _ = arena.reset(.retain_capacity);
+            entity.model = model_id;
+        }
     } }
     _ = imui.pop_layout();
-    if (!data.inited) {
-        data.model_input_state.text.clearRetainingCapacity();
-        data.model_input_state.text.appendSlice((sr.serialize(assets.ModelAssetId, arena.allocator(), entity.model.?) catch unreachable)) catch unreachable;
-    }
-    _ = imui.line_edit(&data.model_input_state, .{@src()});
+    _ = imui.combobox(&data.model_combobox_data, .{@src()});
     _ = arena.reset(.retain_capacity);
 
     data.inited = true;
