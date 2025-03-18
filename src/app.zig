@@ -1509,10 +1509,12 @@ const EntityEditorUiData = struct {
     arena: std.heap.ArenaAllocator,
     inited: bool = false,
     position: [2]f32 = .{ 400.0, 100.0 },
+    name_edit_data: ui.Imui.TextInputState,
     model_combobox_data: ui.Imui.ComboBoxData,
 
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
+        self.name_edit_data.deinit();
     }
 
     pub fn init(alloc: std.mem.Allocator) !EntityEditorUiData {
@@ -1541,6 +1543,7 @@ const EntityEditorUiData = struct {
                 .default_text = "select a model...",
                 .options = options,
             },
+            .name_edit_data = ui.Imui.TextInputState.init(engine().general_allocator.allocator()),
         };
     }
 };
@@ -1550,17 +1553,37 @@ fn entity_editor_ui(
     data: *EntityEditorUiData,
     key: anytype,
 ) void {
+    const imui = &self.imui;
     if (self.selected_entity == null) return;
     const entity = engine().entities.get(self.selected_entity.?) orelse return;
     
     var arena = std.heap.ArenaAllocator.init(engine().frame_allocator);
     defer arena.deinit();
 
-    const imui = &self.imui;
+    if (!data.inited) {
+        defer data.inited = true;
+
+        // set name text
+        data.name_edit_data.text.clearRetainingCapacity();
+        data.name_edit_data.text.appendSlice(entity.name orelse "unnamed") catch unreachable;
+        data.name_edit_data.cursor = data.name_edit_data.text.items.len;
+        data.name_edit_data.mark = data.name_edit_data.text.items.len;
+
+        // set model text
+        const model_text = sr.serialize(assets.ModelAssetId, arena.allocator(), entity.model.?) catch unreachable;
+        for (data.model_combobox_data.options, 0..) |option, i| {
+            if (std.mem.eql(u8, option, model_text)) {
+                data.model_combobox_data.selected_index = i;
+                break;
+            }
+        }
+        _ = arena.reset(.retain_capacity);
+    }
 
     const background_box = imui.push_floating_layout(.Y, data.position[0], data.position[1], key ++ .{@src()});
     defer imui.pop_layout();
     if (imui.get_widget(background_box)) |background_widget| {
+        background_widget.flags.clickable = true;
         background_widget.flags.render = true;
         background_widget.background_colour = imui.palette().background;
         background_widget.border_colour = imui.palette().border;
@@ -1573,9 +1596,23 @@ fn entity_editor_ui(
         };
         background_widget.children_gap = 2;
     }
+    if (imui.generate_widget_signals(background_box).dragged) {
+        data.position[0] += engine().input.mouse_delta[0];
+        data.position[1] += engine().input.mouse_delta[1];
+    }
 
     _ = imui.label("Entity Editor");
-    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "name: \"{s}\"", .{ entity.name orelse "unnamed" }) catch return);
+    _ = imui.label("name:");
+    _ = imui.line_edit(&data.name_edit_data, .{@src()});
+
+    // if name line edit has changed then update the entity's name
+    if (!std.mem.eql(u8, data.name_edit_data.text.items, entity.name orelse "unnamed")) {
+        if (entity.name) |_| {
+            engine().general_allocator.allocator().free(entity.name.?);
+            entity.name = std.fmt.allocPrint(engine().general_allocator.allocator(), "{s}", .{data.name_edit_data.text.items}) catch unreachable;
+        }
+    }
+
     _ = arena.reset(.retain_capacity);
     _ = imui.label("Transform");
     _ = imui.label(std.fmt.allocPrint(arena.allocator(), "position: {d:.2}", .{ entity.transform.position }) catch return);
