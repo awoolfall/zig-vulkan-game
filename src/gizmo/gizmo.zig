@@ -8,6 +8,7 @@ const zm = en.zmath;
 const zmesh = en.zmesh;
 const gf = en.gfx;
 const input = en.input;
+const cm = en.camera;
 const Transform = en.Transform;
 const SelectionTextures = @import("../selection_textures.zig");
 
@@ -504,7 +505,7 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
     }
 }
 
-pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffer, rtv: *gf.RenderTargetView, dsv: *gf.DepthStencilView, camera_rot: zm.Quat) void {
+pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffer, rtv: *gf.RenderTargetView, dsv: *gf.DepthStencilView, camera: *const cm.Camera) void {
     const gfx = &engine().gfx;
 
     // recreate selection textures if size has changed
@@ -551,7 +552,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffe
 
         mapped_buffer.data().* = .{
             .model_matrix = zm.mul(
-                zm.matFromQuat(camera_rot), 
+                zm.matFromQuat(camera.transform.rotation), 
                 base_tra
             ),
             .colour = WHITE,

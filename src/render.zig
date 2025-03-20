@@ -47,7 +47,8 @@ const InstanceStruct = extern struct {
     entity_id: u32,
     flags: packed struct(u32) {
         is_selected: bool,
-        pad: u31 = 0,
+        unlit: bool,
+        pad: u30 = 0,
     },
 };
 
@@ -276,6 +277,7 @@ pub fn render(
                         .entity_id = entity_id,
                         .flags = .{
                             .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
+                            .unlit = iro.material.unlit,
                         },
                     };
                 }
@@ -365,6 +367,7 @@ pub fn render(
                         .entity_id = entity_id,
                         .flags = .{
                             .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
+                            .unlit = iro.material.unlit,
                         },
                     };
                 }

@@ -12,6 +12,7 @@ struct instance_data
     unsigned int flags;
 };
 #define IS_SELECTED_BIT 0x1
+#define IS_UNLIT_BIT 0x2
 
 cbuffer instance_data_array : register(b1)
 {
@@ -47,7 +48,7 @@ struct vs_out
 {
     float4 position : SV_POSITION;
     float3 normal : NORMAL;
-    float4 colour : POS;
+    float4 world_pos : POS;
     float2 tex_coord : TEXCOORD0;
     float3 sun_dir : SUN_DIR;
 };
@@ -67,8 +68,6 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
 
     vs_out output = (vs_out) 0;
 
-    float4x4 vp = mul(view, projection);
-    float4x4 mvp = mul(id.model_matrix, vp);
     
     float4x4 bone_mat = bone_matricies[input.bone_ids[0] + start_bone_idx] * input.bone_weights[0];
     bone_mat         += bone_matricies[input.bone_ids[1] + start_bone_idx] * input.bone_weights[1];
@@ -76,7 +75,12 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     bone_mat         += bone_matricies[input.bone_ids[3] + start_bone_idx] * input.bone_weights[3];
 
     output.position = mul(float4(input.pos, 1.0), bone_mat);
-    output.position = mul(output.position, mvp);
+    output.position = mul(output.position, id.model_matrix);
+
+    output.world_pos = float4(output.position.xyz, 0.0);
+
+    float4x4 vp = mul(view, projection);
+    output.position = mul(output.position, vp);
 
     float4 colour = float4(vertId == 0, vertId == 1, vertId == 2, 1.0);
 
@@ -89,8 +93,6 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     float3x3 tbn = float3x3(tangents, bitangents, normals);
     float3 sun_direction = normalize(float3(0.0, 1.0, 0.0));
     output.sun_dir = normalize(mul(tbn, sun_direction));
-
-    output.colour = float4(input.normals, 0.0);
 
     output.tex_coord = input.tex_coord;
     output.tex_coord.y = 1.0 - output.tex_coord.y;
@@ -109,8 +111,11 @@ ps_out ps_main(vs_out input)
     const instance_data id = instance_data_array[instance_idx];
 
     ps_out output = (ps_out) 0;
-
-    float diffuse = max(dot(float3(0.0, 0.0, 1.0), input.sun_dir.xyz), 0.1);
+    
+    float diffuse = 1.0;
+    if (~id.flags & IS_UNLIT_BIT) {
+        diffuse = max(dot(float3(0.0, 0.0, 1.0), input.sun_dir.xyz), 0.1);
+    }
     float4 diffuse_colour = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
 
     output.colour = float4(diffuse_colour.rgb * diffuse, 1.0);
@@ -118,7 +123,7 @@ ps_out ps_main(vs_out input)
     output.entity_id = id.entity_id;
 
     if (id.flags & IS_SELECTED_BIT) {
-        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), step(0.5, sin(id.time * 10.0 + (input.position.x + input.position.y) * 0.05)));
+        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(id.time * 5.0 + (-input.world_pos.y) * 2.0)));
     }
 
     return output;

@@ -626,9 +626,7 @@ fn update(self: *Self) void {
     self.imui.pop_layout();
     self.imui.push_layout_id(labels_layout);
     _ = self.imui.label("Option 3:");
-    if (self.imui.checkbox(self.checkbox_bool, "this is a checkbox", .{@src()}).clicked) {
-        self.checkbox_bool = !self.checkbox_bool;
-    }
+    _ = self.imui.checkbox(&self.checkbox_bool, "this is a checkbox", .{@src()});
     const slider = self.imui.slider(self.slider_float, 0.0, 1.0, .{@src()});
     if (slider.dragged) {
         if (self.imui.get_widget_from_last_frame(slider.id.background_bar)) |b| {
@@ -733,7 +731,7 @@ fn update(self: *Self) void {
     self.imui.pop_layout();
 
     // new entity button
-    if (engine().input.get_key_down(KeyCode.E)) {
+    if (!self.imui.has_focus() and engine().input.get_key_down(KeyCode.E)) {
         _ = engine().entities.new_entity(Engine.EntityDescriptor {
             .name = "new entity",
             .should_serialize = true,
@@ -749,16 +747,16 @@ fn update(self: *Self) void {
     // Input to move the model around
     if (engine().entities.get(self.character_idx)) |character_entity| {
         var movement_direction = zm.f32x4s(0.0);
-        if (engine().input.get_key(KeyCode.W)) {
+        if (!self.imui.has_focus() and engine().input.get_key(KeyCode.W)) {
             movement_direction[2] += 1.0;
         }
-        if (engine().input.get_key(KeyCode.S)) {
+        if (!self.imui.has_focus() and engine().input.get_key(KeyCode.S)) {
             movement_direction[2] -= 1.0;
         }
-        if (engine().input.get_key(KeyCode.D)) {
+        if (!self.imui.has_focus() and engine().input.get_key(KeyCode.D)) {
             movement_direction[0] += 1.0;
         }
-        if (engine().input.get_key(KeyCode.A)) {
+        if (!self.imui.has_focus() and engine().input.get_key(KeyCode.A)) {
             movement_direction[0] -= 1.0;
         }
 
@@ -772,7 +770,7 @@ fn update(self: *Self) void {
         if (@reduce(.Add, @abs(movement_direction)) != 0.0) {
             movement_direction = zm.normalize3(movement_direction);
         }
-        if (engine().input.get_key(KeyCode.Shift)) {
+        if (!self.imui.has_focus() and engine().input.get_key(KeyCode.Shift)) {
             movement_direction *= zm.f32x4s(2.0);
         }
 
@@ -816,7 +814,7 @@ fn update(self: *Self) void {
             );
         }
 
-        if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+        if (!self.imui.has_focus() and engine().input.get_key_down(KeyCode.MouseLeft)) {
             var collector = CollideShapeCollector.init(engine().frame_allocator);
             defer collector.deinit();
 
@@ -1009,7 +1007,7 @@ fn update(self: *Self) void {
     }
 
     // update camera
-    if (engine().input.get_key_down(KeyCode.P)) {
+    if (!self.imui.has_focus() and engine().input.get_key_down(KeyCode.P)) {
         if (self.camera_type == .ORBIT) {
             self.camera_type = .FLY;
         } else {
@@ -1096,7 +1094,7 @@ fn update(self: *Self) void {
     // }
 
     // Draw Physics Debug Wireframes
-    if (engine().input.get_key(KeyCode.C)) {
+    if (!self.imui.has_focus() and engine().input.get_key(KeyCode.C)) {
         engine().physics.debug_draw_bodies(
             &rtv, 
             engine().gfx.swapchain_size.width,
@@ -1181,7 +1179,7 @@ fn update(self: *Self) void {
             };
             engine().gfx.cmd_set_viewport(viewport);
             self.gizmo.update(&entity.transform, zm.inverse(self.camera.generate_perspective_matrix(engine().gfx.swapchain_aspect())), zm.inverse(camera_view_matrix));
-            self.gizmo.render(&entity.transform, &self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer(), &self.depth_textures.dsv, self.camera.transform.rotation);
+            self.gizmo.render(&entity.transform, &self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer(), &self.depth_textures.dsv, &self.camera);
         } 
     }
 
@@ -1198,7 +1196,7 @@ fn update(self: *Self) void {
         return;
     };
 
-    if (engine().input.get_key_down(KeyCode.MouseLeft) and engine().input.get_key(KeyCode.Shift)) {
+    if (!self.imui.has_focus() and engine().input.get_key_down(KeyCode.MouseLeft) and engine().input.get_key(KeyCode.Shift)) {
         const selection_entity_id = self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx) catch |err| {
             std.log.err("cannot get value at position: {}", .{err});
             return;
@@ -1508,7 +1506,9 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
 const EntityEditorUiData = struct {
     arena: std.heap.ArenaAllocator,
     inited: bool = false,
-    position: [2]f32 = .{ 400.0, 100.0 },
+    position: [2]f32 = .{ -10.0, 10.0 },
+
+    transform_checkbox: bool = false,
     name_edit_data: ui.Imui.TextInputState,
     model_combobox_data: ui.Imui.ComboBoxData,
 
@@ -1583,18 +1583,30 @@ fn entity_editor_ui(
     const background_box = imui.push_floating_layout(.Y, data.position[0], data.position[1], key ++ .{@src()});
     defer imui.pop_layout();
     if (imui.get_widget(background_box)) |background_widget| {
+        background_widget.semantic_size[0].minimum_pixel_size = 350;
         background_widget.flags.clickable = true;
         background_widget.flags.render = true;
+        background_widget.flags.hover_effect = false;
         background_widget.background_colour = imui.palette().background;
         background_widget.border_colour = imui.palette().border;
         background_widget.border_width_px = 2;
         background_widget.padding_px = .{
-            .left = 4,
-            .right = 4,
-            .top = 4,
-            .bottom = 4,
+            .left = 10,
+            .right = 10,
+            .top = 10,
+            .bottom = 10,
         };
-        background_widget.children_gap = 2;
+        background_widget.corner_radii_px = .{
+            .top_left = 10,
+            .top_right = 10,
+            .bottom_left = 10,
+            .bottom_right = 10,
+        };
+        background_widget.children_gap = 5;
+
+        // origin is top right
+        background_widget.anchor = .{ 1.0, 0.0 };
+        background_widget.pivot = .{ 1.0, 0.0 };
     }
     if (imui.generate_widget_signals(background_box).dragged) {
         data.position[0] += engine().input.mouse_delta[0];
@@ -1602,6 +1614,8 @@ fn entity_editor_ui(
     }
 
     _ = imui.label("Entity Editor");
+    _ = imui.checkbox(&entity.should_serialize, "should serialize", .{@src()});
+
     _ = imui.label("name:");
     _ = imui.line_edit(&data.name_edit_data, .{@src()});
 
@@ -1612,27 +1626,59 @@ fn entity_editor_ui(
             entity.name = std.fmt.allocPrint(engine().general_allocator.allocator(), "{s}", .{data.name_edit_data.text.items}) catch unreachable;
         }
     }
+    _ = arena.reset(.retain_capacity);
 
-    _ = arena.reset(.retain_capacity);
-    _ = imui.label("Transform");
-    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "position: {d:.2}", .{ entity.transform.position }) catch return);
-    _ = arena.reset(.retain_capacity);
-    _ = imui.label(std.fmt.allocPrint(arena.allocator(), "rotation: {d:.2}", .{ entity.transform.rotation }) catch return);
-    _ = arena.reset(.retain_capacity);
+    _ = imui.checkbox(&data.transform_checkbox, "Transform", .{@src()});
+    if (data.transform_checkbox) {
+        const transform_layout = imui.push_layout(.Y, .{@src()});
+        if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+            transform_layout_widget.padding_px = .{
+                .left = 10,
+            };
+        }
+        defer imui.pop_layout();
+
+        {
+            _ = imui.push_layout(.X, .{@src()});
+            defer imui.pop_layout();
+
+            _ = imui.label("position: ");
+            const data_label = imui.label(std.fmt.allocPrint(arena.allocator(), "{d:.2}", .{ 
+                zm.arr3Ptr(&entity.transform.position).* 
+            }) catch return);
+            _ = arena.reset(.retain_capacity);
+            if (imui.get_widget(data_label.id)) |data_widget| {
+                data_widget.text_content.?.font = .GeistMono;
+            }
+        }
+        {
+            _ = imui.push_layout(.X, .{@src()});
+            defer imui.pop_layout();
+
+            _ = imui.label("rotation: ");
+            const data_label = imui.label(std.fmt.allocPrint(arena.allocator(), "{d:.2}", .{
+                zm.arr3Ptr(&(zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi))).* 
+            }) catch return);
+            _ = arena.reset(.retain_capacity);
+            if (imui.get_widget(data_label.id)) |data_widget| {
+                data_widget.text_content.?.font = .GeistMono;
+            }
+        }
+    }
 
     _ = imui.push_layout(.X, .{@src()});
     _ = imui.label("model: ");
-    const set_model_button = imui.button("set", .{@src()});
-    set_model: { if (set_model_button.clicked) {
-        if (data.model_combobox_data.selected_index) |si| {
-            const model_id = sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_combobox_data.options[si]) catch { std.log.err("Failed to deserialize model id!", .{}); break :set_model; };
-            _ = arena.reset(.retain_capacity);
-            entity.model = model_id;
-        }
-    } }
     _ = imui.pop_layout();
-    _ = imui.combobox(&data.model_combobox_data, .{@src()});
+    const model_combobox = imui.combobox(&data.model_combobox_data, .{@src()});
+    if (model_combobox.data_changed) {
+        if (data.model_combobox_data.selected_index) |si| {
+            if (sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_combobox_data.options[si])) |model_id| {
+                entity.model = model_id;
+            } else |_| { 
+                std.log.err("Failed to deserialize model id!", .{});
+            }
+            _ = arena.reset(.retain_capacity);
+        }
+    }
     _ = arena.reset(.retain_capacity);
-
-    data.inited = true;
 }
