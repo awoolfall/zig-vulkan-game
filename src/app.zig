@@ -1512,6 +1512,9 @@ const EntityEditorUiData = struct {
     name_edit_data: ui.Imui.TextInputState,
     model_combobox_data: ui.Imui.ComboBoxData,
 
+    physics_combobox_data: ui.Imui.ComboBoxData,
+    running_physics_desc: en.entity.PhysicsOptionsDescriptor,
+
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
         self.name_edit_data.deinit();
@@ -1537,6 +1540,11 @@ const EntityEditorUiData = struct {
             options[i] = name;
         }
 
+        const physics_combobox_data = ui.Imui.ComboBoxData {
+            .default_text = "None",
+            .options = &[_][]const u8{"Body", "Character", "Virtual Character"},
+        };
+
         return EntityEditorUiData {
             .arena = arena,
             .model_combobox_data = ui.Imui.ComboBoxData {
@@ -1544,6 +1552,8 @@ const EntityEditorUiData = struct {
                 .options = options,
             },
             .name_edit_data = ui.Imui.TextInputState.init(engine().general_allocator.allocator()),
+            .running_physics_desc = .{ .Body = .{} },
+            .physics_combobox_data = physics_combobox_data,
         };
     }
 };
@@ -1578,6 +1588,15 @@ fn entity_editor_ui(
             }
         }
         _ = arena.reset(.retain_capacity);
+
+        // set physics descriptor
+        if (entity.physics) |*physics| {
+            data.running_physics_desc = physics.descriptor();
+            data.physics_combobox_data.selected_index = @intFromEnum(data.running_physics_desc);
+        } else {
+            data.running_physics_desc = .{ .Body = .{} };
+            data.physics_combobox_data.selected_index = null;
+        }
     }
 
     const background_box = imui.push_floating_layout(.Y, data.position[0], data.position[1], key ++ .{@src()});
@@ -1681,4 +1700,39 @@ fn entity_editor_ui(
         }
     }
     _ = arena.reset(.retain_capacity);
+
+    // physics
+    _ = imui.label("Physics:");
+    const physics_combobox = imui.combobox(&data.physics_combobox_data, .{@src()});
+    if (physics_combobox.data_changed) {
+        if (data.physics_combobox_data.selected_index) |si| {
+            switch (@as(en.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
+                .Body => data.running_physics_desc = .{ .Body = .{} },
+                .Character => data.running_physics_desc = .{ .Character = .{} },
+                .CharacterVirtual => data.running_physics_desc = .{ .CharacterVirtual = .{} },
+            }
+        }
+    }
+    if (data.physics_combobox_data.selected_index != null) {
+        const transform_layout = imui.push_layout(.Y, .{@src()});
+        if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+            transform_layout_widget.padding_px = .{
+                .left = 10,
+            };
+        }
+        defer imui.pop_layout();
+
+        switch (data.running_physics_desc) {
+            .Body => |*b| {
+                _ = imui.checkbox(&b.is_sensor, "is sensor", .{@src()});
+                _ = imui.checkbox(&b.is_static, "is static", .{@src()});
+            },
+            .Character => |_| {
+                _ = imui.label("is character");
+            },
+            .CharacterVirtual => |_| {
+                _ = imui.label("is virtual character");
+            },
+        }
+    }
 }
