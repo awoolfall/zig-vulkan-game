@@ -423,6 +423,15 @@ fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: R
     transform.position = closest_points.point_on_ray2 - self.selected_offset;
 }
 
+fn scale_with_cursor(self: *const Self, transform: *Transform, cursor_ray: Ray, scale_dir: zm.F32x4) void {
+    const closest_points = closest_points_between_rays(cursor_ray, Ray{
+        .origin = transform.position,
+        .direction = scale_dir,
+    });
+    transform.scale = transform.scale * (zm.f32x4s(1.0) - scale_dir) +
+        scale_dir * zm.f32x4s(zm.length3(closest_points.point_on_ray2 - transform.position - self.selected_offset)[0]);
+}
+
 inline fn non_orthogonalized_plane_up_direction(normal: zm.F32x4) zm.F32x4 {
     return if (zm.dot3(normal, zm.f32x4(0.0, 1.0, 0.0, 0.0))[0] == 1.0) zm.f32x4(0.0, 0.0, 1.0, 0.0) else zm.f32x4(0.0, 1.0, 0.0, 0.0);
 }
@@ -495,7 +504,11 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
             switch (s) {
                 .None => {},
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    self.translate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
+                    if (engine().input.get_key(input.KeyCode.Z)) {
+                        self.scale_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
+                    } else {
+                        self.translate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
+                    }
                 },
                 .RotateX, .RotateY, .RotateZ => {
                     self.rotate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
