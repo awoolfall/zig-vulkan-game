@@ -254,8 +254,8 @@ const Ray = struct {
     direction: zm.F32x4,
 };
 
-fn ray_out_cursor(inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
-    var ndc_cursor = zm.f32x4(@floatFromInt(engine().input.cursor_position[0]), @floatFromInt(engine().input.cursor_position[1]), 1.0, 1.0);
+fn ray_out_point_on_screen_px(point_px: [2]i32, inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
+    var ndc_cursor = zm.f32x4(@floatFromInt(point_px[0]), @floatFromInt(point_px[1]), 1.0, 1.0);
     ndc_cursor /= zm.f32x4(@floatFromInt(engine().gfx.swapchain_size.width), @floatFromInt(engine().gfx.swapchain_size.height), 1.0, 1.0);
     ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
     ndc_cursor -= zm.f32x4(1.0, -1.0, 0.0, 0.0);
@@ -423,13 +423,29 @@ fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: R
     transform.position = closest_points.point_on_ray2 - self.selected_offset;
 }
 
-fn scale_with_cursor(self: *const Self, transform: *Transform, cursor_ray: Ray, scale_dir: zm.F32x4) void {
-    const closest_points = closest_points_between_rays(cursor_ray, Ray{
+fn scale_with_cursor(self: *const Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat, scale_dir: zm.F32x4) void {
+    _ = self;
+    const cursor_ray_this_frame = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
+    const closest_point_this_frame = closest_points_between_rays(cursor_ray_this_frame, Ray{
         .origin = transform.position,
         .direction = scale_dir,
-    });
-    transform.scale = transform.scale * (zm.f32x4s(1.0) - scale_dir) +
-        scale_dir * zm.f32x4s(zm.length3(closest_points.point_on_ray2 - transform.position - self.selected_offset)[0]);
+    }).point_on_ray2;
+
+    const mouse_delta = [2]i32{@intFromFloat(engine().input.mouse_delta[0]), @intFromFloat(engine().input.mouse_delta[1])};
+    const cursor_pos_last_frame = [2]i32 {
+        engine().input.cursor_position[0] - mouse_delta[0],
+        engine().input.cursor_position[1] - mouse_delta[1],
+    };
+    const cursor_ray_last_frame = ray_out_point_on_screen_px(cursor_pos_last_frame, inv_perspective, inv_view);
+    const closest_point_last_frame = closest_points_between_rays(cursor_ray_last_frame, Ray{
+        .origin = transform.position,
+        .direction = scale_dir,
+    }).point_on_ray2;
+
+    const delta = closest_point_this_frame - closest_point_last_frame;
+    const delta_length = std.math.sign(zm.dot3(delta, scale_dir)[0]) * zm.length3(delta)[0];
+
+    transform.scale += scale_dir * zm.f32x4s(delta_length);
 }
 
 inline fn non_orthogonalized_plane_up_direction(normal: zm.F32x4) zm.F32x4 {
@@ -466,7 +482,7 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
             switch (self.selected_control.?) {
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
                     const closest_points = closest_points_between_rays(cursor_ray, Ray{
                         .origin = transform.position,
                         .direction = self.selected_control.?.direction(transform, coord_space),
@@ -474,7 +490,7 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
                     self.selected_offset = closest_points.point_on_ray2 - transform.position;
                 },
                 .RotateX, .RotateY, .RotateZ => {
-                    const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
                     const local_direction = self.selected_control.?.direction(transform, coord_space);
                     const plane = Plane {
                         .point = transform.position,
@@ -500,12 +516,12 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
     }
     if (engine().input.get_key(input.KeyCode.MouseLeft)) {
         if (self.selected_control) |s| {
-            const cursor_ray = ray_out_cursor(inv_perspective, inv_view);
+            const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
             switch (s) {
                 .None => {},
                 .TranslateX, .TranslateY, .TranslateZ => {
                     if (engine().input.get_key(input.KeyCode.Z)) {
-                        self.scale_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
+                        self.scale_with_cursor(transform, inv_perspective, inv_view, s.direction(transform, coord_space));
                     } else {
                         self.translate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
                     }
