@@ -1653,14 +1653,51 @@ fn entity_editor_ui(
     _ = imui.label("Entity Editor");
     _ = imui.checkbox(&entity.should_serialize, "should serialize", .{@src()});
 
-    _ = imui.label("name:");
-    const name_edit = imui.line_edit(&data.name_edit_data, .{@src()});
+    {
+        const ll = imui.push_layout(.X, .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
 
-    // if name line edit has changed then update the entity's name
-    if (name_edit.data_changed) {
-        if (entity.name) |_| {
-            engine().general_allocator.allocator().free(entity.name.?);
-            entity.name = std.fmt.allocPrint(engine().general_allocator.allocator(), "{s}", .{data.name_edit_data.text.items}) catch unreachable;
+        const labell = imui.label("name:");
+        if (imui.get_widget(labell.id)) |label_widget| {
+            label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
+        }
+        const name_edit = imui.line_edit(&data.name_edit_data, .{@src()});
+        // if name line edit has changed then update the entity's name
+        if (name_edit.data_changed) {
+            if (entity.name) |_| {
+                engine().general_allocator.allocator().free(entity.name.?);
+                entity.name = std.fmt.allocPrint(engine().general_allocator.allocator(), "{s}", .{data.name_edit_data.text.items}) catch unreachable;
+            }
+        }
+    }
+    _ = arena.reset(.retain_capacity);
+
+    {
+        const ll = imui.push_layout(.X, .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
+
+        const labell = imui.label("model: ");
+        if (imui.get_widget(labell.id)) |label_widget| {
+            label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
+        }
+        const model_combobox = imui.combobox(&data.model_combobox_data, .{@src()});
+        if (model_combobox.data_changed) {
+            if (data.model_combobox_data.selected_index) |si| {
+                if (sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_combobox_data.options[si])) |model_id| {
+                    entity.model = model_id;
+                } else |_| { 
+                    std.log.err("Failed to deserialize model id!", .{});
+                }
+                _ = arena.reset(.retain_capacity);
+            }
         }
     }
     _ = arena.reset(.retain_capacity);
@@ -1669,6 +1706,8 @@ fn entity_editor_ui(
     if (data.transform_checkbox) {
         const transform_layout = imui.push_layout(.Y, .{@src()});
         if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+            transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
+            transform_layout_widget.semantic_size[0].value = 1.0;
             transform_layout_widget.padding_px = .{
                 .left = EntityEditorTabWidth,
             };
@@ -1677,61 +1716,61 @@ fn entity_editor_ui(
         defer imui.pop_layout();
 
         {
-            _ = imui.push_layout(.X, .{@src()});
+            const pl = imui.push_layout(.X, .{@src()});
+            if (imui.get_widget(pl)) |pl_widget| {
+                pl_widget.semantic_size[0].kind = .ParentPercentage;
+                pl_widget.semantic_size[0].value = 1.0;
+                pl_widget.children_gap = 2;
+            }
             defer imui.pop_layout();
 
-            _ = imui.label("position: ");
-            const data_label = imui.label(std.fmt.allocPrint(arena.allocator(), "{d:.2}", .{ 
-                zm.arr3Ptr(&entity.transform.position).* 
-            }) catch return);
-            _ = arena.reset(.retain_capacity);
-            if (imui.get_widget(data_label.id)) |data_widget| {
-                data_widget.text_content.?.font = .GeistMono;
+            const ll = imui.label("position: ");
+            if (imui.get_widget(ll.id)) |ll_widget| {
+                ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
+            _ = imui.number_slider(&entity.transform.position[0], .{@src()});
+            _ = imui.number_slider(&entity.transform.position[1], .{@src()});
+            _ = imui.number_slider(&entity.transform.position[2], .{@src()});
         }
         {
-            _ = imui.push_layout(.X, .{@src()});
+            const pl = imui.push_layout(.X, .{@src()});
+            if (imui.get_widget(pl)) |pl_widget| {
+                pl_widget.semantic_size[0].kind = .ParentPercentage;
+                pl_widget.semantic_size[0].value = 1.0;
+                pl_widget.children_gap = 2;
+            }
             defer imui.pop_layout();
 
-            _ = imui.label("rotation: ");
-            const data_label = imui.label(std.fmt.allocPrint(arena.allocator(), "{d:.2}", .{
-                zm.arr3Ptr(&(zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi))).* 
-            }) catch return);
-            _ = arena.reset(.retain_capacity);
-            if (imui.get_widget(data_label.id)) |data_widget| {
-                data_widget.text_content.?.font = .GeistMono;
+            const ll = imui.label("rotation: ");
+            if (imui.get_widget(ll.id)) |ll_widget| {
+                ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
+            var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
+            _ = imui.number_slider(&rot[0], .{@src()});
+            _ = imui.number_slider(&rot[1], .{@src()});
+            _ = imui.number_slider(&rot[2], .{@src()});
+
+            // TODO set entity rotation when number sliders change
+            //entity.transform.rotation = zm.quatFromRollPitchYawV(rot / zm.f32x4s(180.0 / std.math.pi));
         }
         {
-            _ = imui.push_layout(.X, .{@src()});
+            const pl = imui.push_layout(.X, .{@src()});
+            if (imui.get_widget(pl)) |pl_widget| {
+                pl_widget.semantic_size[0].kind = .ParentPercentage;
+                pl_widget.semantic_size[0].value = 1.0;
+                pl_widget.children_gap = 2;
+            }
             defer imui.pop_layout();
 
-            _ = imui.label("scale: ");
-            const data_label = imui.label(std.fmt.allocPrint(arena.allocator(), "{d:.2}", .{
-                zm.arr3Ptr(&entity.transform.scale).* 
-            }) catch return);
-            _ = arena.reset(.retain_capacity);
-            if (imui.get_widget(data_label.id)) |data_widget| {
-                data_widget.text_content.?.font = .GeistMono;
+            const ll = imui.label("scale: ");
+            if (imui.get_widget(ll.id)) |ll_widget| {
+                ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
+            _ = imui.number_slider(&entity.transform.scale[0], .{@src()});
+            _ = imui.number_slider(&entity.transform.scale[1], .{@src()});
+            _ = imui.number_slider(&entity.transform.scale[2], .{@src()});
         }
     }
-
-    _ = imui.push_layout(.X, .{@src()});
-    _ = imui.label("model: ");
-    _ = imui.pop_layout();
-    const model_combobox = imui.combobox(&data.model_combobox_data, .{@src()});
-    if (model_combobox.data_changed) {
-        if (data.model_combobox_data.selected_index) |si| {
-            if (sr.deserialize(assets.ModelAssetId, arena.allocator(), data.model_combobox_data.options[si])) |model_id| {
-                entity.model = model_id;
-            } else |_| { 
-                std.log.err("Failed to deserialize model id!", .{});
-            }
-            _ = arena.reset(.retain_capacity);
-        }
-    }
-    _ = arena.reset(.retain_capacity);
 
     // physics
     _ = imui.collapsible(&data.physics_checkbox, "Physics", .{@src()});
@@ -1827,7 +1866,8 @@ fn physics_shape_editor_ui(
     switch (shape_settings.shape) {
         .Capsule => |*c| {
             _ = imui.label("radius:");
-            _ = imui.slider(&c.radius, .{ .min = 0.0, .max = 1.0, .step = 0.01 }, key ++ .{@src()});
+            _ = imui.number_slider(&c.radius, .{@src()});
+            //_ = imui.slider(&c.radius, .{ .min = 0.0, .max = 1.0, .step = 0.01 }, key ++ .{@src()});
             _ = imui.label("half height:");
             _ = imui.slider(&c.half_height, .{ .min = 0.0, .max = 1.0, .step = 0.01 }, key ++ .{@src()});
         },
