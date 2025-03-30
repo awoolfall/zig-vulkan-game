@@ -534,7 +534,7 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
     }
 }
 
-pub fn render(self: *Self, transform: *const Transform, camera_buffer: *gf.Buffer, rtv: *gf.RenderTargetView, dsv: *gf.DepthStencilView, camera: *const cm.Camera) void {
+pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf.Buffer, rtv: *const gf.RenderTargetView, dsv: *const gf.DepthStencilView, camera: *const cm.Camera) void {
     const gfx = &engine().gfx;
 
     // recreate selection textures if size has changed

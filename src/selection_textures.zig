@@ -72,7 +72,7 @@ pub fn on_resize(self: *Self, gf: *gfx.GfxState) void {
     }
 }
 
-pub fn get_value_at_position(self: *Self, x: usize, y: usize, gf: *gfx.GfxState) !u32 {
+pub fn get_value_at_position(self: *const Self, x: usize, y: usize, gf: *gfx.GfxState) !u32 {
     if (x >= self.texture.desc.width or y >= self.texture.desc.height) {
         return error.OutOfBounds;
     }
