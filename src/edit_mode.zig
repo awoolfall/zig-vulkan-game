@@ -7,6 +7,7 @@ const gfx = en.gfx;
 
 const Gizmo = @import("gizmo/gizmo.zig");
 const SelectionTextures = @import("selection_textures.zig");
+const pe = @import("particle_editor.zig");
 
 const zm = en.zmath;
 const sr = en.serialize;
@@ -22,6 +23,8 @@ editor_camera: Camera,
 gizmo: Gizmo,
 entity_editor_ui_data: EntityEditorUiData,
 selected_entity: ?GenerationalIndex = null,
+
+file_dropdown_open: bool = false,
 
 pub fn deinit(self: *Self) void {
     self.entity_editor_ui_data.deinit();
@@ -85,7 +88,100 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
         }
     }
 
+    const imui = &engine().imui;
+
     self.entity_editor_ui(&self.entity_editor_ui_data, .{@src()});
+    
+    // top bar UI
+    const top_bar_background = imui.push_layout(.X, .{@src()});
+    if (imui.get_widget(top_bar_background)) |top_widget| {
+        top_widget.layout_axis = null;
+        top_widget.semantic_size[0].kind = .ParentPercentage;
+        top_widget.semantic_size[0].value = 1.0;
+        top_widget.semantic_size = .{
+            .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 },
+            .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable_percent = 0.0 },
+        };
+        top_widget.padding_px = .{
+            .left = 10,
+            .right = 10,
+            .top = 0,
+            .bottom = 0,
+        };
+        top_widget.children_gap = 5;
+        top_widget.flags.render = true;
+        top_widget.background_colour = imui.palette().background;
+        top_widget.background_colour.?[3] = 0.5;
+    }
+
+    const l = imui.label("Edit Mode");
+    if (imui.get_widget(l.id)) |label_widget| {
+        label_widget.anchor = .{ 0.5, 0.5 };
+        label_widget.pivot = .{ 0.5, 0.5 };
+    }
+
+    _ = imui.push_layout(.X, .{@src()});
+    const file_button = imui.button("File", .{@src()});
+    if (imui.get_widget(file_button.id.box)) |file_widget| {
+        file_widget.background_colour = imui.palette().background;
+        file_widget.background_colour.?[3] = 1.0;
+        file_widget.border_width_px = 0;
+        file_widget.padding_px = .{
+            .top = 5,
+            .bottom = 5,
+            .left = 10,
+            .right = 10,
+        };
+    }
+    if (imui.get_widget(file_button.id.text)) |text_widget| {
+        text_widget.text_content.?.colour = imui.palette().text_dark;
+    }
+    if (file_button.clicked) {
+        self.file_dropdown_open = !self.file_dropdown_open;
+    }
+    defer {
+        if (!file_button.clicked) {
+            if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+                self.file_dropdown_open = false;
+            }
+        }
+    }
+
+    file_blk: {
+        if (self.file_dropdown_open) {
+            const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
+            const file_lfw_rect = file_lfw.computed.rect();
+            const file_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(file_lfw_rect.left), @floatFromInt(file_lfw_rect.top + file_lfw_rect.height), .{@src()});
+            if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
+                file_dropdown_widget.flags.render = true;
+                file_dropdown_widget.background_colour = imui.palette().background;
+            }
+            defer imui.pop_layout();
+
+            const save_button = imui.badge("Save Scene", .{@src()});
+            if (save_button.clicked) {
+                save_entities_to_scene("scene") catch |err| {
+                    std.log.err("Failed to save scene: {}", .{err});
+                };
+                std.log.debug("saved!", .{});
+            }
+            const load_button = imui.badge("Load Scene", .{@src()});
+            if (load_button.clicked) {
+                for (engine().entities.list.data.items, 0..) |*it, idx| {
+                    if (it.item_data) |_| {
+                        engine().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
+                    }
+                }
+                create_scene_entities("scene") catch |err| {
+                    std.log.err("Failed to load scene: {}", .{err});
+                };
+                std.log.debug("loaded!", .{});
+            }
+        }
+    }
+
+    imui.pop_layout();
+    imui.pop_layout();
 }
 
 pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gfx.RenderTargetView, dsv: *const gfx.DepthStencilView) !void {
@@ -119,6 +215,10 @@ const EntityEditorUiData = struct {
     physics_combobox_data: Imui.ComboBoxData,
     shape_combobox_data: Imui.ComboBoxData,
     running_physics_desc: en.entity.PhysicsOptionsDescriptor,
+
+    particle_checkbox: bool = false,
+    particle_editor_data: pe.ParticleEditorData,
+    particle_position: [2]f32 = .{ 0.0, 0.0 },
 
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
@@ -174,16 +274,86 @@ const EntityEditorUiData = struct {
         return EntityEditorUiData {
             .arena = arena,
             .model_combobox_data = Imui.ComboBoxData {
-                .default_text = "select a model...",
+                .default_text = "None",
                 .options = options,
             },
             .name_edit_data = Imui.TextInputState.init(engine().general_allocator.allocator()),
             .running_physics_desc = .{ .Body = .{} },
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
+            .particle_editor_data = pe.ParticleEditorData {
+                .settings = .{
+                    .max_particles = 100,
+                    .spawn_radius = 1.0,
+                    .spawn_rate = 1.0,
+                },
+            },
         };
     }
+
+    pub fn reinit(self: *EntityEditorUiData, entity: *en.entity.EntitySuperStruct) void {
+        defer self.inited = true;
+
+        var arena = std.heap.ArenaAllocator.init(engine().frame_allocator);
+        defer arena.deinit();
+
+        self.particle_editor_data.reinit(entity);
+        self.particle_position = .{
+            @as(f32, @floatFromInt(en.engine().gfx.swapchain_size.width)) * 0.5,
+            @as(f32, @floatFromInt(en.engine().gfx.swapchain_size.height)) * 0.5,
+        };
+
+        // set name text
+        self.name_edit_data.text.clearRetainingCapacity();
+        self.name_edit_data.text.appendSlice(entity.name orelse "unnamed") catch unreachable;
+        self.name_edit_data.cursor = self.name_edit_data.text.items.len;
+        self.name_edit_data.mark = self.name_edit_data.text.items.len;
+
+        // set model text
+        const model_text = if (entity.model) |mid| sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable else "None";
+        for (self.model_combobox_data.options, 0..) |option, i| {
+            if (std.mem.eql(u8, option, model_text)) {
+                self.model_combobox_data.selected_index = i;
+                break;
+            }
+        }
+        _ = arena.reset(.retain_capacity);
+
+        // set physics descriptor
+        if (entity.physics) |*physics| {
+            self.running_physics_desc = physics.descriptor();
+            self.physics_combobox_data.selected_index = @intFromEnum(self.running_physics_desc);
+        } else {
+            self.running_physics_desc = .{ .Body = .{} };
+            self.physics_combobox_data.selected_index = null;
+        }
+    }
 };
+
+fn set_background_widget_layout(background_widget: *Imui.Widget) void {
+    const imui = &engine().imui;
+
+    background_widget.semantic_size[0].minimum_pixel_size = 350;
+    background_widget.flags.clickable = true;
+    background_widget.flags.render = true;
+    background_widget.flags.hover_effect = false;
+    background_widget.background_colour = imui.palette().background;
+    background_widget.border_colour = imui.palette().border;
+    background_widget.border_width_px = 2;
+    background_widget.padding_px = .{
+        .left = 10,
+        .right = 10,
+        .top = 10,
+        .bottom = 10,
+    };
+    background_widget.corner_radii_px = .{
+        .top_left = 10,
+        .top_right = 10,
+        .bottom_left = 10,
+        .bottom_right = 10,
+    };
+    background_widget.children_gap = 5;
+}
 
 const EntityEditorTabWidth = 10;
 fn entity_editor_ui(
@@ -199,57 +369,13 @@ fn entity_editor_ui(
     defer arena.deinit();
 
     if (!data.inited) {
-        defer data.inited = true;
-
-        // set name text
-        data.name_edit_data.text.clearRetainingCapacity();
-        data.name_edit_data.text.appendSlice(entity.name orelse "unnamed") catch unreachable;
-        data.name_edit_data.cursor = data.name_edit_data.text.items.len;
-        data.name_edit_data.mark = data.name_edit_data.text.items.len;
-
-        // set model text
-        const model_text = sr.serialize(assets.ModelAssetId, arena.allocator(), entity.model.?) catch unreachable;
-        for (data.model_combobox_data.options, 0..) |option, i| {
-            if (std.mem.eql(u8, option, model_text)) {
-                data.model_combobox_data.selected_index = i;
-                break;
-            }
-        }
-        _ = arena.reset(.retain_capacity);
-
-        // set physics descriptor
-        if (entity.physics) |*physics| {
-            data.running_physics_desc = physics.descriptor();
-            data.physics_combobox_data.selected_index = @intFromEnum(data.running_physics_desc);
-        } else {
-            data.running_physics_desc = .{ .Body = .{} };
-            data.physics_combobox_data.selected_index = null;
-        }
+        data.reinit(entity);
     }
 
     const background_box = imui.push_floating_layout(.Y, data.position[0], data.position[1], key ++ .{@src()});
     defer imui.pop_layout();
     if (imui.get_widget(background_box)) |background_widget| {
-        background_widget.semantic_size[0].minimum_pixel_size = 350;
-        background_widget.flags.clickable = true;
-        background_widget.flags.render = true;
-        background_widget.flags.hover_effect = false;
-        background_widget.background_colour = imui.palette().background;
-        background_widget.border_colour = imui.palette().border;
-        background_widget.border_width_px = 2;
-        background_widget.padding_px = .{
-            .left = 10,
-            .right = 10,
-            .top = 10,
-            .bottom = 10,
-        };
-        background_widget.corner_radii_px = .{
-            .top_left = 10,
-            .top_right = 10,
-            .bottom_left = 10,
-            .bottom_right = 10,
-        };
-        background_widget.children_gap = 5;
+        set_background_widget_layout(background_widget);
 
         // origin is top right
         background_widget.anchor = .{ 1.0, 0.0 };
@@ -307,6 +433,8 @@ fn entity_editor_ui(
                     std.log.err("Failed to deserialize model id!", .{});
                 }
                 _ = arena.reset(.retain_capacity);
+            } else {
+                entity.model = null;
             }
         }
     }
@@ -338,9 +466,9 @@ fn entity_editor_ui(
             if (imui.get_widget(ll.id)) |ll_widget| {
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
-            _ = imui.number_slider(&entity.transform.position[0], key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.position[1], key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.position[2], key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.position[0], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.position[1], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.position[2], .{}, key ++ .{@src()});
         }
         {
             const pl = imui.push_layout(.X, key ++ .{@src()});
@@ -356,9 +484,9 @@ fn entity_editor_ui(
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
             var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
-            _ = imui.number_slider(&rot[0], key ++ .{@src()});
-            _ = imui.number_slider(&rot[1], key ++ .{@src()});
-            _ = imui.number_slider(&rot[2], key ++ .{@src()});
+            _ = imui.number_slider(&rot[0], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&rot[1], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&rot[2], .{}, key ++ .{@src()});
 
             // TODO set entity rotation when number sliders change
             //entity.transform.rotation = zm.quatFromRollPitchYawV(rot / zm.f32x4s(180.0 / std.math.pi));
@@ -376,9 +504,9 @@ fn entity_editor_ui(
             if (imui.get_widget(ll.id)) |ll_widget| {
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
-            _ = imui.number_slider(&entity.transform.scale[0], key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.scale[1], key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.scale[2], key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.scale[0], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.scale[1], .{}, key ++ .{@src()});
+            _ = imui.number_slider(&entity.transform.scale[2], .{}, key ++ .{@src()});
         }
     }
 
@@ -431,6 +559,23 @@ fn entity_editor_ui(
                 },
             }
         }
+    }
+
+    _ = imui.collapsible(&data.particle_checkbox, "Particle System", key ++ .{@src()});
+    if (data.particle_checkbox) {
+        const background = imui.push_floating_layout(.Y, data.particle_position[0], data.particle_position[1], key ++ .{@src()});
+        defer imui.pop_layout();
+
+        if (imui.get_widget(background)) |background_widget| {
+            set_background_widget_layout(background_widget);
+        }
+
+        if (imui.generate_widget_signals(background).dragged) {
+            data.particle_position[0] += engine().input.mouse_delta[0];
+            data.particle_position[1] += engine().input.mouse_delta[1];
+        }
+
+        pe.particle_editor(&data.particle_editor_data, entity, key ++ .{@src()});
     }
 }
 
@@ -511,5 +656,115 @@ fn labeled_number_slider(
     if (engine().imui.get_widget(label.id)) |label_widget| {
         label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
     }
-    _ = engine().imui.number_slider(value, key ++ .{@src()});
+    _ = engine().imui.number_slider(value, .{}, key ++ .{@src()});
+}
+
+fn create_scene_entities(scene_name: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    defer arena.deinit();
+
+    var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        _ = arena.reset(.retain_capacity);
+        if (entry.kind == .file) {
+            const ent_file = dir.openFile(entry.name, .{}) catch |err| {
+                std.log.err("Failed to open file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            defer ent_file.close();
+
+            const ent_str = ent_file.readToEndAlloc(arena.allocator(), 1024 * 1024) catch |err| {
+                std.log.err("Failed to read file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            defer arena.allocator().free(ent_str);
+
+            const ent_s = std.json.parseFromSliceLeaky(
+                sr.Serializable(en.entity.EntityDescriptor),
+                arena.allocator(),
+                ent_str,
+                .{ .ignore_unknown_fields = true, }
+            ) catch |err| {
+                std.log.err("Failed to parse file {s}: {}", .{ entry.name, err });
+                continue;
+            };
+
+            const ent = sr.deserialize(en.entity.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
+                std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
+                continue;
+            };
+
+            const loaded_entity = engine().entities.new_entity(ent) catch |err| {
+                std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
+                continue;
+            };
+            std.log.info("Loaded entity: {}", .{engine().entities.get(loaded_entity).?});
+        }
+    }
+}
+
+fn save_entities_to_scene(scene_name: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    defer arena.deinit();
+
+    std.fs.cwd().deleteTree(scene_name) catch |err| {
+        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+    };
+
+    var scene_dir: std.fs.Dir = undefined;
+    scene_dir = std.fs.cwd().openDir(scene_name, .{.iterate = true,}) catch blk: {
+        try std.fs.cwd().makeDir(scene_name);
+        break :blk try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    };
+    defer scene_dir.close();
+
+    var it = engine().entities.list.iterator();
+
+    var largest_serialize_id: u32 = 0;
+    while (it.next()) |entity| {
+        if (!entity.should_serialize) continue;
+        largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
+    }
+
+    it.reset();
+    while (it.next()) |entity| {
+        if (!entity.should_serialize) continue;
+        _ = arena.reset(.retain_capacity);
+
+        entity.serialize_id = entity.serialize_id orelse blk: {
+            largest_serialize_id += 1;
+            break :blk largest_serialize_id;
+        };
+
+        const entity_descriptor = entity.descriptor(arena.allocator()) catch |err| {
+            std.log.err("unable to produce descriptor for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        const entity_s = sr.serialize(en.entity.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
+            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        const res = std.json.stringifyAlloc(arena.allocator(), entity_s, .{.whitespace = .indent_2}) catch |err| {
+            std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity.serialize_id.?}) catch |err| {
+            std.log.err("unable to produce file path for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+
+        scene_dir.writeFile(.{
+            .sub_path = file_path,
+            .data = res,
+            .flags = .{ .read = false, .truncate = true, },
+        }) catch |err| {
+            std.log.err("unable to write file for entity {}: {}\n", .{entity.serialize_id.?, err});
+            continue;
+        };
+    }
 }

@@ -39,17 +39,26 @@ const gitchanged = en.gitchanged;
 pub const EntityData = struct {
     health_points: ?i32,
     anim_controller: ?anim.AnimController,
+    particle_system: ?particle.ParticleSystem,
 
     pub fn deinit(self: *EntityData) void {
         if (self.anim_controller) |*anim_controller| {
             anim_controller.deinit();
+        }
+        if (self.particle_system) |*particle_system| {
+            particle_system.deinit();
         }
     }
 
     pub fn init(desc: Descriptor) !EntityData {
         return EntityData {
             .health_points = desc.health_points,
-            .anim_controller = if (desc.anim_controller_desc) |anim_desc| try anim.AnimController.init(engine().general_allocator.allocator(), anim_desc) else null,
+            .anim_controller = if (desc.anim_controller_desc) |anim_desc| 
+                try anim.AnimController.init(engine().general_allocator.allocator(), anim_desc) 
+                else null,
+            .particle_system = if (desc.particle_system_settings) |ps| 
+                try particle.ParticleSystem.init(engine().general_allocator.allocator(), ps) 
+                else null,
         };
     }
 
@@ -57,15 +66,19 @@ pub const EntityData = struct {
         const anim_desc = if (self.anim_controller) |ac| try ac.descriptor(alloc) else null;
         errdefer if (anim_desc) |ad| alloc.free(ad);
 
+        const particle_system_settings = if (self.particle_system) |ps| ps.settings else null;
+
         return Descriptor {
             .health_points = self.health_points,
             .anim_controller_desc = anim_desc,
+            .particle_system_settings = particle_system_settings,
         };
     }
 
     pub const Descriptor = struct {
         health_points: ?i32 = null,
         anim_controller_desc: ?anim.AnimController.Descriptor = null,
+        particle_system_settings: ?particle.ParticleSystemSettings = null,
     };
 };
 
@@ -76,13 +89,11 @@ camera: cm.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
 character_idx: gen.GenerationalIndex,
-opponent_idx: gen.GenerationalIndex,
 //character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
 
 app_life_asset_pack_id: assets.AssetPackId,
 turntable_model_id: assets.ModelAssetId,
 
-zero_particle_system: particle.ParticleSystem,
 player_attack_particle_system: particle.ParticleSystem,
 
 terrain: Terrain,
@@ -94,7 +105,6 @@ current_mode: enum { EDIT, PLAY } = .EDIT,
 pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
-    self.zero_particle_system.deinit();
     self.player_attack_particle_system.deinit();
 
     engine().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
@@ -125,6 +135,8 @@ pub fn init(self: *Self) !void {
     try asset_pack.add_model("terrain", assets.AssetPack.ModelAsset{ .Plane = .{ .slices = 1, .stacks = 1, } });
     try asset_pack.add_model("cone", assets.AssetPack.ModelAsset{ .Cone = .{ .slices = 8, } });
     try asset_pack.add_model("sphere", assets.AssetPack.ModelAsset{ .Sphere = .{  } });
+    try asset_pack.add_model("cube", assets.AssetPack.ModelAsset{ .Cube = .{} });
+    try asset_pack.add_model("block", assets.AssetPack.ModelAsset{ .Path = "block.glb" });
 
     try asset_pack.define_animation("character idle", "character", 36);
     try asset_pack.define_animation("character run", "character", 48);
@@ -141,181 +153,11 @@ pub fn init(self: *Self) !void {
     const character_model_id = engine().asset_manager.find_model_id("character").?;
     const turntable_model_id = engine().asset_manager.find_model_id("model").?;
 
-    const character_animation_idle_id = engine().asset_manager.find_animation_id("character idle").?;
-    const character_animation_walk_id = engine().asset_manager.find_animation_id("character walk").?;
-    const character_animation_run_id = engine().asset_manager.find_animation_id("character run").?;
-    const character_animation_attack_id = engine().asset_manager.find_animation_id("character attack").?;
-
     const character_model = engine().asset_manager.get_model(character_model_id) catch unreachable;
     std.log.info("character model animations:", .{});
     for (character_model.animations, 0..) |*animation, i| {
         std.log.info("{}. anim: {s}", .{i, animation.name});
     }
-
-    var anim_nodes = [_]anim.Node{
-        .{
-            .node = .{ .Basic = .{
-                .animation = character_animation_idle_id,
-            } },
-            .next = &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 1,
-                    .condition = anim.TransitionCondition{ .Float = .{
-                        .variable_id = anim.AnimController.hash_variable("character speed"),
-                        .comparison = .GreaterThan,
-                        .value = 0.05,
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-                anim.NodeTransition{
-                    .node = 2,
-                    .condition = anim.TransitionCondition{ .Event = .{
-                        .variable_id = anim.AnimController.hash_variable("character attack"),
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            },
-        },
-        .{
-            .node = .{ .Blend1D = .{
-                .left_animation = character_animation_walk_id,
-                .right_animation = character_animation_run_id,
-                .variable = anim.AnimController.hash_variable("character speed"),
-                .left_value = 4.0,
-                .right_value = 8.0,
-                .left_strength_variable = anim.AnimController.hash_variable("character walk speed norm"),
-            } },
-            .next = &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 0,
-                    .condition = anim.TransitionCondition{ .Float = .{
-                        .variable_id = anim.AnimController.hash_variable("character speed"),
-                        .comparison = .LessThan,
-                        .value = 0.05,
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-                anim.NodeTransition{
-                    .node = 2,
-                    .condition = anim.TransitionCondition{ .Event = .{
-                        .variable_id = anim.AnimController.hash_variable("character attack"),
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            },
-        },
-        .{
-            .node = .{ .Basic = .{
-                .animation = character_animation_attack_id,
-            } },
-            .next = &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 0,
-                    .condition = anim.TransitionCondition.Always,
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            },
-        },
-    };
-    const anim_desc = anim.AnimController.Descriptor {
-        .nodes = anim_nodes[0..],
-        .base_animation = character_animation_idle_id,
-    };
-
-    _ = try engine().entities.new_entity(Engine.EntityDescriptor {
-        .name = "ground entity",
-        .should_serialize = true,
-        .model = "default|terrain",
-        .physics = .{ .Body = .{
-            .settings = .{
-                .shape = .{ .Box = .{
-                    .width = 1.0,
-                    .height = 1.0,
-                    .depth = 1.0,
-                }, },
-                .offset_transform = .{
-                    .position = zm.f32x4(0.0, -0.5, 0.0, 0.0),
-                },
-            },
-            .is_static = true,
-        }, },
-        .transform = Transform {
-            .scale = zm.f32x4(100.0, 1.0, 100.0, 1.0),
-        },
-    });
-
-    const chara_transform = Transform {
-        .position = zm.f32x4(-0.5, -3.0, 0.5, 1.0),
-    };
-
-    const chara_shape = ph.ShapeSettings {
-        .shape = .{ .Capsule = .{
-            .half_height = 0.7,
-            .radius = 0.2,
-        } },
-        .offset_transform = Transform {
-            .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
-            .rotation = zm.qidentity(),
-        },
-    };
-
-    const character_virtual_settings = ph.CharacterVirtualSettings {
-        .base = ph.CharacterBaseSettings {
-            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-            .max_slope_angle = 70.0,
-            .shape = chara_shape,
-        },
-        .mass = 70.0,
-        .character_padding = 0.02,
-    };
-
-    const chara_root_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
-        .name = "character entity",
-        .should_serialize = true,
-        .model = "default|character",
-        .transform = Transform {
-            .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
-        },
-        .physics = .{ .CharacterVirtual = .{
-            .settings = character_virtual_settings,
-            .create_character = true,
-        } },
-        .app = .{
-            .health_points = 100,
-            .anim_controller_desc = anim_desc,
-        },
-    });
-
-    const character_settings = ph.CharacterSettings {
-        .base = ph.CharacterBaseSettings {
-            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-            .max_slope_angle = 70.0,
-            .shape = chara_shape,
-        },
-        .layer = ph.object_layers.moving,
-        .mass = 70.0,
-        .friction = 0.0,
-        .gravity_factor = 0.0,
-    };
-
-    const opponent_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
-        .name = "opponent entity",
-        .should_serialize = true,
-        .model = "default|character",
-        .transform = chara_transform,
-        .physics = .{ .Character = .{
-            .settings = character_settings,
-        } },
-        .app = .{
-            .health_points = 100,
-            .anim_controller_desc = anim_desc,
-        },
-    });
 
     // for (0..100) |_| {
     //     chara_transform.position += zm.f32x4(0.0, 0.5, 0.0, 0.0);
@@ -333,67 +175,13 @@ pub fn init(self: *Self) !void {
     //         },
     //         });
     // }
-    
-    // if (engine().entities.get(opponent_idx)) |op| {
-    //     var rand = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-    //     op.app.anim_controller.?.base_animation_time = rand.random().float(f64) * 10.0;
-    // }
-
-    _ = try engine().entities.new_entity(Engine.EntityDescriptor {
-        .name = "cone entity",
-        .should_serialize = true,
-        .model = "default|cone",
-        .transform = .{
-            .position = zm.f32x4(0.0, 10.0, 0.0, 0.0),
-        },
-    });
 
     engine().physics.zphy.optimizeBroadPhase();
 
-    var zero_particle_system = try particle.ParticleSystem.init(
-        engine().general_allocator.allocator(),
-        2000,
-        .{
-            .alignment = .{ .VelocityAligned = 150.0 },
-            .shape = .Circle,
-            .spawn_origin = zm.f32x4(0.0, -4.0, 0.0, 0.0),
-            .spawn_offset = zm.f32x4s(0.0),
-            .spawn_radius = 1.0,
-            .spawn_rate = 0.01,
-            .spawn_rate_variance = 0.01,
-            .burst_count = 1,
-            .particle_lifetime = 10.0,
-            .initial_velocity = zm.f32x4(0.0, 0.0, 0.0, 0.0),
-            .scale = .{
-                .{ .value = zm.f32x4s(0.02), .key_time = 0.0, },
-                .{ .value = zm.f32x4s(0.02), .key_time = 0.95, },
-                .{ .value = zm.f32x4s(0.0), .key_time = 1.0, },
-                null
-            },
-            .colour = .{
-                // .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 0.0)) * zm.f32x4(1.0, 1.0, 1.0, 1.0), .key_time = 0.0, },
-                // .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 1.0)) * zm.f32x4(1.0, 1.0, 1.0, 1.0), .key_time = 0.05, },
-                .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 0.0)) * zm.f32x4(60.0, 60.0, 60.0, 1.0), .key_time = 0.0, },
-                .{ .value = zm.srgbToRgb(zm.f32x4(90.0/255.0, 195.0/255.0, 232.0/255.0, 1.0)) * zm.f32x4(60.0, 60.0, 60.0, 1.0), .key_time = 0.05, },
-                null,
-                null,
-            },
-            .forces = .{
-                //.{ .Constant = zm.f32x4(0.0, -9.8, 0.0, 0.0) },
-                .{ .Curl = 0.05 },
-                .{ .Drag = 1.0 },
-                .{ .Vortex = .{ .axis = zm.f32x4(1.0, 0.0, 0.0, 0.0), .force = 1.0, .origin_pull = 0.5,  } },
-                null,
-            },
-        },
-        &engine().gfx
-    );
-    errdefer zero_particle_system.deinit();
-
     var player_attack_particle_system = try particle.ParticleSystem.init(
         engine().general_allocator.allocator(),
-        60,
         .{
+            .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
             .shape = .Circle,
             .spawn_origin = zm.f32x4(0.0, 0.0, 0.0, 0.0),
@@ -426,7 +214,6 @@ pub fn init(self: *Self) !void {
                 null,
             },
         },
-        &engine().gfx
     );
     errdefer player_attack_particle_system.deinit();
 
@@ -448,15 +235,13 @@ pub fn init(self: *Self) !void {
             .orbit_distance = 5.0,
         },
 
-        .character_idx = chara_root_idx,
-        .opponent_idx = opponent_idx,
+        .character_idx = gen.GenerationalIndex.invalid(),
 
         //.character_ignore_self_filter = character_ignore_self_filter,
 
         .app_life_asset_pack_id = asset_pack_id,
         .turntable_model_id = turntable_model_id,
 
-        .zero_particle_system = zero_particle_system,
         .player_attack_particle_system = player_attack_particle_system,
 
         .terrain = terrain,
@@ -488,14 +273,16 @@ fn update(self: *Self) !void {
     defer self.standard_renderer.clear();
 
     // switch modes
-    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.F9)) {
+    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.F1)) {
         switch (self.current_mode) {
             .EDIT => {
                 self.current_mode = .PLAY;
+                engine().time.time_scale = 1.0;
             },
             .PLAY => {
                 self.current_mode = .EDIT;
                 self.edit_mode.editor_camera.transform = self.camera.transform;
+                engine().time.time_scale = 0.01;
             },
         }
     }
@@ -510,6 +297,54 @@ fn update(self: *Self) !void {
             render_camera = &self.edit_mode.editor_camera;
         },
         .PLAY => {
+            blk: {
+                if (self.character_idx.is_invalid()) {
+                    // spawn character
+                    const character_spawner_idx = engine().entities.find_entity_by_name("character-spawner") orelse break :blk;
+                    const character_spawner = engine().entities.get(character_spawner_idx).?;
+                    const character_spawner_transform = character_spawner.transform;
+
+                    const chara_shape = ph.ShapeSettings {
+                        .shape = .{ .Capsule = .{
+                            .half_height = 0.7,
+                            .radius = 0.2,
+                        } },
+                        .offset_transform = Transform {
+                            .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
+                            .rotation = zm.qidentity(),
+                        },
+                    };
+
+                    const character_virtual_settings = ph.CharacterVirtualSettings {
+                        .base = ph.CharacterBaseSettings {
+                            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
+                            .max_slope_angle = 70.0,
+                            .shape = chara_shape,
+                        },
+                        .mass = 70.0,
+                        .character_padding = 0.02,
+                    };
+
+                    self.character_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
+                        .name = "character entity",
+                        .should_serialize = false,
+                        .model = "default|character",
+                        .transform = Transform {
+                            .position = character_spawner_transform.position,
+                            .rotation = character_spawner_transform.rotation,
+                        },
+                        .physics = .{ .CharacterVirtual = .{
+                            .settings = character_virtual_settings,
+                            .create_character = true,
+                        } },
+                        .app = .{
+                            .health_points = 100,
+                            .anim_controller_desc = character_anim_description(),
+                        },
+                    });
+                }
+            }
+
             // Input to move the model around
             if (engine().entities.get(self.character_idx)) |character_entity| {
                 var movement_direction = zm.f32x4s(0.0);
@@ -532,6 +367,15 @@ fn update(self: *Self) !void {
                 movement_direction = 
                     camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
                     + camera_right * zm.f32x4s(movement_direction[0]);
+
+                const ground_normal = zm.normalize3(zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getGroundNormal()));
+                movement_direction = zm.cross3(zm.cross3(ground_normal, movement_direction), ground_normal);
+
+                engine().debug.draw_line(.{
+                    .p0 = character_entity.transform.position,
+                    .p1 = character_entity.transform.position + movement_direction,
+                    .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
+                });
 
                 if (@reduce(.Add, @abs(movement_direction)) != 0.0) {
                     movement_direction = zm.normalize3(movement_direction);
@@ -600,16 +444,8 @@ fn update(self: *Self) !void {
                         .position = shape_position
                     }).generate_model_matrix());
 
-                    if (engine().input.get_key(KeyCode.Control)) {
-                        if (engine().entities.get(self.opponent_idx)) |opponent_entity| {
-                            if (opponent_entity.app.anim_controller) |*ac| {
-                                ac.trigger_event("character attack");
-                            }
-                        }
-                    } else {
-                        if (character_entity.app.anim_controller) |*ac| {
-                            ac.trigger_event("character attack");
-                        }
+                    if (character_entity.app.anim_controller) |*ac| {
+                        ac.trigger_event("character attack");
                     }
 
                     // particles!
@@ -722,25 +558,21 @@ fn update(self: *Self) !void {
                     &m.nodes_list[m.root_nodes[0]],
                     entity.transform.generate_model_matrix()
                 );
+            } else {
+                if (self.current_mode == .EDIT) {
+                    const m = engine().asset_manager.get_model(engine().asset_manager.find_model_id("sphere").?) catch unreachable;
+                    self.recursive_render_model(
+                        @truncate(entity_id),
+                        m,
+                        null,
+                        null,
+                        &entity.transform.generate_model_matrix(), 
+                        &m.nodes_list[m.root_nodes[0]],
+                        entity.transform.generate_model_matrix()
+                    );
+                }
             }
         }
-    }
-
-    // render sea house scene
-    {
-        const m = engine().asset_manager.get_model(self.turntable_model_id) catch unreachable;
-
-        // Finally, render the model
-        const tt = Transform{ .scale = zm.f32x4s(0.05) };
-        self.recursive_render_model(
-            0,
-            m, 
-            null,
-            null,
-            &tt.generate_model_matrix(), 
-            &m.nodes_list[m.root_nodes[0]],
-            tt.generate_model_matrix()
-        );
     }
 
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
@@ -772,14 +604,21 @@ fn update(self: *Self) !void {
     // render terrain
     self.terrain.render(&self.standard_renderer.camera_data_buffer, &engine().gfx);
 
-    self.zero_particle_system.update(&engine().time);
-    self.zero_particle_system.draw(
-        camera_view_matrix,
-        camera_projection_matrix,
-        &rtv,
-        &self.depth_textures.dsv_read_only,
-        &engine().gfx
-    );
+    // update and render particle systems
+    var entities = engine().entities.list.iterator();
+    while (entities.next()) |entity| {
+        if (entity.app.particle_system) |*ps| {
+            ps.settings.spawn_origin = entity.transform.position;
+            ps.update(&engine().time);
+            ps.draw(
+                camera_view_matrix,
+                camera_projection_matrix,
+                &rtv,
+                &self.depth_textures.dsv_read_only,
+                &engine().gfx
+            );
+        }
+    }
 
     self.player_attack_particle_system.update(&engine().time);
     self.player_attack_particle_system.draw(
@@ -835,7 +674,7 @@ fn update(self: *Self) !void {
         _ = engine().imui.push_floating_layout(
             .Y, 
             5.0, 
-            5.0 - engine().imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            25.0 - engine().imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
         const l = engine().imui.label(fps_text);
@@ -1065,112 +904,85 @@ const CollideShapeCollector = extern struct {
     }
 };
 
-fn create_scene_entities(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
-    defer arena.deinit();
+fn character_anim_description() anim.AnimController.Descriptor {
+    const character_animation_idle_id = engine().asset_manager.find_animation_id("character idle").?;
+    const character_animation_walk_id = engine().asset_manager.find_animation_id("character walk").?;
+    const character_animation_run_id = engine().asset_manager.find_animation_id("character run").?;
+    const character_animation_attack_id = engine().asset_manager.find_animation_id("character attack").?;
 
-    var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
-    defer dir.close();
-
-    var iter = dir.iterate();
-    while (try iter.next()) |entry| {
-        _ = arena.reset(.retain_capacity);
-        if (entry.kind == .file) {
-            const ent_file = dir.openFile(entry.name, .{}) catch |err| {
-                std.log.err("Failed to open file {s}: {}", .{ entry.name, err });
-                continue;
-            };
-            defer ent_file.close();
-
-            const ent_str = ent_file.readToEndAlloc(arena.allocator(), 1024 * 1024) catch |err| {
-                std.log.err("Failed to read file {s}: {}", .{ entry.name, err });
-                continue;
-            };
-            defer arena.allocator().free(ent_str);
-
-            const ent_s = std.json.parseFromSliceLeaky(
-                sr.Serializable(Engine.EntityDescriptor),
-                arena.allocator(),
-                ent_str,
-                .{ .ignore_unknown_fields = true, }
-            ) catch |err| {
-                std.log.err("Failed to parse file {s}: {}", .{ entry.name, err });
-                continue;
-            };
-
-            const ent = sr.deserialize(Engine.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
-                std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
-                continue;
-            };
-
-            const loaded_entity = engine().entities.new_entity(ent) catch |err| {
-                std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
-                continue;
-            };
-            std.log.info("Loaded entity: {}", .{engine().entities.get(loaded_entity).?});
-        }
-    }
-}
-
-fn save_entities_to_scene(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
-    defer arena.deinit();
-
-    std.fs.cwd().deleteTree(scene_name) catch |err| {
-        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+    var anim_nodes = [_]anim.Node{
+        .{
+            .node = .{ .Basic = .{
+                .animation = character_animation_idle_id,
+            } },
+            .next = &[_]anim.NodeTransition{
+                anim.NodeTransition{
+                    .node = 1,
+                    .condition = anim.TransitionCondition{ .Float = .{
+                        .variable_id = anim.AnimController.hash_variable("character speed"),
+                        .comparison = .GreaterThan,
+                        .value = 0.05,
+                    } },
+                    .transition_duration = 0.1,
+                    .transition_easing = es.Easing.OutLinear,
+                },
+                anim.NodeTransition{
+                    .node = 2,
+                    .condition = anim.TransitionCondition{ .Event = .{
+                        .variable_id = anim.AnimController.hash_variable("character attack"),
+                    } },
+                    .transition_duration = 0.1,
+                    .transition_easing = es.Easing.OutLinear,
+                },
+            },
+        },
+        .{
+            .node = .{ .Blend1D = .{
+                .left_animation = character_animation_walk_id,
+                .right_animation = character_animation_run_id,
+                .variable = anim.AnimController.hash_variable("character speed"),
+                .left_value = 4.0,
+                .right_value = 8.0,
+                .left_strength_variable = anim.AnimController.hash_variable("character walk speed norm"),
+            } },
+            .next = &[_]anim.NodeTransition{
+                anim.NodeTransition{
+                    .node = 0,
+                    .condition = anim.TransitionCondition{ .Float = .{
+                        .variable_id = anim.AnimController.hash_variable("character speed"),
+                        .comparison = .LessThan,
+                        .value = 0.05,
+                    } },
+                    .transition_duration = 0.1,
+                    .transition_easing = es.Easing.OutLinear,
+                },
+                anim.NodeTransition{
+                    .node = 2,
+                    .condition = anim.TransitionCondition{ .Event = .{
+                        .variable_id = anim.AnimController.hash_variable("character attack"),
+                    } },
+                    .transition_duration = 0.1,
+                    .transition_easing = es.Easing.OutLinear,
+                },
+            },
+        },
+        .{
+            .node = .{ .Basic = .{
+                .animation = character_animation_attack_id,
+            } },
+            .next = &[_]anim.NodeTransition{
+                anim.NodeTransition{
+                    .node = 0,
+                    .condition = anim.TransitionCondition.Always,
+                    .transition_duration = 0.1,
+                    .transition_easing = es.Easing.OutLinear,
+                },
+            },
+        },
     };
 
-    var scene_dir: std.fs.Dir = undefined;
-    scene_dir = std.fs.cwd().openDir(scene_name, .{.iterate = true,}) catch blk: {
-        try std.fs.cwd().makeDir(scene_name);
-        break :blk try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    return anim.AnimController.Descriptor {
+        .nodes = anim_nodes[0..],
+        .base_animation = character_animation_idle_id,
     };
-    defer scene_dir.close();
-
-    var it = engine().entities.list.iterator();
-
-    var largest_serialize_id: u32 = 0;
-    while (it.next()) |entity| {
-        if (!entity.should_serialize) continue;
-        largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
-    }
-
-    it.reset();
-    while (it.next()) |entity| {
-        if (!entity.should_serialize) continue;
-        _ = arena.reset(.retain_capacity);
-
-        entity.serialize_id = entity.serialize_id orelse blk: {
-            largest_serialize_id += 1;
-            break :blk largest_serialize_id;
-        };
-
-        const entity_descriptor = entity.descriptor(arena.allocator()) catch |err| {
-            std.log.err("unable to produce descriptor for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-
-        const entity_s = sr.serialize(Engine.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
-            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-
-        const res = std.json.stringifyAlloc(arena.allocator(), entity_s, .{.whitespace = .indent_2}) catch |err| {
-            std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity.serialize_id.?}) catch |err| {
-            std.log.err("unable to produce file path for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-
-        scene_dir.writeFile(.{
-            .sub_path = file_path,
-            .data = res,
-            .flags = .{ .read = false, .truncate = true, },
-        }) catch |err| {
-            std.log.err("unable to write file for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-    }
 }
