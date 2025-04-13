@@ -1,0 +1,238 @@
+{
+  "should_serialize": true,
+  "serialize_id": 2,
+  "name": "new entity",
+  "transform": {
+    "position": [
+      -7.670997977256775e-1,
+      1.8541970252990723e0,
+      -4.310151100158691e0,
+      1e0
+    ],
+    "rotation": [
+      0e0,
+      0e0,
+      0e0,
+      1e0
+    ],
+    "scale": [
+      1e0,
+      1e0,
+      1e0,
+      1e0
+    ]
+  },
+  "model": null,
+  "physics": null,
+  "app": {
+    "health_points": null,
+    "anim_controller_desc": null,
+    "particle_system_settings": {
+      "max_particles": 2654,
+      "alignment": {
+        "Billboard": {}
+      },
+      "shape": {
+        "Circle": {}
+      },
+      "spawn_origin": [
+        -7.670997977256775e-1,
+        1.8541970252990723e0,
+        -4.310151100158691e0,
+        1e0
+      ],
+      "spawn_offset": [
+        0e0,
+        0e0,
+        0e0,
+        0e0
+      ],
+      "spawn_radius": 4.589997291564941e0,
+      "spawn_rate": 1.700005829334259e-1,
+      "spawn_rate_variance": 3.999995440244675e-2,
+      "burst_count": 1,
+      "particle_lifetime": 2.0000106811523438e1,
+      "particle_lifetime_variance": 0e0,
+      "initial_velocity": [
+        0e0,
+        4.3213367462158203e-7,
+        0e0,
+        0e0
+      ],
+      "scale": {
+        "buffer": [
+          {
+            "easing_into": "OutLinear",
+            "key_time": 0e0,
+            "value": [
+              0e0,
+              0e0,
+              0e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutLinear",
+            "key_time": 5.29999852180481e-1,
+            "value": [
+              1e0,
+              1e0,
+              1e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutLinear",
+            "key_time": 1e0,
+            "value": [
+              0e0,
+              0e0,
+              0e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "Constant",
+            "key_time": 0e0,
+            "value": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          },
+          {
+            "easing_into": "Constant",
+            "key_time": 0e0,
+            "value": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          },
+          {
+            "easing_into": "Constant",
+            "key_time": 0e0,
+            "value": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          }
+        ],
+        "len": 3
+      },
+      "colour": {
+        "buffer": [
+          {
+            "easing_into": "OutElastic",
+            "key_time": 0e0,
+            "value": [
+              4.290001392364502e0,
+              1e0,
+              1e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutQuart",
+            "key_time": 2.0000001788139343e-1,
+            "value": [
+              1e0,
+              5.399999618530273e0,
+              1e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutExpo",
+            "key_time": 6.699997186660767e-1,
+            "value": [
+              1e0,
+              1e0,
+              3.9200000762939453e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutLinear",
+            "key_time": 1e0,
+            "value": [
+              1e0,
+              1e0,
+              1e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutExpo",
+            "key_time": 6.699997186660767e-1,
+            "value": [
+              1e0,
+              1e0,
+              3.9200000762939453e0,
+              1e0
+            ]
+          },
+          {
+            "easing_into": "OutLinear",
+            "key_time": 8.599997162818909e-1,
+            "value": [
+              1e0,
+              1e0,
+              1e0,
+              1e0
+            ]
+          }
+        ],
+        "len": 4
+      },
+      "forces": {
+        "buffer": [
+          {
+            "Curl": 1.0000034421682358e-1
+          },
+          {
+            "Drag": 1e0
+          },
+          {
+            "Constant": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          },
+          {
+            "Constant": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          },
+          {
+            "Constant": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          },
+          {
+            "Constant": [
+              0e0,
+              0e0,
+              0e0,
+              0e0
+            ]
+          }
+        ],
+        "len": 1
+      }
+    },
+    "abc": 0
+  }
+}

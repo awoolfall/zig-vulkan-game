@@ -191,28 +191,20 @@ pub fn init(self: *Self) !void {
             .spawn_rate_variance = 0.0,
             .burst_count = 60,
             .particle_lifetime = 1.0,
-            .scale = .{
+            .scale = try particle.ScaleKeyFrameArray.fromSlice(&.{
                 .{ .value = zm.f32x4s(0.05), },
-                null,
-                null,
-                null,
-            },
-            .colour = .{
+            }),
+            .colour = try particle.ColourKeyFrameArray.fromSlice(&.{
                 .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0, },
                 .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 0.0)), .key_time = 1.0, .easing_into = .OutLinear },
-                null,
-                null,
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.0, 1.0, 1.0, 1.0)), .key_time = 0.0, },
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.5, 1.0, 1.0, 1.0)), .key_time = 0.5, },
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.999, 1.0, 1.0, 1.0)), .key_time = 1.0, },
-                // null
-            },
-            .forces = .{
+            }),
+            .forces = try particle.ForceArray.fromSlice(&.{
                 .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0, } },
                 .{ .Drag = 5.0 },
-                null,
-                null,
-            },
+            }),
         },
     );
     errdefer player_attack_particle_system.deinit();

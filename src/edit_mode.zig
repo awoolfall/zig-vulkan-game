@@ -56,7 +56,7 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
         _ = engine().entities.new_entity(EntityDescriptor {
             .name = "new entity",
             .should_serialize = true,
-            .model = "default|sphere",
+            .model = null,
             .transform = Transform {
                 .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
             },
@@ -72,6 +72,8 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
         };
 
         if (selection_entity_id == 0) {
+            self.selected_entity = null;
+        } else if (self.selected_entity != null and self.selected_entity.?.index == selection_entity_id) {
             self.selected_entity = null;
         } else {
             const entity = engine().entities.get_dont_check_generation(selection_entity_id);
@@ -223,6 +225,7 @@ const EntityEditorUiData = struct {
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
         self.name_edit_data.deinit();
+        self.particle_editor_data.deinit();
     }
 
     pub fn init(alloc: std.mem.Allocator) !EntityEditorUiData {
@@ -271,6 +274,9 @@ const EntityEditorUiData = struct {
             .options = shape_option_names,
         };
 
+        const particle_editor_data = pe.ParticleEditorData.init(engine().general_allocator.allocator());
+        errdefer particle_editor_data.deinit();
+
         return EntityEditorUiData {
             .arena = arena,
             .model_combobox_data = Imui.ComboBoxData {
@@ -281,13 +287,7 @@ const EntityEditorUiData = struct {
             .running_physics_desc = .{ .Body = .{} },
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
-            .particle_editor_data = pe.ParticleEditorData {
-                .settings = .{
-                    .max_particles = 100,
-                    .spawn_radius = 1.0,
-                    .spawn_rate = 1.0,
-                },
-            },
+            .particle_editor_data = particle_editor_data,
         };
     }
 
@@ -311,6 +311,7 @@ const EntityEditorUiData = struct {
 
         // set model text
         const model_text = if (entity.model) |mid| sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable else "None";
+        self.model_combobox_data.selected_index = null;
         for (self.model_combobox_data.options, 0..) |option, i| {
             if (std.mem.eql(u8, option, model_text)) {
                 self.model_combobox_data.selected_index = i;
@@ -386,7 +387,11 @@ fn entity_editor_ui(
         data.position[1] += engine().input.mouse_delta[1];
     }
 
-    _ = imui.label("Entity Editor");
+    const entity_editor_title_text = imui.label("Entity Editor");
+    if (imui.get_widget(entity_editor_title_text.id)) |entity_editor_title_widget| {
+        entity_editor_title_widget.anchor = .{ 0.5, 0.5 };
+        entity_editor_title_widget.pivot = .{ 0.5, 0.5 };
+    }
     _ = imui.checkbox(&entity.should_serialize, "should serialize", .{@src()});
 
     {

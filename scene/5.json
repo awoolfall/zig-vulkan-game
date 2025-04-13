@@ -1,0 +1,33 @@
+{
+  "should_serialize": true,
+  "serialize_id": 5,
+  "name": "sea-house",
+  "transform": {
+    "position": [
+      -2.9133875370025635e0,
+      -1.8447507172822952e-3,
+      4.306135654449463e0,
+      0e0
+    ],
+    "rotation": [
+      0e0,
+      0e0,
+      0e0,
+      1e0
+    ],
+    "scale": [
+      7.000032067298889e-2,
+      7.000061869621277e-2,
+      6.999960541725159e-2,
+      1e0
+    ]
+  },
+  "model": "default|model",
+  "physics": null,
+  "app": {
+    "health_points": null,
+    "anim_controller_desc": null,
+    "particle_system_settings": null,
+    "abc": 0
+  }
+}
