@@ -4,9 +4,9 @@
   "name": "character-spawner",
   "transform": {
     "position": [
-      -1.223582649230957e1,
+      1.8935131072998047e1,
       2.449751615524292e0,
-      -1.7496910095214844e0,
+      -1.4585468292236328e1,
       0e0
     ],
     "rotation": [
@@ -27,7 +27,6 @@
   "app": {
     "health_points": null,
     "anim_controller_desc": null,
-    "particle_system_settings": null,
-    "abc": 0
+    "particle_system_settings": null
   }
 }

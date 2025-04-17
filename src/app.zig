@@ -328,6 +328,7 @@ fn update(self: *Self) !void {
                         .physics = .{ .CharacterVirtual = .{
                             .settings = character_virtual_settings,
                             .create_character = true,
+                            .extended_update_settings = .{},
                         } },
                         .app = .{
                             .health_points = 100,
@@ -360,8 +361,8 @@ fn update(self: *Self) !void {
                     camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
                     + camera_right * zm.f32x4s(movement_direction[0]);
 
-                const ground_normal = zm.normalize3(zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getGroundNormal()));
-                movement_direction = zm.cross3(zm.cross3(ground_normal, movement_direction), ground_normal);
+                //const ground_normal = zm.normalize3(zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getGroundNormal()));
+                //movement_direction = zm.cross3(zm.cross3(ground_normal, movement_direction), ground_normal);
 
                 engine().debug.draw_line(.{
                     .p0 = character_entity.transform.position,

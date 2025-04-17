@@ -168,6 +168,7 @@ pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuper
         push_row_item_layout("shape: ", key ++ .{@src()});
         defer imui.pop_layout();
 
+        data.shape_combobox.selected_index = @intFromEnum(data.settings.shape);
         const shape_combobox = imui.combobox(&data.shape_combobox, key ++ .{@src()});
         if (shape_combobox.data_changed) {
             if (data.shape_combobox.selected_index) |si| {
@@ -186,6 +187,7 @@ pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuper
         push_row_item_layout("alignment: ", key ++ .{@src()});
         defer imui.pop_layout();
 
+        data.alignment_combobox.selected_index = @intFromEnum(data.settings.alignment);
         const combobox = imui.combobox(&data.alignment_combobox, key ++ .{@src()});
         if (combobox.data_changed) {
             if (data.alignment_combobox.selected_index) |si| {

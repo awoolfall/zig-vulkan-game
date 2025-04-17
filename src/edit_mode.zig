@@ -25,6 +25,7 @@ entity_editor_ui_data: EntityEditorUiData,
 selected_entity: ?GenerationalIndex = null,
 
 file_dropdown_open: bool = false,
+edit_dropdown_open: bool = false,
 
 pub fn deinit(self: *Self) void {
     self.entity_editor_ui_data.deinit();
@@ -53,16 +54,12 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
 
     // new entity button
     if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.E)) {
-        _ = engine().entities.new_entity(EntityDescriptor {
-            .name = "new entity",
-            .should_serialize = true,
-            .model = null,
-            .transform = Transform {
-                .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
-            },
-        }) catch |err| {
-            std.log.err("Failed to create entity: {}", .{err});
-        };
+        self.create_new_entity();
+    }
+
+    // delete entity button
+    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.Delete)) {
+        self.remove_selected_entity();
     }
 
     if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.MouseLeft) and engine().input.get_key(KeyCode.Shift)) {
@@ -122,62 +119,117 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
         label_widget.pivot = .{ 0.5, 0.5 };
     }
 
-    _ = imui.push_layout(.X, .{@src()});
-    const file_button = imui.button("File", .{@src()});
-    if (imui.get_widget(file_button.id.box)) |file_widget| {
-        file_widget.background_colour = imui.palette().background;
-        file_widget.background_colour.?[3] = 1.0;
-        file_widget.border_width_px = 0;
-        file_widget.padding_px = .{
-            .top = 5,
-            .bottom = 5,
-            .left = 10,
-            .right = 10,
-        };
+    const items_layout = imui.push_layout(.X, .{@src()});
+    if (imui.get_widget(items_layout)) |ilw| {
+        ilw.children_gap = 4;
     }
-    if (imui.get_widget(file_button.id.text)) |text_widget| {
-        text_widget.text_content.?.colour = imui.palette().text_dark;
-    }
-    if (file_button.clicked) {
-        self.file_dropdown_open = !self.file_dropdown_open;
-    }
-    defer {
-        if (!file_button.clicked) {
-            if (engine().input.get_key_down(KeyCode.MouseLeft)) {
-                self.file_dropdown_open = false;
+
+    {
+        const file_button = imui.button("File", .{@src()});
+        if (imui.get_widget(file_button.id.box)) |file_widget| {
+            file_widget.background_colour = zm.f32x4s(0.0);
+            file_widget.border_width_px = 0;
+            file_widget.padding_px = .{
+                .top = 5,
+                .bottom = 5,
+                .left = 10,
+                .right = 10,
+            };
+        }
+        if (imui.get_widget(file_button.id.text)) |text_widget| {
+            text_widget.text_content.?.colour = imui.palette().text_dark;
+        }
+        if (file_button.clicked) {
+            self.file_dropdown_open = !self.file_dropdown_open;
+        }
+        defer {
+            if (!file_button.clicked) {
+                if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+                    self.file_dropdown_open = false;
+                }
+            }
+        }
+
+        file_blk: {
+            if (self.file_dropdown_open) {
+                const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
+                const file_lfw_rect = file_lfw.computed.rect();
+                const file_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(file_lfw_rect.left), @floatFromInt(file_lfw_rect.top + file_lfw_rect.height), .{@src()});
+                if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
+                    file_dropdown_widget.flags.render = true;
+                    file_dropdown_widget.background_colour = imui.palette().background;
+                }
+                defer imui.pop_layout();
+
+                const save_button = imui.badge("Save Scene", .{@src()});
+                if (save_button.clicked) {
+                    save_entities_to_scene("scene") catch |err| {
+                        std.log.err("Failed to save scene: {}", .{err});
+                    };
+                    std.log.debug("saved!", .{});
+                }
+                const load_button = imui.badge("Load Scene", .{@src()});
+                if (load_button.clicked) {
+                    for (engine().entities.list.data.items, 0..) |*it, idx| {
+                        if (it.item_data) |_| {
+                            engine().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
+                        }
+                    }
+                    create_scene_entities("scene") catch |err| {
+                        std.log.err("Failed to load scene: {}", .{err});
+                    };
+                    std.log.debug("loaded!", .{});
+                }
             }
         }
     }
 
-    file_blk: {
-        if (self.file_dropdown_open) {
-            const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
-            const file_lfw_rect = file_lfw.computed.rect();
-            const file_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(file_lfw_rect.left), @floatFromInt(file_lfw_rect.top + file_lfw_rect.height), .{@src()});
-            if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
-                file_dropdown_widget.flags.render = true;
-                file_dropdown_widget.background_colour = imui.palette().background;
-            }
-            defer imui.pop_layout();
-
-            const save_button = imui.badge("Save Scene", .{@src()});
-            if (save_button.clicked) {
-                save_entities_to_scene("scene") catch |err| {
-                    std.log.err("Failed to save scene: {}", .{err});
-                };
-                std.log.debug("saved!", .{});
-            }
-            const load_button = imui.badge("Load Scene", .{@src()});
-            if (load_button.clicked) {
-                for (engine().entities.list.data.items, 0..) |*it, idx| {
-                    if (it.item_data) |_| {
-                        engine().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
-                    }
+    {
+        const edit_button = imui.button("Edit", .{@src()});
+        if (imui.get_widget(edit_button.id.box)) |edit_widget| {
+            edit_widget.background_colour = zm.f32x4s(0.0);
+            edit_widget.border_width_px = 0;
+            edit_widget.padding_px = .{
+                .top = 5,
+                .bottom = 5,
+                .left = 10,
+                .right = 10,
+            };
+        }
+        if (imui.get_widget(edit_button.id.text)) |text_widget| {
+            text_widget.text_content.?.colour = imui.palette().text_dark;
+        }
+        if (edit_button.clicked) {
+            self.edit_dropdown_open = !self.edit_dropdown_open;
+        }
+        defer {
+            if (!edit_button.clicked) {
+                if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+                    self.edit_dropdown_open = false;
                 }
-                create_scene_entities("scene") catch |err| {
-                    std.log.err("Failed to load scene: {}", .{err});
-                };
-                std.log.debug("loaded!", .{});
+            }
+        }
+
+        edit_blk: {
+            if (self.edit_dropdown_open) {
+                const edit_lfw = imui.get_widget_from_last_frame(edit_button.id.box) orelse break :edit_blk;
+                const edit_lfw_rect = edit_lfw.computed.rect();
+                const edit_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(edit_lfw_rect.left), @floatFromInt(edit_lfw_rect.top + edit_lfw_rect.height), .{@src()});
+                if (imui.get_widget(edit_dropdown)) |edit_dropdown_widget| {
+                    edit_dropdown_widget.flags.render = true;
+                    edit_dropdown_widget.background_colour = imui.palette().background;
+                }
+                defer imui.pop_layout();
+
+                const new_button = imui.badge("New Entity", .{@src()});
+                if (new_button.clicked) {
+                    self.create_new_entity();
+                }
+
+                const delete_button = imui.badge("Delete Entity", .{@src()});
+                if (delete_button.clicked) {
+                    self.remove_selected_entity();
+                }
             }
         }
     }
@@ -204,6 +256,28 @@ pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gf
     }
 }
 
+fn create_new_entity(self: *Self) void {
+    _ = engine().entities.new_entity(EntityDescriptor {
+        .name = "new entity",
+        .should_serialize = true,
+        .model = null,
+        .transform = Transform {
+            .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
+        },
+        }) catch |err| {
+        std.log.err("Failed to create entity: {}", .{err});
+    };
+}
+
+fn remove_selected_entity(self: *Self) void {
+    if (self.selected_entity) |selected_entity| {
+        engine().entities.remove_entity(selected_entity) catch |err| {
+            std.log.err("Failed to remove entity: {}", .{err});
+        };
+        self.selected_entity = null;
+    }
+}
+
 const EntityEditorUiData = struct {
     arena: std.heap.ArenaAllocator,
     inited: bool = false,
@@ -216,7 +290,7 @@ const EntityEditorUiData = struct {
     physics_checkbox: bool = false,
     physics_combobox_data: Imui.ComboBoxData,
     shape_combobox_data: Imui.ComboBoxData,
-    running_physics_desc: en.entity.PhysicsOptionsDescriptor,
+    running_physics_desc: ?en.entity.PhysicsOptionsDescriptor = null,
 
     particle_checkbox: bool = false,
     particle_editor_data: pe.ParticleEditorData,
@@ -258,6 +332,7 @@ const EntityEditorUiData = struct {
 
         const physics_combobox_data = Imui.ComboBoxData {
             .default_text = "None",
+            .can_be_default = true,
             .options = physics_option_names,
         };
 
@@ -284,7 +359,6 @@ const EntityEditorUiData = struct {
                 .options = options,
             },
             .name_edit_data = Imui.TextInputState.init(engine().general_allocator.allocator()),
-            .running_physics_desc = .{ .Body = .{} },
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
             .particle_editor_data = particle_editor_data,
@@ -323,9 +397,9 @@ const EntityEditorUiData = struct {
         // set physics descriptor
         if (entity.physics) |*physics| {
             self.running_physics_desc = physics.descriptor();
-            self.physics_combobox_data.selected_index = @intFromEnum(self.running_physics_desc);
+            self.physics_combobox_data.selected_index = @intFromEnum(self.running_physics_desc.?);
         } else {
-            self.running_physics_desc = .{ .Body = .{} };
+            self.running_physics_desc = null;
             self.physics_combobox_data.selected_index = null;
         }
     }
@@ -521,13 +595,13 @@ fn entity_editor_ui(
         const physics_button = imui.badge("Set Physics", key ++ .{@src()});
         if (physics_button.clicked) {
             if (data.physics_combobox_data.selected_index) |_| {
-                entity.set_physics(self.selected_entity.?, data.running_physics_desc, &engine().physics) catch unreachable;
+                entity.set_physics(self.selected_entity.?, data.running_physics_desc.?, &engine().physics) catch unreachable;
             } else {
                 entity.remove_physics(&engine().physics);
             }
         }
 
-        data.physics_combobox_data.selected_index = @intFromEnum(data.running_physics_desc);
+        data.physics_combobox_data.selected_index = if (data.running_physics_desc) |d| @intFromEnum(d) else null;
         const physics_combobox = imui.combobox(&data.physics_combobox_data, key ++ .{@src()});
         if (physics_combobox.data_changed) {
             if (data.physics_combobox_data.selected_index) |si| {
@@ -550,18 +624,20 @@ fn entity_editor_ui(
             }
             defer imui.pop_layout();
 
-            switch (data.running_physics_desc) {
-                .Body => |*b| {
-                    physics_shape_editor_ui(entity, &b.settings, data, key ++ .{@src()});
-                    _ = imui.checkbox(&b.is_sensor, "is sensor", key ++ .{@src()});
-                    _ = imui.checkbox(&b.is_static, "is static", key ++ .{@src()});
-                },
-                .Character => |_| {
-                    _ = imui.label("is character");
-                },
-                .CharacterVirtual => |_| {
-                    _ = imui.label("is virtual character");
-                },
+            if (data.running_physics_desc) |*running_physics_desc| {
+                switch (running_physics_desc.*) {
+                    .Body => |*b| {
+                        physics_shape_editor_ui(entity, &b.settings, data, key ++ .{@src()});
+                        _ = imui.checkbox(&b.is_sensor, "is sensor", key ++ .{@src()});
+                        _ = imui.checkbox(&b.is_static, "is static", key ++ .{@src()});
+                    },
+                    .Character => |_| {
+                        _ = imui.label("is character");
+                    },
+                    .CharacterVirtual => |_| {
+                        _ = imui.label("is virtual character");
+                    },
+                }
             }
         }
     }

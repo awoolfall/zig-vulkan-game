@@ -1,12 +1,12 @@
 {
   "should_serialize": true,
-  "serialize_id": 3,
+  "serialize_id": 7,
   "name": "new entity",
   "transform": {
     "position": [
-      1.9706059247255325e-3,
-      -7.854960858821869e-5,
-      -2.724871039390564e-3,
+      -9.97329330444336e0,
+      1.0231966018676758e1,
+      -2.1798418045043945e1,
       1e0
     ],
     "rotation": [
@@ -16,22 +16,18 @@
       1e0
     ],
     "scale": [
-      1.0002991485595703e2,
-      2.500007152557373e-1,
-      1.0000015258789062e2,
+      1e0,
+      1e0,
+      1e0,
       1e0
     ]
   },
-  "model": "default|cube",
+  "model": "default|cone",
   "physics": {
     "Body": {
       "settings": {
         "shape": {
-          "Box": {
-            "width": 1e0,
-            "height": 1e0,
-            "depth": 1e0
-          }
+          "ModelCompoundConvexHull": "default|cone"
         },
         "offset_transform": {
           "position": [
