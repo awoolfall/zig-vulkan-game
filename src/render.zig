@@ -63,11 +63,13 @@ pub const LightType = enum (u32) {
 };
 
 pub const Light = extern struct {
-    position: zm.F32x4,
-    colour: zm.F32x4,
-    intensity: f32,
-    type: LightType,
-    padding: [2]u32 = .{ 0, 0 },
+    position: zm.F32x4 = zm.f32x4s(0.0),
+    direction: zm.F32x4 = zm.f32x4(0.0, -1.0, 0.0, 0.0),
+    colour: zm.F32x4 = zm.f32x4(1.0, 1.0, 1.0, 1.0),
+    intensity: f32 = 0.0,
+    umbra: f32 = std.math.degreesToRadians(20.0),
+    delta_penumbra: f32 = std.math.degreesToRadians(0.5), // degrees smaller the penumbra is compared to the umbra
+    light_type: LightType = .Directional,
 };
 
 const MAX_LIGHTS: usize = 4;
@@ -282,12 +284,7 @@ pub fn render(
             mapped_buffer.data().lights[i] = self.lights.items[i];
         }
         while (i < MAX_LIGHTS) : (i += 1) {
-            mapped_buffer.data().lights[i] = Light {
-                .position = zm.f32x4(1.0, 2.0, 3.0, 4.0),
-                .colour = zm.f32x4(5.0, 6.0, 7.0, 8.0),
-                .type = .Directional,
-                .intensity = 0.0,
-            };
+            mapped_buffer.data().lights[i] = .{};
         }
     }
 

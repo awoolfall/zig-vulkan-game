@@ -572,6 +572,7 @@ fn update(self: *Self) !void {
 
             if (entity.app.light) |*light| {
                 light.position = entity.transform.position;
+                light.direction = entity.transform.forward_direction();
                 self.standard_renderer.push_light(light.*) catch unreachable;
             }
         }

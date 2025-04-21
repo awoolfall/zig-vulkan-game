@@ -286,7 +286,7 @@ fn duplicate_selected_entity(self: *Self) void {
             return;
         };
         self.selected_entity = new_entity;
-        std.log.info("duplicated entity: {}", .{engine().entities.get(new_entity).?});
+        //std.log.info("duplicated entity: {}", .{engine().entities.get(new_entity).?});
     }
 }
 
@@ -699,38 +699,28 @@ fn entity_editor_ui(
 
     _ = imui.collapsible(&data.light_checkbox, "Light", key ++ .{@src()});
     if (data.light_checkbox) {
-        data.light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.type) else null;
+        data.light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.light_type) else null;
         const light_type_combobox = imui.combobox(&data.light_type_combobox_data, key ++ .{@src()});
         if (light_type_combobox.data_changed) {
             if (data.light_type_combobox_data.selected_index) |si| {
-                switch (@as(StandardRenderer.LightType, @enumFromInt(si))) {
-                    .Directional => entity.app.light = .{
-                        .position = entity.transform.position,
-                        .colour = zm.f32x4s(1.0),
-                        .type = .Directional,
+                if (entity.app.light == null) {
+                    entity.app.light = .{
                         .intensity = 1.0,
-                    },
-                    .Point => entity.app.light = .{
-                        .position = entity.transform.position,
-                        .colour = zm.f32x4s(1.0),
-                        .type = .Point,
-                        .intensity = 1.0,
-                    },
-                    .Spot => entity.app.light = .{
-                        .position = entity.transform.position,
-                        .colour = zm.f32x4s(1.0),
-                        .type = .Spot,
-                        .intensity = 1.0,
-                    },
+                    };
                 }
+                entity.app.light.?.light_type = @as(StandardRenderer.LightType, @enumFromInt(si));
             } else {
                 entity.app.light = null;
             }
         }
         if (entity.app.light) |*light| {
             {
-                _ = imui.push_layout(.X, key ++ .{@src()});
-                defer imui.pop_layout();
+                const ll = engine().imui.push_layout(.X, key ++ .{@src()});
+                if (engine().imui.get_widget(ll)) |ll_widget| {
+                    ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+                    ll_widget.children_gap = 4;
+                }
+                defer engine().imui.pop_layout();
 
                 _ = imui.label("colour: ");
                 _ = imui.number_slider(&light.colour[0], .{}, key ++ .{@src()});
@@ -738,6 +728,16 @@ fn entity_editor_ui(
                 _ = imui.number_slider(&light.colour[2], .{}, key ++ .{@src()});
             }
             labeled_number_slider("intensity:", &light.intensity, key ++ .{@src()});
+
+            if (light.light_type == .Spot) {
+                var umbra_degrees = std.math.radiansToDegrees(light.umbra);
+                labeled_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
+                light.umbra = std.math.degreesToRadians(umbra_degrees);
+
+                var penumbra_degrees = std.math.radiansToDegrees(light.delta_penumbra);
+                labeled_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
+                light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
+            }
         }
     }
 }

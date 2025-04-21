@@ -24,8 +24,11 @@ cbuffer bone_data : register(b2)
 struct light
 {
     float4 position;
+    float4 direction;
     float4 colour;
     float intensity;
+    float umbra;
+    float penumbra;
     unsigned int type;
 };
 #define LIGHT_TYPE_DIRECTIONAL 0
@@ -130,22 +133,43 @@ ps_out ps_main(vs_out input)
     for (int i = 0; i < MAX_LIGHTS; i++) {
         if (lights[i].intensity < 0.05) { continue; }
 
+        // TODO: distance max, smoothstep to zero, cull lights
         if (lights[i].type == LIGHT_TYPE_DIRECTIONAL) {
-            output.colour = lights[i].colour;
-            return output;
-            //float3 light_dir = normalize(lights[i].position.xyz - input.world_pos.xyz);
-            //float diffuse = clamp(dot(normalize(input.normal), light_dir), 0.1, 1.0);
-            //output.colour += lights[i].colour * diffuse * lights[i].intensity;
+            float3 light_colour = lights[i].colour.rgb * lights[i].intensity;
+            float light_diffuse = saturate(dot(normalize(input.normal), -normalize(lights[i].direction.xyz)));
+
+            output.colour.rgb += light_colour * light_diffuse;
         }
         else if (lights[i].type == LIGHT_TYPE_POINT) {
             float3 light_dir = normalize(lights[i].position.xyz - input.world_pos.xyz);
-            float dist = length(input.world_pos.xyz - lights[i].position.xyz);
-            float attenuation = 1.0 / (1.0 + dist * dist);
-            output.colour.rgb += saturate(dot(light_dir, normalize(input.normal))) * lights[i].colour.rgb * attenuation * lights[i].intensity;
+            float dist = length(lights[i].position.xyz - input.world_pos.xyz);
+            dist = max(dist, 0.01);
+            float attenuation = (lights[i].intensity * lights[i].intensity) / (dist * dist);
+
+            float3 light_colour = lights[i].colour.rgb * attenuation;
+            float light_diffuse = saturate(dot(light_dir, normalize(input.normal)));
+            
+            output.colour.rgb += light_colour * light_diffuse;
+        }
+        else if (lights[i].type == LIGHT_TYPE_SPOT) {
+            float dist = length(lights[i].position.xyz - input.world_pos.xyz);
+            float attenuation = (lights[i].intensity * lights[i].intensity) / (dist * dist);
+
+            float3 light_dir = normalize(lights[i].position.xyz - input.world_pos.xyz);
+            float ts = dot(light_dir, -normalize(lights[i].direction.xyz));
+            float tu = cos(lights[i].umbra);
+            float t = saturate((ts - tu) / (cos(lights[i].umbra - lights[i].penumbra) - tu));
+            float fdir = t * t;
+
+            float3 light_colour = lights[i].colour.rgb * fdir * attenuation;
+            float light_diffuse = saturate(dot(light_dir, normalize(input.normal)));
+
+            output.colour.rgb += light_colour * light_diffuse;
         }
     }
     output.colour.a = 1.0;
 
+    //output.colour = float4((normalize(input.normal) + 1.0) / 2.0 , 1.0);
     //output.colour = lerp(output.colour, float4(1.0, 1.0, 1.0, 1.0), fresnel);
     //output.colour = float4(fresnel, fresnel, fresnel, 1.0);
     //output.colour = float4(input.view_dir, 1.0);
