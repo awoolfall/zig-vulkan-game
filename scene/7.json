@@ -57,6 +57,7 @@
   "app": {
     "health_points": null,
     "anim_controller_desc": null,
-    "particle_system_settings": null
+    "particle_system_settings": null,
+    "light": null
   }
 }

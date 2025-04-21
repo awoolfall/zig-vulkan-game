@@ -8,6 +8,7 @@ const gfx = en.gfx;
 const Gizmo = @import("gizmo/gizmo.zig");
 const SelectionTextures = @import("selection_textures.zig");
 const pe = @import("particle_editor.zig");
+const StandardRenderer = @import("render.zig");
 
 const zm = en.zmath;
 const sr = en.serialize;
@@ -230,6 +231,11 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
+
+                const duplicate_button = imui.badge("Duplicate Entity", .{@src()});
+                if (duplicate_button.clicked) {
+                    self.duplicate_selected_entity();
+                }
             }
         }
     }
@@ -269,6 +275,21 @@ fn create_new_entity(self: *Self) void {
     };
 }
 
+fn duplicate_selected_entity(self: *Self) void {
+    if (self.selected_entity) |selected_entity| {
+        const descriptor = engine().entities.get(selected_entity).?.descriptor(engine().frame_allocator) catch |err| {
+            std.log.err("Failed to create descriptor for entity: {}", .{err});
+            return;
+        };
+        const new_entity = engine().entities.new_entity(descriptor) catch |err| {
+            std.log.err("Failed to duplicate entity: {}", .{err});
+            return;
+        };
+        self.selected_entity = new_entity;
+        std.log.info("duplicated entity: {}", .{engine().entities.get(new_entity).?});
+    }
+}
+
 fn remove_selected_entity(self: *Self) void {
     if (self.selected_entity) |selected_entity| {
         engine().entities.remove_entity(selected_entity) catch |err| {
@@ -295,6 +316,9 @@ const EntityEditorUiData = struct {
     particle_checkbox: bool = false,
     particle_editor_data: pe.ParticleEditorData,
     particle_position: [2]f32 = .{ 0.0, 0.0 },
+
+    light_checkbox: bool = false,
+    light_type_combobox_data: Imui.ComboBoxData,
 
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
@@ -352,6 +376,19 @@ const EntityEditorUiData = struct {
         const particle_editor_data = pe.ParticleEditorData.init(engine().general_allocator.allocator());
         errdefer particle_editor_data.deinit();
 
+        // generate light type option names from enum
+        const light_type_options_fields = @typeInfo(StandardRenderer.LightType).@"enum".fields;
+        const light_type_option_names = arena.allocator().alloc([]const u8, light_type_options_fields.len) catch unreachable;
+        inline for (light_type_options_fields, 0..) |field, field_idx| {
+            light_type_option_names[field_idx] = field.name;
+        }
+
+        const light_type_combobox_data = Imui.ComboBoxData {
+            .default_text = "None",
+            .can_be_default = true,
+            .options = light_type_option_names,
+        };
+
         return EntityEditorUiData {
             .arena = arena,
             .model_combobox_data = Imui.ComboBoxData {
@@ -362,6 +399,7 @@ const EntityEditorUiData = struct {
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
             .particle_editor_data = particle_editor_data,
+            .light_type_combobox_data = light_type_combobox_data,
         };
     }
 
@@ -657,6 +695,50 @@ fn entity_editor_ui(
         }
 
         pe.particle_editor(&data.particle_editor_data, entity, key ++ .{@src()});
+    }
+
+    _ = imui.collapsible(&data.light_checkbox, "Light", key ++ .{@src()});
+    if (data.light_checkbox) {
+        data.light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.type) else null;
+        const light_type_combobox = imui.combobox(&data.light_type_combobox_data, key ++ .{@src()});
+        if (light_type_combobox.data_changed) {
+            if (data.light_type_combobox_data.selected_index) |si| {
+                switch (@as(StandardRenderer.LightType, @enumFromInt(si))) {
+                    .Directional => entity.app.light = .{
+                        .position = entity.transform.position,
+                        .colour = zm.f32x4s(1.0),
+                        .type = .Directional,
+                        .intensity = 1.0,
+                    },
+                    .Point => entity.app.light = .{
+                        .position = entity.transform.position,
+                        .colour = zm.f32x4s(1.0),
+                        .type = .Point,
+                        .intensity = 1.0,
+                    },
+                    .Spot => entity.app.light = .{
+                        .position = entity.transform.position,
+                        .colour = zm.f32x4s(1.0),
+                        .type = .Spot,
+                        .intensity = 1.0,
+                    },
+                }
+            } else {
+                entity.app.light = null;
+            }
+        }
+        if (entity.app.light) |*light| {
+            {
+                _ = imui.push_layout(.X, key ++ .{@src()});
+                defer imui.pop_layout();
+
+                _ = imui.label("colour: ");
+                _ = imui.number_slider(&light.colour[0], .{}, key ++ .{@src()});
+                _ = imui.number_slider(&light.colour[1], .{}, key ++ .{@src()});
+                _ = imui.number_slider(&light.colour[2], .{}, key ++ .{@src()});
+            }
+            labeled_number_slider("intensity:", &light.intensity, key ++ .{@src()});
+        }
     }
 }
 

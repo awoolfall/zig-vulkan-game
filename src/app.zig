@@ -40,6 +40,7 @@ pub const EntityData = struct {
     health_points: ?i32,
     anim_controller: ?anim.AnimController,
     particle_system: ?particle.ParticleSystem,
+    light: ?StandardRenderer.Light,
 
     pub fn deinit(self: *EntityData) void {
         if (self.anim_controller) |*anim_controller| {
@@ -59,6 +60,7 @@ pub const EntityData = struct {
             .particle_system = if (desc.particle_system_settings) |ps| 
                 try particle.ParticleSystem.init(engine().general_allocator.allocator(), ps) 
                 else null,
+            .light = if (desc.light) |l| l else null,
         };
     }
 
@@ -72,6 +74,7 @@ pub const EntityData = struct {
             .health_points = self.health_points,
             .anim_controller_desc = anim_desc,
             .particle_system_settings = particle_system_settings,
+            .light = self.light,
         };
     }
 
@@ -79,6 +82,7 @@ pub const EntityData = struct {
         health_points: ?i32 = null,
         anim_controller_desc: ?anim.AnimController.Descriptor = null,
         particle_system_settings: ?particle.ParticleSystemSettings = null,
+        light: ?StandardRenderer.Light = null,
     };
 };
 
@@ -565,6 +569,11 @@ fn update(self: *Self) !void {
                     );
                 }
             }
+
+            if (entity.app.light) |*light| {
+                light.position = entity.transform.position;
+                self.standard_renderer.push_light(light.*) catch unreachable;
+            }
         }
     }
 
@@ -610,6 +619,10 @@ fn update(self: *Self) !void {
                 &self.depth_textures.dsv_read_only,
                 &engine().gfx
             );
+        }
+
+        if (entity.app.light) |light| {
+            self.standard_renderer.push_light(light) catch unreachable;
         }
     }
 
