@@ -221,7 +221,7 @@ pub fn init(self: *Self) !void {
         .selection_textures = selection_textures,
 
         .camera = cm.Camera {
-            .field_of_view_y = 20.0,
+            .field_of_view_y = cm.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 1000.0,
             .move_speed = 10.0,
@@ -708,10 +708,11 @@ fn update(self: *Self) !void {
         _ = engine().imui.pop_layout();
     }
 
-    const exposure = 2.0;
     engine().gfx.tone_mapping_filter.apply_filter(
         &engine().gfx.hdr_texture_view, 
-        exposure, 
+        .{
+            .black_and_white = engine().input.get_key(KeyCode.B),
+        },
         engine().gfx.get_framebuffer(), 
         &engine().gfx
     );

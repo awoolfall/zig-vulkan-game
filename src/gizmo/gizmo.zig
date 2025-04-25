@@ -62,7 +62,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
-    const line_width = 0.05;
+    const line_width = 0.03;
 
     const torus_shape = zmesh.Shape.initTorus(16, 64, line_width);
     defer torus_shape.deinit();
@@ -572,18 +572,30 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
     gfx.cmd_set_index_buffer(&self.torus_index_buffer, .U32, 0);
 
     const base_rot = if (get_coord_space() == .local) zm.matFromQuat(transform.rotation) else zm.identity();
-    const base_tra = zm.translationV(transform.position);
+    const distance = 10.0;
+    const distance_f32x4 = zm.f32x4(distance, distance, distance, 0.0);
+    const base_tra = zm.translationV(zm.normalize3(transform.position - camera.transform.position) * distance_f32x4 + camera.transform.position);
 
     // render white torus
     {
         const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
+        var cam_pos = camera.transform.position;
+        cam_pos[3] = 0.0;
+        engine().debug.draw_line(.{
+            .p0 = transform.position,
+            .p1 = zm.normalize3(camera.transform.position - transform.position) + transform.position + zm.f32x4(0.1, 0.0, 0.0, 0.0),
+            .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
+        });
+        std.debug.print("camera_pos {d}, transform_pos {d}\n", .{ camera.transform.position, transform.position });
+
         mapped_buffer.data().* = .{
-            .model_matrix = zm.mul(
-                zm.matFromQuat(camera.transform.rotation), 
-                base_tra
-            ),
+            .model_matrix = 
+                zm.mul(
+                    zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(cam_pos - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
+                    base_tra,
+                ),
             .colour = WHITE,
             .id = @intFromEnum(GizmoControl.None),
         };

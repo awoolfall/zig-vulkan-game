@@ -16,11 +16,6 @@ cbuffer instance_data : register(b1)
 #define IS_SELECTED_BIT 0x1
 #define IS_UNLIT_BIT 0x2
 
-cbuffer bone_data : register(b2)
-{
-    row_major float4x4 bone_matricies[1024];
-}
-
 struct light
 {
     float4 position;
@@ -36,10 +31,17 @@ struct light
 #define LIGHT_TYPE_SPOT 2
 
 #define MAX_LIGHTS 4
-cbuffer lights_data : register(b3)
+cbuffer lights_data : register(b2)
 {
     light lights[MAX_LIGHTS];
 }
+
+#ifdef SKELETAL_RENDERING
+cbuffer bone_data : register(b3)
+{
+    row_major float4x4 bone_matricies[1024];
+}
+#endif
 
 Texture2D diffuse_texture;
 SamplerState diffuse_sampler;
@@ -51,8 +53,10 @@ struct vs_in
     float3 tangents : TANGENT;
     float3 bitangents : BITANGENT;
     float2 tex_coord : TEXCOORD0;
-    int4 bone_ids : TEXCOORD1;
-    float4 bone_weights : TEXCOORD2;
+#ifdef SKELETAL_RENDERING
+    int4 bone_ids : BONE_IDS;
+    float4 bone_weights : BONE_WEIGHTS;
+#endif
 };
 
 struct vs_out
@@ -68,12 +72,17 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
 {
     vs_out output = (vs_out) 0;
 
+    output.position = float4(input.pos, 1.0);
+
+#ifdef SKELETAL_RENDERING
     float4x4 bone_mat = bone_matricies[input.bone_ids[0] + start_bone_idx] * input.bone_weights[0];
     bone_mat         += bone_matricies[input.bone_ids[1] + start_bone_idx] * input.bone_weights[1];
     bone_mat         += bone_matricies[input.bone_ids[2] + start_bone_idx] * input.bone_weights[2];
     bone_mat         += bone_matricies[input.bone_ids[3] + start_bone_idx] * input.bone_weights[3];
 
-    output.position = mul(float4(input.pos, 1.0), bone_mat);
+    output.position = mul(output.position, bone_mat);
+#endif
+
     output.position = mul(output.position, model_matrix);
 
     output.world_pos = float4(output.position.xyz, 0.0);

@@ -38,7 +38,7 @@ pub fn init() !Self {
         .gizmo = try Gizmo.init(engine().general_allocator.allocator(), &engine().gfx),
         .entity_editor_ui_data = try EntityEditorUiData.init(engine().general_allocator.allocator()),
         .editor_camera = Camera {
-            .field_of_view_y = Camera.horizontal_to_vertical_fov(90.0, engine().gfx.swapchain_aspect()),
+            .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 1000.0,
             .move_speed = 10.0,
@@ -91,7 +91,7 @@ pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
     const imui = &engine().imui;
 
     self.entity_editor_ui(&self.entity_editor_ui_data, .{@src()});
-    
+
     // top bar UI
     const top_bar_background = imui.push_layout(.X, .{@src()});
     if (imui.get_widget(top_bar_background)) |top_widget| {

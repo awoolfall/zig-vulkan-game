@@ -77,9 +77,27 @@ const LightsStruct = extern struct {
     lights: [MAX_LIGHTS]Light,
 };
 
+const ShaderSet = struct {
+    vertex_shader: gfx.VertexShader,
+    pixel_shader: gfx.PixelShader,
 
-vertex_shader: gfx.VertexShader,
-pixel_shader: gfx.PixelShader,
+    pub fn deinit(self: *ShaderSet) void {
+        self.vertex_shader.deinit();
+        self.pixel_shader.deinit();
+    }
+};
+
+const Shaders = struct {
+    static: ShaderSet,
+    skeletal: ShaderSet,
+
+    pub fn deinit(self: *Shaders) void {
+        self.static.deinit();
+        self.skeletal.deinit();
+    }
+};
+
+shaders: Shaders,
 shader_watcher: en.assets.FileAsset,
 
 camera_data_buffer: gfx.Buffer,
@@ -98,8 +116,7 @@ lights: std.ArrayList(Light),
 
 
 pub fn deinit(self: *Self) void {
-    self.vertex_shader.deinit();
-    self.pixel_shader.deinit();
+    self.shaders.deinit();
     self.shader_watcher.deinit();
     self.camera_data_buffer.deinit();
     for (&self.instance_buffers) |*ib| {
@@ -166,8 +183,7 @@ pub fn init() !Self {
     errdefer lights_buffer.deinit();
 
     return Self {
-        .vertex_shader = shaders[0],
-        .pixel_shader = shaders[1],
+        .shaders = shaders,
         .shader_watcher = shader_watcher,
 
         .camera_data_buffer = camera_constant_buffer,
@@ -182,10 +198,20 @@ pub fn init() !Self {
     };
 }
 
-fn init_shaders() !struct { gfx.VertexShader, gfx.PixelShader } {
+fn init_shaders() !Shaders {
     const shader_path = path.Path{.ExeRelative = "../../src/shader.hlsl"};
 
-    const vertex_shader = try gfx.VertexShader.init_file(
+    var shaders = Shaders{
+        .static = undefined,
+        .skeletal = undefined,
+    };
+
+    shaders.skeletal = ShaderSet{
+        .vertex_shader = undefined,
+        .pixel_shader = undefined,
+    };
+
+    shaders.skeletal.vertex_shader = try gfx.VertexShader.init_file(
         engine().general_allocator.allocator(), 
         shader_path, 
         "vs_main",
@@ -195,24 +221,62 @@ fn init_shaders() !struct { gfx.VertexShader, gfx.PixelShader } {
             .{ .name = "TANGENT",               .format = .F32x3,   .per = .Vertex, .slot = 2, },
             .{ .name = "BITANGENT",             .format = .F32x3,   .per = .Vertex, .slot = 3, },
             .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
-            .{ .name = "TEXCOORD",  .index = 1, .format = .I32x4,   .per = .Vertex, .slot = 5, },
-            .{ .name = "TEXCOORD",  .index = 2, .format = .F32x4,   .per = .Vertex, .slot = 6, },
+            .{ .name = "BONE_IDS",              .format = .I32x4,   .per = .Vertex, .slot = 5, },
+            .{ .name = "BONE_WEIGHTS",          .format = .F32x4,   .per = .Vertex, .slot = 6, },
+        })[0..],
+        .{
+            .defines = &.{
+                .{ "SKELETAL_RENDERING", "1" },
+            },
+        },
+        &engine().gfx
+    );
+    errdefer shaders.skeletal.vertex_shader.deinit();
+
+    shaders.skeletal.pixel_shader = try gfx.PixelShader.init_file(
+        engine().general_allocator.allocator(), 
+        shader_path,
+        "ps_main",
+        .{
+            .defines = &.{
+                .{ "SKELETAL_RENDERING", "1" },
+            },
+        },
+        &engine().gfx
+    );
+    errdefer shaders.skeletal.pixel_shader.deinit();
+
+    shaders.static = ShaderSet{
+        .vertex_shader = undefined,
+        .pixel_shader = undefined,
+    };
+
+    shaders.static.vertex_shader = try gfx.VertexShader.init_file(
+        engine().general_allocator.allocator(), 
+        shader_path, 
+        "vs_main",
+        ([_]gfx.VertexInputLayoutEntry {
+            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
+            .{ .name = "NORMAL",                .format = .F32x3,   .per = .Vertex, .slot = 1, },
+            .{ .name = "TANGENT",               .format = .F32x3,   .per = .Vertex, .slot = 2, },
+            .{ .name = "BITANGENT",             .format = .F32x3,   .per = .Vertex, .slot = 3, },
+            .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
         })[0..],
         .{},
         &engine().gfx
     );
-    errdefer vertex_shader.deinit();
+    errdefer shaders.static.vertex_shader.deinit();
 
-    const pixel_shader = try gfx.PixelShader.init_file(
+    shaders.static.pixel_shader = try gfx.PixelShader.init_file(
         engine().general_allocator.allocator(), 
         shader_path,
         "ps_main",
         .{},
         &engine().gfx
     );
-    errdefer pixel_shader.deinit();
+    errdefer shaders.static.pixel_shader.deinit();
 
-    return .{ vertex_shader, pixel_shader, };
+    return shaders;
 }
 
 pub fn push(self: *Self, ro: RenderObject) !void {
@@ -268,23 +332,8 @@ pub fn render(
                 std.log.err("Failed to reload shaders: {}", .{err});
                 break :blk;
             };
-            self.vertex_shader.deinit();
-            self.pixel_shader.deinit();
-            self.vertex_shader = new_shaders[0];
-            self.pixel_shader = new_shaders[1];
-        }
-    }
-
-    { // Update lights buffer
-        const mapped_buffer = self.lights_buffer.map(LightsStruct, &engine().gfx) catch unreachable;
-        defer mapped_buffer.unmap();
-
-        var i: usize = 0;
-        while (i < self.lights.items.len and i < MAX_LIGHTS) : (i += 1) {
-            mapped_buffer.data().lights[i] = self.lights.items[i];
-        }
-        while (i < MAX_LIGHTS) : (i += 1) {
-            mapped_buffer.data().lights[i] = .{};
+            self.shaders.deinit();
+            self.shaders = new_shaders;
         }
     }
 
@@ -300,32 +349,26 @@ pub fn render(
     };
     engine().gfx.cmd_set_viewport(viewport);
 
-    engine().gfx.cmd_set_vertex_shader(&self.vertex_shader);
-    engine().gfx.cmd_set_pixel_shader(&self.pixel_shader);
-
     engine().gfx.cmd_set_blend_state(null);
 
     engine().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
         &self.camera_data_buffer,
+        &self.instance_buffers[0],
         &self.instance_buffers[0],
         &self.bone_matrix_buffer, // TODO
     });
     engine().gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
         &self.camera_data_buffer,
         &self.instance_buffers[0], // slot 1 will be overwritten by later
-        &self.instance_buffers[0],
         &self.lights_buffer,
+        &self.instance_buffers[0],
     });
 
     engine().gfx.cmd_set_topology(.TriangleList);
 
     // render boneless objects
-    { // Update bone matrix buffer
-        const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &engine().gfx) catch unreachable;
-        defer mapped_buffer.unmap();
-
-        @memset(mapped_buffer.data().*[0..], zm.identity());
-    }
+    engine().gfx.cmd_set_vertex_shader(&self.shaders.static.vertex_shader);
+    engine().gfx.cmd_set_pixel_shader(&self.shaders.static.pixel_shader);
 
     var top_bone_idx: usize = 0;
     var start_bone_idx: usize = 0;
@@ -371,6 +414,8 @@ pub fn render(
         engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
         engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
 
+        self.update_lights_buffer(&ro.transform);
+
         if (ro.index_buffer) |ib| {
             engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
             engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
@@ -380,6 +425,9 @@ pub fn render(
     }
 
     // render skeletal objects
+    engine().gfx.cmd_set_vertex_shader(&self.shaders.skeletal.vertex_shader);
+    engine().gfx.cmd_set_pixel_shader(&self.shaders.skeletal.pixel_shader);
+
     top_bone_idx = 0;
     start_bone_idx = 0;
     for (self.skeletal_render_objects.items) |*sro| {
@@ -443,11 +491,38 @@ pub fn render(
         engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
         engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
 
+        self.update_lights_buffer(&ro.transform);
+
         if (ro.index_buffer) |ib| {
             engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
             engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
         } else {
             engine().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
+        }
+    }
+}
+
+fn lights_sort_func(pos: zm.F32x4, a: Light, b: Light) bool {
+    const a_dist = zm.length3(a.position - pos)[0] - a.intensity;
+    const b_dist = zm.length3(b.position - pos)[0] - b.intensity;
+    return a_dist < b_dist;
+}
+
+fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
+    const entity_position = transform[3];
+    // TODO: probably should use a quadtree or something here
+    std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
+
+    { // Update lights buffer
+        const mapped_buffer = self.lights_buffer.map(LightsStruct, &engine().gfx) catch unreachable;
+        defer mapped_buffer.unmap();
+
+        var i: usize = 0;
+        while (i < self.lights.items.len and i < MAX_LIGHTS) : (i += 1) {
+            mapped_buffer.data().lights[i] = self.lights.items[i];
+        }
+        while (i < MAX_LIGHTS) : (i += 1) {
+            mapped_buffer.data().lights[i] = .{};
         }
     }
 }
