@@ -18,25 +18,33 @@ const InstanceInfoStruct = extern struct {
     id: u32,
 };
 
+const RenderBuffers = struct {
+    vertex_buffer: gf.Buffer,
+    index_buffer: gf.Buffer,
+    index_count: usize,
+
+    pub fn deinit(self: *RenderBuffers) void {
+        self.vertex_buffer.deinit();
+        self.index_buffer.deinit();
+    }
+};
+
 const RED = zm.srgbToRgb(zm.f32x4(0xF5, 0x6B, 0x4E, 0xFF) / zm.f32x4s(0xFF));
 const GREEN = zm.srgbToRgb(zm.f32x4(0xB7, 0xF5, 0x4E, 0xFF) / zm.f32x4s(0xFF));
 const BLUE = zm.srgbToRgb(zm.f32x4(0x4F, 0x80, 0xF5, 0xFF) / zm.f32x4s(0xFF));
 const WHITE = zm.f32x4(1.0, 1.0, 1.0, 1.0);
 
-torus_vertex_buffer: gf.Buffer,
-torus_index_buffer: gf.Buffer,
-torus_index_count: usize,
+visual_torus: RenderBuffers,
+visual_cylinder: RenderBuffers,
+visual_sphere: RenderBuffers,
 
-cylinder_vertex_buffer: gf.Buffer,
-cylinder_index_buffer: gf.Buffer,
-cylinder_index_count: usize,
-
-sphere_vertex_buffer: gf.Buffer,
-sphere_index_buffer: gf.Buffer,
-sphere_index_count: usize,
+id_torus: RenderBuffers,
+id_cylinder: RenderBuffers,
+id_sphere: RenderBuffers,
 
 vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
+id_pixel_shader: gf.PixelShader,
 
 instance_data_buffer: gf.Buffer,
 selection_textures: SelectionTextures,
@@ -45,14 +53,13 @@ selected_control: ?GizmoControl = null,
 selected_offset: zm.F32x4 = zm.f32x4s(0.0),
 
 pub fn deinit(self: *Self) void {
-    self.torus_vertex_buffer.deinit();
-    self.torus_index_buffer.deinit();
+    self.visual_torus.deinit();
+    self.visual_cylinder.deinit();
+    self.visual_sphere.deinit();
 
-    self.cylinder_vertex_buffer.deinit();
-    self.cylinder_index_buffer.deinit();
-
-    self.sphere_vertex_buffer.deinit();
-    self.sphere_index_buffer.deinit();
+    self.id_torus.deinit();
+    self.id_cylinder.deinit();
+    self.id_sphere.deinit();
 
     self.vertex_shader.deinit();
     self.pixel_shader.deinit();
@@ -62,8 +69,70 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
-    const line_width = 0.03;
+    const visual_line_width = 0.03;
+    const id_line_width = 0.07;
 
+    var visual_torus = try init_torus(visual_line_width);
+    errdefer visual_torus.deinit();
+
+    var visual_cylinder = try init_cylinder(visual_line_width);
+    errdefer visual_cylinder.deinit();
+
+    var visual_sphere = try init_sphere(visual_line_width);
+    errdefer visual_sphere.deinit();
+
+    var id_torus = try init_torus(id_line_width);
+    errdefer id_torus.deinit();
+
+    var id_cylinder = try init_cylinder(id_line_width);
+    errdefer id_cylinder.deinit();
+
+    var id_sphere = try init_sphere(visual_line_width);
+    errdefer id_sphere.deinit();
+
+    const instance_data_buffer = try gf.Buffer.init(
+        @sizeOf(InstanceInfoStruct),
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+        gfx
+    );
+    errdefer instance_data_buffer.deinit();
+
+    var selection_textures = try SelectionTextures.init(gfx);
+    errdefer selection_textures.deinit();
+
+    var self = Self {
+        .visual_torus = visual_torus,
+        .visual_cylinder = visual_cylinder,
+        .visual_sphere = visual_sphere,
+
+        .id_torus = id_torus,
+        .id_cylinder = id_cylinder,
+        .id_sphere = id_sphere,
+
+        .instance_data_buffer = instance_data_buffer,
+        .selection_textures = selection_textures,
+        .vertex_shader = undefined,
+        .pixel_shader = undefined,
+        .id_pixel_shader = undefined,
+    };
+
+    self.compile_shaders(alloc, gfx) catch |err| {
+        std.log.err("unable to compile shaders: {}", .{err});
+        return err;
+    };
+    errdefer {
+        self.vertex_shader.deinit();
+        self.pixel_shader.deinit();
+        self.id_pixel_shader.deinit();
+    }
+
+    return self;
+}
+
+fn init_torus(line_width: f32) !RenderBuffers {
+    const gfx = &engine().gfx;
+    
     const torus_shape = zmesh.Shape.initTorus(16, 64, line_width);
     defer torus_shape.deinit();
 
@@ -83,6 +152,16 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     );
     errdefer torus_index_buffer.deinit();
 
+    return .{
+        .vertex_buffer = torus_vertex_buffer,
+        .index_buffer = torus_index_buffer,
+        .index_count = torus_shape.indices.len,
+    };
+}
+
+fn init_cylinder(line_width: f32) !RenderBuffers {
+    const gfx = &engine().gfx;
+    
     var cylinder_shape = zmesh.Shape.initCylinder(16, 2);
     defer cylinder_shape.deinit();
     cylinder_shape.scale(line_width, line_width, 1.0);
@@ -102,6 +181,16 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
         gfx
     );
     errdefer cylinder_index_buffer.deinit();
+
+    return .{
+        .vertex_buffer = cylinder_vertex_buffer,
+        .index_buffer = cylinder_index_buffer,
+        .index_count = cylinder_shape.indices.len,
+    };
+}
+
+fn init_sphere(line_width: f32) !RenderBuffers {
+    const gfx = &engine().gfx;
 
     var sphere_shape = zmesh.Shape.initParametricSphere(16, 16);
     defer sphere_shape.deinit();
@@ -123,51 +212,15 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     );
     errdefer sphere_index_buffer.deinit();
 
-    const instance_data_buffer = try gf.Buffer.init(
-        @sizeOf(InstanceInfoStruct),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-        gfx
-    );
-    errdefer instance_data_buffer.deinit();
-
-    var selection_textures = try SelectionTextures.init(gfx);
-    errdefer selection_textures.deinit();
-
-    var self = Self {
-        .torus_vertex_buffer = torus_vertex_buffer,
-        .torus_index_buffer = torus_index_buffer,
-        .torus_index_count = torus_shape.indices.len,
-
-        .cylinder_vertex_buffer = cylinder_vertex_buffer,
-        .cylinder_index_buffer = cylinder_index_buffer,
-        .cylinder_index_count = cylinder_shape.indices.len,
-
-        .sphere_vertex_buffer = sphere_vertex_buffer,
-        .sphere_index_buffer = sphere_index_buffer,
-        .sphere_index_count = sphere_shape.indices.len,
-
-        .instance_data_buffer = instance_data_buffer,
-        .selection_textures = selection_textures,
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
+    return .{
+        .vertex_buffer = sphere_vertex_buffer,
+        .index_buffer = sphere_index_buffer,
+        .index_count = sphere_shape.indices.len,
     };
-
-    self.compile_shaders(alloc, gfx) catch |err| {
-        std.log.err("unable to compile shaders: {}", .{err});
-        return err;
-    };
-    errdefer {
-        self.vertex_shader.deinit();
-        self.pixel_shader.deinit();
-    }
-
-    return self;
 }
 
 fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !void {
-    var res = true;
-    const maybe_vertex_shader = gf.VertexShader.init_file(
+    const new_vertex_shader = try gf.VertexShader.init_file(
         alloc,
         .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
         "vs_main",
@@ -177,30 +230,29 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
         .{},
         gfx
     ); 
-    if (maybe_vertex_shader) |vertex_shader| {
-        self.vertex_shader = vertex_shader;
-    } else |err| {
-        std.log.err("unable to compile vertex shader: {}", .{err});
-        res = false;
-    }
+    errdefer new_vertex_shader.deinit();
 
-    const maybe_pixel_shader = gf.PixelShader.init_file(
+    const new_pixel_shader = try gf.PixelShader.init_file(
         alloc,
         .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
-        "ps_main",
+        "ps_colour_main",
         .{},
         gfx
     );
-    if (maybe_pixel_shader) |pixel_shader| {
-        self.pixel_shader = pixel_shader;
-    } else |err| {
-        std.log.err("unable to compile pixel shader: {}", .{err});
-        res = false;
-    }
-    
-    if (!res) {
-        return error.ShaderCompilationFailed;
-    }
+    errdefer new_pixel_shader.deinit();
+
+    const new_id_pixel_shader = try gf.PixelShader.init_file(
+        alloc,
+        .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
+        "ps_id_main",
+        .{},
+        gfx
+    );
+    errdefer new_id_pixel_shader.deinit();
+
+    self.vertex_shader = new_vertex_shader;
+    self.pixel_shader = new_pixel_shader;
+    self.id_pixel_shader = new_id_pixel_shader;
 }
 
 const CoordSpace = enum { local, world, };
@@ -534,7 +586,14 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
     }
 }
 
-pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf.Buffer, rtv: *const gf.RenderTargetView, dsv: *const gf.DepthStencilView, camera: *const cm.Camera) void {
+pub fn render(
+    self: *Self, 
+    transform: *const Transform, 
+    camera_buffer: *const gf.Buffer, 
+    rtv: *const gf.RenderTargetView, 
+    dsv: *const gf.DepthStencilView, 
+    camera: *const cm.Camera
+) void {
     const gfx = &engine().gfx;
 
     // recreate selection textures if size has changed
@@ -543,12 +602,10 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
     }
 
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
-    gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
-    gfx.cmd_set_render_target(&.{rtv, &self.selection_textures.rtv}, dsv);
+    gfx.cmd_set_render_target(&.{rtv}, dsv);
 
     // set shaders
     gfx.cmd_set_vertex_shader(&self.vertex_shader);
-    gfx.cmd_set_pixel_shader(&self.pixel_shader);
 
     // set render state
     gfx.cmd_set_blend_state(null);
@@ -565,11 +622,43 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
         &self.instance_data_buffer,
     });
 
+    // render visual objects
+    gfx.cmd_set_pixel_shader(&self.pixel_shader);
+    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
+    self.render_objects(transform, camera, dsv, .Visual);
+
+    // render id objects
+    gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
+    gfx.cmd_set_render_target(&.{&self.selection_textures.rtv}, dsv);
+    gfx.cmd_set_pixel_shader(&self.id_pixel_shader);
+    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
+    self.render_objects(transform, camera, dsv, .Id);
+}
+
+fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Camera, dsv: *const gf.DepthStencilView, ty: enum { Visual, Id }) void {
+    const gfx = &engine().gfx;
+
     // set torus vertex and index buffers
+    var torus_vertex_bufer: gf.Buffer = undefined;
+    var torus_index_buffer: gf.Buffer = undefined;
+    var torus_index_count: usize = undefined;
+    switch (ty) {
+        .Visual => {
+            torus_vertex_bufer = self.visual_torus.vertex_buffer;
+            torus_index_buffer = self.visual_torus.index_buffer;
+            torus_index_count = self.visual_torus.index_count;
+        },
+        .Id => {
+            torus_vertex_bufer = self.id_torus.vertex_buffer;
+            torus_index_buffer = self.id_torus.index_buffer;
+            torus_index_count = self.id_torus.index_count;
+        },
+    }
+
     gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &self.torus_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
+        .{ .buffer = &torus_vertex_bufer, .stride = @sizeOf([3]f32), .offset = 0, },
     });
-    gfx.cmd_set_index_buffer(&self.torus_index_buffer, .U32, 0);
+    gfx.cmd_set_index_buffer(&torus_index_buffer, .U32, 0);
 
     const base_rot = if (get_coord_space() == .local) zm.matFromQuat(transform.rotation) else zm.identity();
     const distance = 10.0;
@@ -600,7 +689,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.None),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
 
     // clear depth buffer so that all following controls are drawn on top of the white torus
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
@@ -616,7 +705,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.RotateX),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
 
     // render green torus
     {
@@ -629,7 +718,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.RotateY),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
 
     // render blue torus
     {
@@ -642,14 +731,30 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.RotateZ),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.torus_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
 
 
     // set culinder vertex and index buffers
+    var cylinder_vertex_buffer: gf.Buffer = undefined;
+    var cylinder_index_buffer: gf.Buffer = undefined;
+    var cylinder_index_count: usize = undefined;
+    switch (ty) {
+        .Visual => {
+            cylinder_vertex_buffer = self.visual_cylinder.vertex_buffer;
+            cylinder_index_buffer = self.visual_cylinder.index_buffer;
+            cylinder_index_count = self.visual_cylinder.index_count;
+        },
+        .Id => {
+            cylinder_vertex_buffer = self.id_cylinder.vertex_buffer;
+            cylinder_index_buffer = self.id_cylinder.index_buffer;
+            cylinder_index_count = self.id_cylinder.index_count;
+        },
+    }
+
     gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &self.cylinder_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
+        .{ .buffer = &cylinder_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
     });
-    gfx.cmd_set_index_buffer(&self.cylinder_index_buffer, .U32, 0);
+    gfx.cmd_set_index_buffer(&cylinder_index_buffer, .U32, 0);
 
     // render red cylinder
     {
@@ -662,7 +767,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.TranslateX),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.cylinder_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
 
     // render green cylinder
     {
@@ -675,7 +780,7 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.TranslateY),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.cylinder_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
 
     // render blue cylinder
     {
@@ -688,14 +793,30 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.TranslateZ),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.cylinder_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
 
 
     // set sphere vertex and index buffers
+    var sphere_vertex_buffer: gf.Buffer = undefined;
+    var sphere_index_buffer: gf.Buffer = undefined;
+    var sphere_index_count: usize = undefined;
+    switch (ty) {
+        .Visual => {
+            sphere_vertex_buffer = self.visual_sphere.vertex_buffer;
+            sphere_index_buffer = self.visual_sphere.index_buffer;
+            sphere_index_count = self.visual_sphere.index_count;
+        },
+        .Id => {
+            sphere_vertex_buffer = self.id_sphere.vertex_buffer;
+            sphere_index_buffer = self.id_sphere.index_buffer;
+            sphere_index_count = self.id_sphere.index_count;
+        },
+    }
+
     gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &self.sphere_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
+        .{ .buffer = &sphere_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
     });
-    gfx.cmd_set_index_buffer(&self.sphere_index_buffer, .U32, 0);
+    gfx.cmd_set_index_buffer(&sphere_index_buffer, .U32, 0);
 
     // render white sphere
     {
@@ -710,5 +831,5 @@ pub fn render(self: *Self, transform: *const Transform, camera_buffer: *const gf
             .id = @intFromEnum(GizmoControl.None),
         };
     }
-    gfx.cmd_draw_indexed(@intCast(self.sphere_index_count), 0, 0);
+    gfx.cmd_draw_indexed(@intCast(sphere_index_count), 0, 0);
 }

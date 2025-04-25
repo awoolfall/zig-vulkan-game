@@ -36,18 +36,12 @@ vs_out vs_main(vs_in input)
     return output;
 }
 
-struct ps_out
+float4 ps_colour_main(vs_out input) : SV_TARGET
 {
-    float4 colour : SV_TARGET0;
-    unsigned int id : SV_TARGET1;
-};
+    return float4(colour.rgb, 1.0);
+}
 
-ps_out ps_main(vs_out input)
+unsigned int ps_id_main(vs_out input) : SV_TARGET
 {
-    ps_out output = (ps_out) 0;
-
-    output.colour = float4(colour.rgb, 1.0);
-    output.id = id;
-
-    return output;
+    return id;
 }
