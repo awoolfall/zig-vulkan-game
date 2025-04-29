@@ -780,7 +780,7 @@ pub fn render_model(
     try queue.append(.{ .node = &model.nodes_list[0], .mat = root_mat });
 
     while (queue.items.len > 0) {
-        const item = queue.pop();
+        const item = queue.pop().?;
 
         var node_model_matrix = zm.mul(item.node.transform.generate_model_matrix(), item.mat);
 

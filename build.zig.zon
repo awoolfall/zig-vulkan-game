@@ -1,5 +1,6 @@
 .{
-    .name = "zig-dx11-game",
+    .name = .zig_dx11_game,
+    .fingerprint = 0xcf0c22e973f1ca5,
     // This is a [Semantic Version](https://semver.org/).
     // In a future version of Zig it will be used for package deduplication.
     .version = "0.0.0",
