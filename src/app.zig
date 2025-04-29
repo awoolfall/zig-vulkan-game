@@ -60,14 +60,14 @@ pub const EntityData = struct {
         return EntityData {
             .health_points = desc.health_points,
             .anim_controller = if (desc.anim_controller_desc) |anim_desc| 
-                try anim.AnimController.init(engine().general_allocator.allocator(), anim_desc) 
+                try anim.AnimController.init(engine().general_allocator, anim_desc) 
                 else null,
             .particle_system = if (desc.particle_system_settings) |ps| 
-                try particle.ParticleSystem.init(engine().general_allocator.allocator(), ps) 
+                try particle.ParticleSystem.init(engine().general_allocator, ps) 
                 else null,
             .light = if (desc.light) |l| l else null,
             .terrain = if (desc.terrain) |t| 
-                try Terrain.init(engine().general_allocator.allocator(), t, .{}, &engine().gfx) 
+                try Terrain.init(engine().general_allocator, t, .{}, &engine().gfx) 
                 else null,
         };
     }
@@ -143,7 +143,7 @@ pub fn init(self: *Self) !void {
     var selection_textures = try st.SelectionTextures(u32).init(&engine().gfx);
     errdefer selection_textures.deinit();
 
-    var asset_pack = try assets.AssetPack.init(engine().general_allocator.allocator(), "default");
+    var asset_pack = try assets.AssetPack.init(engine().general_allocator, "default");
     defer asset_pack.deinit();
 
     //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
@@ -196,7 +196,7 @@ pub fn init(self: *Self) !void {
     engine().physics.zphy.optimizeBroadPhase();
 
     var player_attack_particle_system = try particle.ParticleSystem.init(
-        engine().general_allocator.allocator(),
+        engine().general_allocator,
         .{
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
@@ -251,7 +251,7 @@ pub fn init(self: *Self) !void {
         .player_attack_particle_system = player_attack_particle_system,
 
         .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainSystem.init(engine().general_allocator.allocator(), &engine().gfx),
+        .terrain_renderer = try TerrainSystem.init(engine().general_allocator, &engine().gfx),
         .edit_mode = try EditMode.init(),
     };
 }

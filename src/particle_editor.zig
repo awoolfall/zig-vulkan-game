@@ -159,7 +159,7 @@ pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuper
 
         if (particle_system_check.data_changed) {
             if (should_have_particle_system) {
-                entity.app.particle_system = en.particles.ParticleSystem.init(en.engine().general_allocator.allocator(), data.settings) catch unreachable;
+                entity.app.particle_system = en.particles.ParticleSystem.init(en.engine().general_allocator, data.settings) catch unreachable;
             } else {
                 entity.app.particle_system.?.deinit();
                 entity.app.particle_system = null;

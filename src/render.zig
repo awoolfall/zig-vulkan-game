@@ -138,7 +138,7 @@ pub fn init() !Self {
     defer engine().frame_allocator.free(full_shader_path);
 
     std.log.info("shader path: '{s}'", .{full_shader_path});
-    var shader_watcher = try en.assets.FileWatcher.init(engine().general_allocator.allocator(), full_shader_path, 500);
+    var shader_watcher = try en.assets.FileWatcher.init(engine().general_allocator, full_shader_path, 500);
     errdefer shader_watcher.deinit();
 
     // Create camera constant buffer
@@ -191,10 +191,10 @@ pub fn init() !Self {
         .bone_matrix_buffer = bone_matrix_buffer,
         .lights_buffer = lights_buffer,
 
-        .render_objects = try std.ArrayList(RenderObject).initCapacity(engine().general_allocator.allocator(), 128),
-        .skeletal_render_objects = try std.ArrayList(AnimatedRenderObject).initCapacity(engine().general_allocator.allocator(), 32),
-        .render_bones = try std.ArrayList(zm.Mat).initCapacity(engine().general_allocator.allocator(), Self.bone_matrix_buffer_size),
-        .lights = try std.ArrayList(Light).initCapacity(engine().general_allocator.allocator(), 4),
+        .render_objects = try std.ArrayList(RenderObject).initCapacity(engine().general_allocator, 128),
+        .skeletal_render_objects = try std.ArrayList(AnimatedRenderObject).initCapacity(engine().general_allocator, 32),
+        .render_bones = try std.ArrayList(zm.Mat).initCapacity(engine().general_allocator, Self.bone_matrix_buffer_size),
+        .lights = try std.ArrayList(Light).initCapacity(engine().general_allocator, 4),
     };
 }
 
@@ -212,7 +212,7 @@ fn init_shaders() !Shaders {
     };
 
     shaders.skeletal.vertex_shader = try gfx.VertexShader.init_file(
-        engine().general_allocator.allocator(), 
+        engine().general_allocator, 
         shader_path, 
         "vs_main",
         ([_]gfx.VertexInputLayoutEntry {
@@ -234,7 +234,7 @@ fn init_shaders() !Shaders {
     errdefer shaders.skeletal.vertex_shader.deinit();
 
     shaders.skeletal.pixel_shader = try gfx.PixelShader.init_file(
-        engine().general_allocator.allocator(), 
+        engine().general_allocator, 
         shader_path,
         "ps_main",
         .{
@@ -252,7 +252,7 @@ fn init_shaders() !Shaders {
     };
 
     shaders.static.vertex_shader = try gfx.VertexShader.init_file(
-        engine().general_allocator.allocator(), 
+        engine().general_allocator, 
         shader_path, 
         "vs_main",
         ([_]gfx.VertexInputLayoutEntry {
@@ -268,7 +268,7 @@ fn init_shaders() !Shaders {
     errdefer shaders.static.vertex_shader.deinit();
 
     shaders.static.pixel_shader = try gfx.PixelShader.init_file(
-        engine().general_allocator.allocator(), 
+        engine().general_allocator, 
         shader_path,
         "ps_main",
         .{},

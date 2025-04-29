@@ -36,8 +36,8 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     return Self {
-        .gizmo = try Gizmo.init(engine().general_allocator.allocator(), &engine().gfx),
-        .entity_editor_ui_data = try EntityEditorUiData.init(engine().general_allocator.allocator()),
+        .gizmo = try Gizmo.init(engine().general_allocator, &engine().gfx),
+        .entity_editor_ui_data = try EntityEditorUiData.init(engine().general_allocator),
         .editor_camera = Camera {
             .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
             .near_field = 0.3,
@@ -381,7 +381,7 @@ const EntityEditorUiData = struct {
             .options = shape_option_names,
         };
 
-        const particle_editor_data = pe.ParticleEditorData.init(engine().general_allocator.allocator());
+        const particle_editor_data = pe.ParticleEditorData.init(engine().general_allocator);
         errdefer particle_editor_data.deinit();
 
         // generate light type option names from enum
@@ -403,7 +403,7 @@ const EntityEditorUiData = struct {
                 .default_text = "None",
                 .options = options,
             },
-            .name_edit_data = Imui.TextInputState.init(engine().general_allocator.allocator()),
+            .name_edit_data = Imui.TextInputState.init(engine().general_allocator),
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
             .particle_editor_data = particle_editor_data,
@@ -532,8 +532,8 @@ fn entity_editor_ui(
         // if name line edit has changed then update the entity's name
         if (name_edit.data_changed) {
             if (entity.name) |_| {
-                engine().general_allocator.allocator().free(entity.name.?);
-                entity.name = std.fmt.allocPrint(engine().general_allocator.allocator(), "{s}", .{data.name_edit_data.text.items}) catch unreachable;
+                engine().general_allocator.free(entity.name.?);
+                entity.name = std.fmt.allocPrint(engine().general_allocator, "{s}", .{data.name_edit_data.text.items}) catch unreachable;
             }
         }
     }
@@ -756,7 +756,7 @@ fn entity_editor_ui(
         const terrain_checkbox = imui.checkbox(&data.enable_terrain_checkbox, "Enable Terrain", key ++ .{@src()});
         if (terrain_checkbox.clicked) {
             if (data.enable_terrain_checkbox) {
-                entity.app.terrain = Terrain.init(engine().general_allocator.allocator(), .{}, entity.transform, &engine().gfx) catch |err| {
+                entity.app.terrain = Terrain.init(engine().general_allocator, .{}, entity.transform, &engine().gfx) catch |err| {
                     std.log.err("Failed to create terrain: {}", .{err});
                     return;
                 };
@@ -855,7 +855,7 @@ fn labeled_number_slider(
 }
 
 fn create_scene_entities(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator);
     defer arena.deinit();
 
     var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
@@ -902,7 +902,7 @@ fn create_scene_entities(scene_name: []const u8) !void {
 }
 
 fn save_entities_to_scene(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator.allocator());
+    var arena = std.heap.ArenaAllocator.init(engine().general_allocator);
     defer arena.deinit();
 
     std.fs.cwd().deleteTree(scene_name) catch |err| {
