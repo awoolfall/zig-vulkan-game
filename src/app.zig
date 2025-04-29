@@ -25,7 +25,8 @@ const assets = en.assets;
 const sr = en.serialize;
 
 const Terrain = @import("terrain/terrain.zig");
-const SelectionTextures = @import("selection_textures.zig");
+const TerrainSystem = @import("terrain/terrain_system.zig");
+const st = @import("selection_textures.zig");
 const DepthTextures = @import("depth_textures.zig");
 const StandardRenderer = @import("render.zig");
 const EditMode = @import("edit_mode.zig");
@@ -41,6 +42,7 @@ pub const EntityData = struct {
     anim_controller: ?anim.AnimController,
     particle_system: ?particle.ParticleSystem,
     light: ?StandardRenderer.Light,
+    terrain: ?Terrain,
 
     pub fn deinit(self: *EntityData) void {
         if (self.anim_controller) |*anim_controller| {
@@ -48,6 +50,9 @@ pub const EntityData = struct {
         }
         if (self.particle_system) |*particle_system| {
             particle_system.deinit();
+        }
+        if (self.terrain) |*terrain| {
+            terrain.deinit();
         }
     }
 
@@ -61,6 +66,9 @@ pub const EntityData = struct {
                 try particle.ParticleSystem.init(engine().general_allocator.allocator(), ps) 
                 else null,
             .light = if (desc.light) |l| l else null,
+            .terrain = if (desc.terrain) |t| 
+                try Terrain.init(engine().general_allocator.allocator(), t, .{}, &engine().gfx) 
+                else null,
         };
     }
 
@@ -70,11 +78,15 @@ pub const EntityData = struct {
 
         const particle_system_settings = if (self.particle_system) |ps| ps.settings else null;
 
+        const terrain_desc = if (self.terrain) |t| try t.descriptor(alloc) else null;
+        errdefer if (terrain_desc) |td| alloc.free(td);
+
         return Descriptor {
             .health_points = self.health_points,
             .anim_controller_desc = anim_desc,
             .particle_system_settings = particle_system_settings,
             .light = self.light,
+            .terrain = terrain_desc,
         };
     }
 
@@ -83,11 +95,12 @@ pub const EntityData = struct {
         anim_controller_desc: ?anim.AnimController.Descriptor = null,
         particle_system_settings: ?particle.ParticleSystemSettings = null,
         light: ?StandardRenderer.Light = null,
+        terrain: ?Terrain.Descriptor = null,
     };
 };
 
 depth_textures: DepthTextures,
-selection_textures: SelectionTextures,
+selection_textures: st.SelectionTextures(u32),
 
 camera: cm.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
@@ -100,8 +113,8 @@ turntable_model_id: assets.ModelAssetId,
 
 player_attack_particle_system: particle.ParticleSystem,
 
-terrain: Terrain,
 standard_renderer: StandardRenderer,
+terrain_renderer: TerrainSystem,
 
 edit_mode: EditMode,
 current_mode: enum { EDIT, PLAY } = .EDIT,
@@ -117,8 +130,8 @@ pub fn deinit(self: *Self) void {
     self.depth_textures.deinit();
     self.selection_textures.deinit();
 
-    self.terrain.deinit();
     self.standard_renderer.deinit();
+    self.terrain_renderer.deinit();
     self.edit_mode.deinit();
 }
 
@@ -127,7 +140,7 @@ pub fn init(self: *Self) !void {
     var depth_textures = try DepthTextures.init(&engine().gfx);
     errdefer depth_textures.deinit();
 
-    var selection_textures = try SelectionTextures.init(&engine().gfx);
+    var selection_textures = try st.SelectionTextures(u32).init(&engine().gfx);
     errdefer selection_textures.deinit();
 
     var asset_pack = try assets.AssetPack.init(engine().general_allocator.allocator(), "default");
@@ -213,9 +226,6 @@ pub fn init(self: *Self) !void {
     );
     errdefer player_attack_particle_system.deinit();
 
-    var terrain = try Terrain.init(engine().general_allocator.allocator(), &engine().physics, &engine().gfx);
-    errdefer terrain.deinit();
-
     self.* = Self {
         .depth_textures = depth_textures,
         .selection_textures = selection_textures,
@@ -240,8 +250,8 @@ pub fn init(self: *Self) !void {
 
         .player_attack_particle_system = player_attack_particle_system,
 
-        .terrain = terrain,
         .standard_renderer = try StandardRenderer.init(),
+        .terrain_renderer = try TerrainSystem.init(engine().general_allocator.allocator(), &engine().gfx),
         .edit_mode = try EditMode.init(),
     };
 }
@@ -546,27 +556,26 @@ fn update(self: *Self) !void {
                 }};
 
                 // Finally, render the model
-                self.recursive_render_model(
+                self.render_model(
                     @truncate(entity_id),
-                    m, 
-                    pose,
-                    bone_info,
-                    &entity.transform.generate_model_matrix(), 
-                    &m.nodes_list[m.root_nodes[0]],
-                    entity.transform.generate_model_matrix()
-                );
+                    m,
+                    if (bone_info) |bi| 
+                    .{
+                        .pose_data = pose,
+                        .bone_info = bi,
+                    }
+                    else null,
+                    entity.transform
+                ) catch unreachable;
             } else {
                 if (self.current_mode == .EDIT) {
                     const m = engine().asset_manager.get_model(engine().asset_manager.find_model_id("sphere").?) catch unreachable;
-                    self.recursive_render_model(
+                    self.render_model(
                         @truncate(entity_id),
                         m,
                         null,
-                        null,
-                        &entity.transform.generate_model_matrix(), 
-                        &m.nodes_list[m.root_nodes[0]],
-                        entity.transform.generate_model_matrix()
-                    );
+                        entity.transform
+                    ) catch unreachable;
                 }
             }
 
@@ -588,8 +597,8 @@ fn update(self: *Self) !void {
     };
 
     engine().gfx.cmd_clear_render_target(&rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
-    engine().gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
     engine().gfx.cmd_clear_depth_stencil_view(&self.depth_textures.dsv, 0.0, null);
+    self.selection_textures.clear(&engine().gfx, 0);
 
     self.standard_renderer.update_camera_data_buffer(render_camera);
     self.standard_renderer.render(
@@ -604,8 +613,20 @@ fn update(self: *Self) !void {
         }
     );
 
-    // render terrain
-    self.terrain.render(&self.standard_renderer.camera_data_buffer, &engine().gfx);
+    // render terrains
+    var entity_iter = engine().entities.list.iterator();
+    while (entity_iter.next()) |entity| {
+        if (entity.app.terrain) |*terrain| {
+            self.terrain_renderer.render(
+                &self.standard_renderer.camera_data_buffer, 
+                entity.transform, 
+                terrain, 
+                &rtv,
+                &self.depth_textures.dsv,
+                &engine().gfx
+            );
+        }
+    }
 
     // update and render particle systems
     var entities = engine().entities.list.iterator();
@@ -737,113 +758,101 @@ fn update(self: *Self) !void {
     };
 }
 
-pub fn recursive_render_model(
-    self: *Self, 
+pub fn render_model(
+    self: *Self,
     entity_id: u32,
-    model: *const ms.Model, 
-    pose: ?[]const zm.Mat, 
-    bone_info: ?StandardRenderer.AnimatedRenderObject.BoneInfo,
-    root_mat: *const zm.Mat,
-    model_node: *const ms.ModelNode, 
-    mat: zm.Mat
-) void {
-    var node_model_matrix = zm.mul(model_node.transform.generate_model_matrix(), mat);
+    model: *const ms.Model,
+    bones_data: ?struct {
+        pose_data: []const zm.Mat,
+        bone_info: StandardRenderer.AnimatedRenderObject.BoneInfo,
+    },
+    transform: Transform,
+) !void {
+    var queue = std.ArrayList(
+        struct { 
+            node: *const ms.ModelNode,
+            mat: zm.Mat
+        }
+    ).initCapacity(engine().frame_allocator, model.nodes_list.len) catch unreachable;
+    defer queue.deinit();
 
-    // Apply pose
-    if (pose) |p| {
-        if (model_node.name) |node_name| {
-            if (model.bone_mapping.get(node_name)) |bone_id| {
-                const bone_data = &model.bone_info.items[@intCast(bone_id)];
-                // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
-                node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset), p[@intCast(bone_id)]), root_mat.*);
+    const root_mat = transform.generate_model_matrix();
+    try queue.append(.{ .node = &model.nodes_list[0], .mat = root_mat });
+
+    while (queue.items.len > 0) {
+        const item = queue.pop();
+
+        var node_model_matrix = zm.mul(item.node.transform.generate_model_matrix(), item.mat);
+
+        // Apply pose
+        if (bones_data) |bd| {
+            if (item.node.name) |node_name| {
+                if (model.bone_mapping.get(node_name)) |bone_id| {
+                    const bone_data = &model.bone_info.items[@intCast(bone_id)];
+                    // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
+                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset), bd.pose_data[@intCast(bone_id)]), root_mat);
+                }
             }
         }
-    }
 
-    if (model_node.mesh) |*mesh_set| {
-        for (mesh_set.primitives) |maybe_prim| {
-            if (maybe_prim) |prim_idx| {
-                const p = &model.mesh_list[prim_idx];
+        if (item.node.mesh) |*mesh_set| {
+            for (mesh_set.primitives) |maybe_prim| {
+                if (maybe_prim) |prim_idx| {
+                    const p = &model.mesh_list[prim_idx];
 
-                var material = ms.MaterialTemplate {};
-                if (p.material_template) |m_idx| {
-                    material = model.materials[m_idx];
-                }
+                    var material = ms.MaterialTemplate {};
+                    if (p.material_template) |m_idx| {
+                        material = model.materials[m_idx];
+                    }
 
-                const indices_info = blk: { if (p.has_indices()) {
-                    break :blk StandardRenderer.RenderObject.IndexInfo {
-                        .buffer_info = .{ .buffer = &model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
-                        .index_count = p.num_indices,
-                    };
-                } else {
-                    break :blk null;
-                } };
+                    const indices_info = blk: { if (p.has_indices()) {
+                        break :blk StandardRenderer.RenderObject.IndexInfo {
+                            .buffer_info = .{ .buffer = &model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
+                            .index_count = p.num_indices,
+                        };
+                    } else {
+                        break :blk null;
+                    } };
 
-                const render_object = StandardRenderer.RenderObject {
-                    .entity_id = entity_id,
-                    .transform = node_model_matrix,
-                    .vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
+                    var vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.tangents), .offset = @truncate(model.buffers.offsets.tangents), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bitangents), .offset = @truncate(model.buffers.offsets.bitangents), },
                         .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
-                    }) catch unreachable,
-                    .vertex_count = p.num_vertices,
-                    .pos_offset = p.pos_offset,
-                    .index_buffer = indices_info,
-                    .material = material,
-                };
-
-                if (bone_info) |bi| {
-                    self.standard_renderer.push_animated(.{
-                        .standard = render_object,
-                        .bone_info = bi,
                     }) catch unreachable;
-                } else {
-                    self.standard_renderer.push(render_object)
-                        catch unreachable;
+                    if (bones_data) |_| {
+                        vertex_buffers.appendSliceAssumeCapacity(&[_]gfx.VertexBufferInput{
+                            .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
+                            .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
+                        });
+                    }
+
+                    const render_object = StandardRenderer.RenderObject {
+                        .entity_id = entity_id,
+                        .transform = node_model_matrix,
+                        .vertex_buffers = vertex_buffers,
+                        .vertex_count = p.num_vertices,
+                        .pos_offset = p.pos_offset,
+                        .index_buffer = indices_info,
+                        .material = material,
+                    };
+
+                    if (bones_data) |bd| {
+                        self.standard_renderer.push_animated(.{
+                            .standard = render_object,
+                            .bone_info = bd.bone_info,
+                        }) catch unreachable;
+                    } else {
+                        self.standard_renderer.push(render_object)
+                            catch unreachable;
+                    }
                 }
             }
         }
-    }
 
-    for (model_node.children) |c| {
-        self.recursive_render_model(entity_id, model, pose, bone_info, root_mat, &model.nodes_list[c], node_model_matrix);
-    }
-}
-
-pub fn render_model_bones(
-    self: *Self, 
-    render_model: *const ms.Model, 
-    render_model_transform: *const zm.Mat, 
-    model: *const ms.Model, 
-    mat: zm.Mat,
-) void {
-    const global_transform = zm.inverse(model.global_inverse_transform);
-    for (model.nodes_list) |*node| {
-        if (node.name) |node_name| {
-            if (model.bone_mapping.get(node_name)) |bone_id| {
-                const bone_data = &model.bone_info.items[@intCast(bone_id)];
-
-                const node_model_matrix_transformed = 
-                    zm.mul(
-                        zm.inverse(bone_data.bone_offset), 
-                        zm.mul(
-                            bone_data.final_transform, 
-                            zm.mul(global_transform, mat)
-                        )
-                    );
-
-                self.recursive_render_model(
-                    render_model, 
-                    null,
-                    &render_model.nodes_list[render_model.root_nodes[0]], 
-                    zm.mul(render_model_transform.*, node_model_matrix_transformed)
-                );
-            }
+        for (item.node.children) |c| {
+            try queue.append(.{ .node = &model.nodes_list[c], .mat = node_model_matrix });
         }
     }
 }

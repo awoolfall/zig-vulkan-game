@@ -5,46 +5,35 @@ const eng = @import("engine");
 const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
+const path = eng.path;
+const Transform = eng.Transform;
 
 const HeightFieldSize = 16;
 
-const InstanceInfoStruct = extern struct {
-    origin: zm.F32x4,
+pub const Descriptor = struct {
+    enable_physics: bool = true,
+    terrain_size: [2]f32 = .{ 16.0, 16.0 },
 };
 
 alloc: std.mem.Allocator,
 
-origin: zm.F32x4 = zm.f32x4(5.0, 1.0, 5.0, 0.0),
-instance_data_buffer: gf.Buffer,
-
-vertex_shader: gf.VertexShader,
-pixel_shader: gf.PixelShader,
-
-model: eng.mesh.Model,
+terrain_size: [2]f32,
 
 heightmap: []f32,
 
 heightmap_texture: gf.Texture2D,
 heightmap_texture_view: gf.TextureView2D,
 
-physics_system: *eng.physics.PhysicsSystem,
 physics_body_id: ?ph.zphy.BodyId = null,
 
 pub fn deinit(self: *Self) void {
-    self.instance_data_buffer.deinit();
-    self.vertex_shader.deinit();
-    self.pixel_shader.deinit();
-    self.model.deinit();
     self.heightmap_texture.deinit();
     self.heightmap_texture_view.deinit();
     self.remove_physics_body();
     self.alloc.free(self.heightmap);
 }
 
-pub fn init(alloc: std.mem.Allocator, physics: *eng.physics.PhysicsSystem, gfx: *gf.GfxState) !Self {
-    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldSize - 1, HeightFieldSize - 1, gfx);
-    errdefer plane_model.deinit();
-
+pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gfx: *gf.GfxState) !Self {
     const heightmap_data = try alloc.alloc(f32, HeightFieldSize * HeightFieldSize);
     errdefer alloc.free(heightmap_data);
 
@@ -55,6 +44,16 @@ pub fn init(alloc: std.mem.Allocator, physics: *eng.physics.PhysicsSystem, gfx: 
             heightmap_data[y * HeightFieldSize + x] = std.math.sin(u * std.math.pi * 2.0) * std.math.sin(v * std.math.pi * 2.0);
         }
     }
+
+    // blk: {
+    //     std.fs.cwd().writeFile(.{
+    //         .sub_path = "heightmap.f32",
+    //         .data = std.mem.sliceAsBytes(heightmap_data),
+    //     }) catch |err| {
+    //         std.log.err("unable to write heightmap.r32: {}", .{err});
+    //         break :blk;
+    //     };
+    // }
 
     const heightmap_texture = try gf.Texture2D.init(
         .{
@@ -72,84 +71,41 @@ pub fn init(alloc: std.mem.Allocator, physics: *eng.physics.PhysicsSystem, gfx: 
     const heightmap_texture_view = try gf.TextureView2D.init_from_texture2d(&heightmap_texture, gfx);
     errdefer heightmap_texture_view.deinit();
 
-    const instance_data_buffer = try gf.Buffer.init(
-        @sizeOf(InstanceInfoStruct),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-        gfx
-    );
-    errdefer instance_data_buffer.deinit();
-
     var self = Self {
         .alloc = alloc,
-        .model = plane_model,
+        .terrain_size = desc.terrain_size,
         .heightmap_texture = heightmap_texture,
         .heightmap_texture_view = heightmap_texture_view,
         .heightmap = heightmap_data,
-        .physics_system = physics,
-        .instance_data_buffer = instance_data_buffer,
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
+        .physics_body_id = null,
     };
-    try self.compile_shaders(alloc, gfx);
-    errdefer self.deinit();
-
-    try self.generate_heightmap_physics();
+    if (desc.enable_physics) {
+        try self.generate_heightmap_physics(transform);
+    }
 
     return self;
 }
 
-fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !void {
-    var res = true;
-    const maybe_vertex_shader = gf.VertexShader.init_file(
-        alloc,
-        .{ .ExeRelative = "../../src/terrain/terrain.hlsl" },
-        "vs_main",
-        (&[_]gf.VertexInputLayoutEntry {
-            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
-            .{ .name = "TEXCOORD",              .format = .F32x2,   .per = .Vertex, .slot = 1, },
-        }),
-        .{},
-        gfx
-    ); 
-    if (maybe_vertex_shader) |vertex_shader| {
-        self.vertex_shader = vertex_shader;
-    } else |err| {
-        std.log.err("unable to compile vertex shader: {}", .{err});
-        res = false;
-    }
-
-    const maybe_pixel_shader = gf.PixelShader.init_file(
-        alloc,
-        .{ .ExeRelative = "../../src/terrain/terrain.hlsl" },
-        "ps_main",
-        .{},
-        gfx
-    );
-    if (maybe_pixel_shader) |pixel_shader| {
-        self.pixel_shader = pixel_shader;
-    } else |err| {
-        std.log.err("unable to compile pixel shader: {}", .{err});
-        res = false;
-    }
-    
-    if (!res) {
-        return error.ShaderCompilationFailed;
-    }
+pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
+    _ = alloc;
+    return Descriptor {
+        .enable_physics = (self.physics_body_id != null),
+        .terrain_size = self.terrain_size,
+    };
 }
 
 /// Removes the physics body from the terrain if it exists
 fn remove_physics_body(self: *Self) void {
     if (self.physics_body_id) |*b| {
-        const body_interface = self.physics_system.zphy.getBodyInterfaceMut();
+        const body_interface = eng.engine().physics.zphy.getBodyInterfaceMut();
         body_interface.removeAndDestroyBody(b.*);
         self.physics_body_id = null;
     }
 }
 
 /// Regenerates the heightmap physics body using the internal heightmap data
-fn generate_heightmap_physics(self: *Self) !void {
-    const body_interface = self.physics_system.zphy.getBodyInterfaceMut();
+fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
+    const body_interface = eng.engine().physics.zphy.getBodyInterfaceMut();
 
     // create the new physics body
     const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, HeightFieldSize);
@@ -160,7 +116,7 @@ fn generate_heightmap_physics(self: *Self) !void {
 
     const new_body = try body_interface.createAndAddBody(.{
         .shape = shape,
-        .position = self.origin,
+        .position = transform.position,
         .motion_type = .static,
     }, .activate);
     errdefer body_interface.removeAndDestroyBody(new_body);
@@ -172,43 +128,40 @@ fn generate_heightmap_physics(self: *Self) !void {
     self.physics_body_id = new_body;
 }
 
-/// Render the terrain using the camera buffer
-pub fn render(self: *Self, camera_buffer: *const gf.Buffer, gfx: *gf.GfxState) void {
-    // update instance data buffer
-    {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
-        defer mapped_buffer.unmap();
-        mapped_buffer.data().origin = self.origin;
+pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: anytype) void {
+    const imui = &eng.engine().imui;
+
+    const container = imui.push_layout(.Y, key ++ .{@src()});
+    if (imui.get_widget(container)) |w| {
+        w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+        w.children_gap = 4;
+    }
+    defer imui.pop_layout();
+
+    var physics_checkbox = (self.physics_body_id != null);
+    const enable_physics_checkbox = imui.checkbox(&physics_checkbox, "physics", key ++ .{@src()});
+    if (enable_physics_checkbox.clicked) {
+        if (physics_checkbox) {
+            self.generate_heightmap_physics(entity.transform) catch |err| {
+                std.log.err("Failed to generate heightmap physics: {}", .{err});
+            };
+            std.log.info("Created physics body", .{});
+        } else {
+            self.remove_physics_body();
+            std.log.info("Removed physics body", .{});
+        }
     }
 
-    // set shaders
-    gfx.cmd_set_vertex_shader(&self.vertex_shader);
-    gfx.cmd_set_pixel_shader(&self.pixel_shader);
+    {
+        const ll = imui.push_layout(.X, key ++ .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
 
-    // set render state
-    gfx.cmd_set_blend_state(null);
-    gfx.cmd_set_topology(.TriangleList);
-    gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
-
-    // set shader resources
-    gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gf.Buffer{
-        camera_buffer,
-        &self.instance_data_buffer,
-    });
-    gfx.cmd_set_shader_resources(.Vertex, 0, .{
-        self.heightmap_texture_view,
-    });
-
-    // set vertex and index buffers
-    var m = self.model;
-    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
-    });
-    gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-
-    // draw
-    const p = m.mesh_list[0];
-    gfx.cmd_draw_indexed(@intCast(p.num_indices), @intCast(p.indices_offset), @intCast(p.pos_offset));
+        _ = imui.label("size: ");
+        _ = imui.number_slider(&self.terrain_size[0], .{}, key ++ .{@src()});
+        _ = imui.number_slider(&self.terrain_size[1], .{}, key ++ .{@src()});
+    }
 }

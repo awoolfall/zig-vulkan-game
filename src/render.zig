@@ -98,7 +98,7 @@ const Shaders = struct {
 };
 
 shaders: Shaders,
-shader_watcher: en.assets.FileAsset,
+shader_watcher: en.assets.FileWatcher,
 
 camera_data_buffer: gfx.Buffer,
 
@@ -138,7 +138,7 @@ pub fn init() !Self {
     defer engine().frame_allocator.free(full_shader_path);
 
     std.log.info("shader path: '{s}'", .{full_shader_path});
-    var shader_watcher = try en.assets.FileAsset.init(engine().general_allocator.allocator(), full_shader_path, 500);
+    var shader_watcher = try en.assets.FileWatcher.init(engine().general_allocator.allocator(), full_shader_path, 500);
     errdefer shader_watcher.deinit();
 
     // Create camera constant buffer

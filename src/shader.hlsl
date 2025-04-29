@@ -156,7 +156,7 @@ ps_out ps_main(vs_out input)
             float attenuation = (lights[i].intensity * lights[i].intensity) / (dist * dist);
 
             float3 light_colour = lights[i].colour.rgb * attenuation;
-            float light_diffuse = saturate(dot(light_dir, normalize(input.normal)));
+            float light_diffuse = clamp(dot(normalize(light_dir), normalize(input.normal)), 0.0, 1.0);
             
             output.colour.rgb += light_colour * light_diffuse;
         }

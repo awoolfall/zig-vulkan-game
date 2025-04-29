@@ -10,7 +10,7 @@ const gf = en.gfx;
 const input = en.input;
 const cm = en.camera;
 const Transform = en.Transform;
-const SelectionTextures = @import("../selection_textures.zig");
+const st = @import("../selection_textures.zig");
 
 const InstanceInfoStruct = extern struct {
     model_matrix: zm.Mat,
@@ -47,7 +47,7 @@ pixel_shader: gf.PixelShader,
 id_pixel_shader: gf.PixelShader,
 
 instance_data_buffer: gf.Buffer,
-selection_textures: SelectionTextures,
+selection_textures: st.SelectionTextures(u32),
 
 selected_control: ?GizmoControl = null,
 selected_offset: zm.F32x4 = zm.f32x4s(0.0),
@@ -98,7 +98,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     );
     errdefer instance_data_buffer.deinit();
 
-    var selection_textures = try SelectionTextures.init(gfx);
+    var selection_textures = try st.SelectionTextures(u32).init(gfx);
     errdefer selection_textures.deinit();
 
     var self = Self {
@@ -628,7 +628,7 @@ pub fn render(
     self.render_objects(transform, camera, dsv, .Visual);
 
     // render id objects
-    gfx.cmd_clear_render_target(&self.selection_textures.rtv, zm.f32x4s(0.0));
+    self.selection_textures.clear(&engine().gfx, 0);
     gfx.cmd_set_render_target(&.{&self.selection_textures.rtv}, dsv);
     gfx.cmd_set_pixel_shader(&self.id_pixel_shader);
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
@@ -670,19 +670,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
         const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        var cam_pos = camera.transform.position;
-        cam_pos[3] = 0.0;
-        engine().debug.draw_line(.{
-            .p0 = transform.position,
-            .p1 = zm.normalize3(camera.transform.position - transform.position) + transform.position + zm.f32x4(0.1, 0.0, 0.0, 0.0),
-            .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
-        });
-        std.debug.print("camera_pos {d}, transform_pos {d}\n", .{ camera.transform.position, transform.position });
-
         mapped_buffer.data().* = .{
             .model_matrix = 
                 zm.mul(
-                    zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(cam_pos - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
+                    zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(camera.transform.position - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
                     base_tra,
                 ),
             .colour = WHITE,

@@ -6,9 +6,10 @@ const engine = en.engine;
 const gfx = en.gfx;
 
 const Gizmo = @import("gizmo/gizmo.zig");
-const SelectionTextures = @import("selection_textures.zig");
+const st = @import("selection_textures.zig");
 const pe = @import("particle_editor.zig");
 const StandardRenderer = @import("render.zig");
+const Terrain = @import("terrain/terrain.zig");
 
 const zm = en.zmath;
 const sr = en.serialize;
@@ -50,7 +51,7 @@ pub fn init() !Self {
     };
 }
 
-pub fn update(self: *Self, selection_textures: *const SelectionTextures) !void {
+pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32)) !void {
     self.editor_camera.fly_camera_update(&engine().window, &engine().input, &engine().time);
 
     // new entity button
@@ -277,10 +278,14 @@ fn create_new_entity(self: *Self) void {
 
 fn duplicate_selected_entity(self: *Self) void {
     if (self.selected_entity) |selected_entity| {
-        const descriptor = engine().entities.get(selected_entity).?.descriptor(engine().frame_allocator) catch |err| {
+        var descriptor = engine().entities.get(selected_entity).?.descriptor(engine().frame_allocator) catch |err| {
             std.log.err("Failed to create descriptor for entity: {}", .{err});
             return;
         };
+
+        // clear the serialize id so that it will be generated on the next save
+        descriptor.serialize_id = null;
+
         const new_entity = engine().entities.new_entity(descriptor) catch |err| {
             std.log.err("Failed to duplicate entity: {}", .{err});
             return;
@@ -319,6 +324,9 @@ const EntityEditorUiData = struct {
 
     light_checkbox: bool = false,
     light_type_combobox_data: Imui.ComboBoxData,
+
+    terrain_checkbox: bool = false,
+    enable_terrain_checkbox: bool = false,
 
     pub fn deinit(self: *EntityEditorUiData) void {
         self.arena.deinit();
@@ -440,6 +448,8 @@ const EntityEditorUiData = struct {
             self.running_physics_desc = null;
             self.physics_combobox_data.selected_index = null;
         }
+
+        self.enable_terrain_checkbox = (entity.app.terrain != null);
     }
 };
 
@@ -738,6 +748,28 @@ fn entity_editor_ui(
                 labeled_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
                 light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
             }
+        }
+    }
+
+    _ = imui.collapsible(&data.terrain_checkbox, "Terrain", key ++ .{@src()});
+    if (data.terrain_checkbox) {
+        const terrain_checkbox = imui.checkbox(&data.enable_terrain_checkbox, "Enable Terrain", key ++ .{@src()});
+        if (terrain_checkbox.clicked) {
+            if (data.enable_terrain_checkbox) {
+                entity.app.terrain = Terrain.init(engine().general_allocator.allocator(), .{}, entity.transform, &engine().gfx) catch |err| {
+                    std.log.err("Failed to create terrain: {}", .{err});
+                    return;
+                };
+            } else {
+                if (entity.app.terrain) |*terrain| {
+                    terrain.deinit();
+                }
+                entity.app.terrain = null;
+            }
+        }
+
+        if (entity.app.terrain) |*terrain| {
+            terrain.editor_ui(entity, key ++ .{@src()});
         }
     }
 }
