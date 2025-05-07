@@ -1,25 +1,33 @@
 const Self = @This();
+const TerrainSystem = @import("terrain_system.zig");
 
 const std = @import("std");
 const eng = @import("engine");
+const KeyCode = eng.input.KeyCode;
 const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
 const path = eng.path;
 const Transform = eng.Transform;
 
-const HeightFieldSize = 16;
+const HeightFieldSize = 32;
 
 pub const Descriptor = struct {
     enable_physics: bool = true,
-    terrain_size: [2]f32 = .{ 16.0, 16.0 },
+    terrain_grid_scale: f32 = 1.0,
+    terrain_height_scale: f32 = 1.0,
 };
 
 alloc: std.mem.Allocator,
 
-terrain_size: [2]f32,
-
 heightmap: []f32,
+
+terrain_grid_scale: f32 = 1.0,
+height_scale: f32 = 1.0,
+
+modify_radius: f32 = 1.0,
+dbg_modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
+dbg_modify_cells: [2][2]f32 = [_][2]f32{ [2]f32{ 0.0, 0.0 }, [2]f32{ 0.0, 0.0 } },
 
 heightmap_texture: gf.Texture2D,
 heightmap_texture_view: gf.TextureView2D,
@@ -39,9 +47,11 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gf
 
     for (0..HeightFieldSize) |y| {
         for (0..HeightFieldSize) |x| {
-            const u: f32 = @as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
-            const v: f32 = @as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
-            heightmap_data[y * HeightFieldSize + x] = std.math.sin(u * std.math.pi * 2.0) * std.math.sin(v * std.math.pi * 2.0);
+            heightmap_data[y * HeightFieldSize + x] = @mod(@as(f32, @floatFromInt(x)), 2.0) + @mod(@as(f32, @floatFromInt(y)), 2.0);
+            heightmap_data[y * HeightFieldSize + x] /= 2.0;
+            // const u: f32 = @as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
+            // const v: f32 = @as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
+            // heightmap_data[y * HeightFieldSize + x] = std.math.sin(u * std.math.pi * 2.0) * std.math.sin(v * std.math.pi * 2.0);
         }
     }
 
@@ -73,7 +83,8 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gf
 
     var self = Self {
         .alloc = alloc,
-        .terrain_size = desc.terrain_size,
+        .terrain_grid_scale = desc.terrain_grid_scale,
+        .height_scale = desc.terrain_height_scale,
         .heightmap_texture = heightmap_texture,
         .heightmap_texture_view = heightmap_texture_view,
         .heightmap = heightmap_data,
@@ -90,7 +101,8 @@ pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
     _ = alloc;
     return Descriptor {
         .enable_physics = (self.physics_body_id != null),
-        .terrain_size = self.terrain_size,
+        .terrain_grid_scale = self.terrain_grid_scale,
+        .terrain_height_scale = self.height_scale,
     };
 }
 
@@ -111,7 +123,12 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
     const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, HeightFieldSize);
     defer shape_settings.release();
 
-    const shape = try shape_settings.createShape();
+    const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
+        shape_settings.asShapeSettings(), 
+        [3]f32{ self.terrain_grid_scale, self.height_scale, self.terrain_grid_scale });
+    defer scaled_shape_settings.release();
+
+    const shape = try scaled_shape_settings.createShape();
     defer shape.release();
 
     const new_body = try body_interface.createAndAddBody(.{
@@ -160,8 +177,95 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("size: ");
-        _ = imui.number_slider(&self.terrain_size[0], .{}, key ++ .{@src()});
-        _ = imui.number_slider(&self.terrain_size[1], .{}, key ++ .{@src()});
+        _ = imui.label("grid scale: ");
+        _ = imui.number_slider(&self.terrain_grid_scale, .{}, key ++ .{@src()});
     }
+    {
+        const ll = imui.push_layout(.X, key ++ .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
+
+        _ = imui.label("height scale: ");
+        _ = imui.number_slider(&self.height_scale, .{}, key ++ .{@src()});
+    }
+    {
+        const ll = imui.push_layout(.X, key ++ .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
+
+        _ = imui.label("modify radius: ");
+        _ = imui.number_slider(&self.modify_radius, .{}, key ++ .{@src()});
+    }
+}
+
+pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
+    var modify_terrain: f32 = 0.0;
+    if (eng.engine().input.get_key(KeyCode.MouseLeft)) {
+        if (eng.engine().input.get_key(KeyCode.Shift)) {
+            modify_terrain -= 1.0;
+        } else {
+            modify_terrain += 1.0;
+        }
+    }
+
+    self.dbg_modify_cells[0] = .{ 0.0, 0.0 };
+    self.dbg_modify_cells[1] = .{ 0.0, 0.0 };
+    self.dbg_modify_center = .{ 0.0, 0.0 };
+
+    if (modify_terrain != 0.0) {
+        const mouse_pos = eng.engine().input.cursor_position;
+        if (mouse_pos[0] < 0 or mouse_pos[1] < 0) {
+            return false;
+        }
+
+        const terrain_uv = terrain_system.selection_textures
+            .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1]), &eng.engine().gfx) catch {
+                return false;
+            };
+        if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0) {
+            return false;
+        }
+        const terrain_uv_v = zm.loadArr2(terrain_uv);
+        const heightfield_size_f32_m1 = @as(f32, @floatFromInt(HeightFieldSize - 1));
+        const heightmap_modify_center = terrain_uv_v * zm.f32x4s(heightfield_size_f32_m1);
+
+        const max_modify_distance_cells: f32 = self.modify_radius / self.terrain_grid_scale;
+        const min_x: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[0] - max_modify_distance_cells), 0.0));
+        const max_x: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[0] + max_modify_distance_cells), @as(f32, @floatFromInt(HeightFieldSize - 1))));
+        const min_y: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[1] - max_modify_distance_cells), 0.0));
+        const max_y: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[1] + max_modify_distance_cells), @as(f32, @floatFromInt(HeightFieldSize - 1))));
+
+        self.dbg_modify_center = terrain_uv;
+        self.dbg_modify_cells[0][0] = @as(f32, @floatFromInt(min_x)) / @as(f32, @floatFromInt(HeightFieldSize));
+        self.dbg_modify_cells[0][1] = @as(f32, @floatFromInt(max_x)) / @as(f32, @floatFromInt(HeightFieldSize));
+        self.dbg_modify_cells[1][0] = @as(f32, @floatFromInt(min_y)) / @as(f32, @floatFromInt(HeightFieldSize));
+        self.dbg_modify_cells[1][1] = @as(f32, @floatFromInt(max_y)) / @as(f32, @floatFromInt(HeightFieldSize));
+
+        for (@intCast(min_x)..@intCast(max_x)) |x| {
+            for (@intCast(min_y)..@intCast(max_y)) |y| {
+                const idx: usize = x + y * HeightFieldSize;
+                const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
+                const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
+                const modify_strength = @max(0.0, (self.modify_radius - distance_to_cell) / @max(self.modify_radius * self.terrain_grid_scale, 0.01));
+                self.heightmap[idx] += modify_terrain * eng.engine().time.delta_time_f32() * modify_strength;
+            }
+        }
+
+        if (self.heightmap_texture.map_write_discard(f32, &eng.engine().gfx)) |mapped_texture| {
+            defer mapped_texture.unmap();
+            // TODO: this is incorrect, d3d11 row pitch is 128 but row length is 64. (when 16 HeightFieldSize)
+            // probably need to do data() array access inside platform code
+            @memcpy(mapped_texture.data(), self.heightmap);
+        } else |err| {
+            std.log.err("Failed to map terrain texture: {}", .{err});
+        }
+    }
+
+    return modify_terrain != 0.0;
 }

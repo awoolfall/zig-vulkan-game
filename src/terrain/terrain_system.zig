@@ -8,18 +8,27 @@ const ph = eng.physics;
 const Terrain = @import("terrain.zig");
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
+const pt = eng.path;
 
-const HeightFieldModelSize = 16;
+const HeightFieldModelSize = 32;
 
 const InstanceInfoStruct = extern struct {
     origin: zm.F32x4,
-    size: zm.F32x4,
+    height_scale: f32,
+    grid_length: f32,
+    grid_scale: f32,
+    _pad0: f32 = 0.0,
+    modify_cells: zm.F32x4,
+    modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
+    modify_radius: f32 = 0.0,
+    modify_strength: f32 = 0.0,
 };
 
 instance_data_buffer: gf.Buffer,
 
 vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
+watch: eng.assets.FileWatcher,
 
 selection_textures: st.SelectionTextures([2]f32),
 
@@ -31,10 +40,11 @@ pub fn deinit(self: *Self) void {
     self.pixel_shader.deinit();
     self.selection_textures.deinit();
     self.model.deinit();
+    self.watch.deinit();
 }
 
 pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
-    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize - 1, HeightFieldModelSize - 1, gfx);
+    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2, gfx);
     errdefer plane_model.deinit();
 
     const instance_data_buffer = try gf.Buffer.init(
@@ -48,12 +58,17 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     var selection_textures = try st.SelectionTextures([2]f32).init(gfx);
     errdefer selection_textures.deinit();
 
+    const terrain_path = pt.Path{ .ExeRelative = "../../src/terrain/terrain.hlsl" };
+    const terrain_path_abs = try terrain_path.resolve_path(alloc);
+    defer alloc.free(terrain_path_abs);
+
     var self = Self {
         .model = plane_model,
         .instance_data_buffer = instance_data_buffer,
         .vertex_shader = undefined,
         .pixel_shader = undefined,
         .selection_textures = selection_textures,
+        .watch = try eng.assets.FileWatcher.init(alloc, terrain_path_abs, 500),
     };
 
     const shaders = try self.compile_shaders(alloc, gfx);
@@ -108,16 +123,36 @@ pub fn render(
     dsv: *const gf.DepthStencilView,
     gfx: *gf.GfxState
 ) void {
+    if (self.watch.was_modified_since_last_check()) blk: {
+        const shaders = self.compile_shaders(eng.engine().general_allocator, gfx) catch break :blk;
+        self.vertex_shader.deinit();
+        self.pixel_shader.deinit();
+        self.vertex_shader = shaders.vertex_shader;
+        self.pixel_shader = shaders.pixel_shader;
+    }
+
     // update instance data buffer
     {
         const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
         defer mapped_buffer.unmap();
-        mapped_buffer.data().origin = transform.position;
-        mapped_buffer.data().size = 
-            zm.f32x4(terrain.terrain_size[0], 1.0, terrain.terrain_size[1], 1.0);
+
+        mapped_buffer.data().* = .{
+            .origin = transform.position,
+            .height_scale = terrain.height_scale,
+            .grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
+            .grid_scale = terrain.terrain_grid_scale,
+            .modify_cells = zm.f32x4(
+                terrain.dbg_modify_cells[0][0], 
+                terrain.dbg_modify_cells[0][1], 
+                terrain.dbg_modify_cells[1][0], 
+                terrain.dbg_modify_cells[1][1]),
+            .modify_center = terrain.dbg_modify_center,
+            .modify_radius = terrain.modify_radius,
+            .modify_strength = 1.0,
+        };
     }
 
-    self.selection_textures.clear(gfx, [2]f32{ 0.0, 0.0 });
+    self.selection_textures.clear(gfx, [2]f32{ -1.0, -1.0 });
     gfx.cmd_set_render_target(&.{ rtv, &self.selection_textures.rtv }, dsv);
 
     // set shaders
@@ -134,8 +169,20 @@ pub fn render(
         camera_buffer,
         &self.instance_data_buffer,
     });
+    gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gf.Buffer{
+        camera_buffer,
+        &self.instance_data_buffer,
+    });
+
+    const texture_id = eng.engine().asset_manager.find_texture2d_id("terrain-texture").?;
+    const texture = eng.engine().asset_manager.get_texture2d(texture_id) catch unreachable;
+
+    const texture_view = gf.TextureView2D.init_from_texture2d(texture, gfx) catch unreachable;
+    defer texture_view.deinit();
+
     gfx.cmd_set_shader_resources(.Vertex, 0, .{
         terrain.heightmap_texture_view,
+        //texture_view,
     });
 
     // set vertex and index buffers

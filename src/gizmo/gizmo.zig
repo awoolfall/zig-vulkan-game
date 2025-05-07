@@ -52,6 +52,9 @@ selection_textures: st.SelectionTextures(u32),
 selected_control: ?GizmoControl = null,
 selected_offset: zm.F32x4 = zm.f32x4s(0.0),
 
+rendered_perspective_matrix: zm.Mat = zm.identity(),
+rendered_view_matrix: zm.Mat = zm.identity(),
+
 pub fn deinit(self: *Self) void {
     self.visual_torus.deinit();
     self.visual_cylinder.deinit();
@@ -526,7 +529,10 @@ inline fn get_coord_space() CoordSpace {
     return if (engine().input.get_key(input.KeyCode.Control)) .local else .world;
 }
 
-pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat) void {
+pub fn update(self: *Self, transform: *Transform) bool {
+    const inv_perspective = zm.inverse(self.rendered_perspective_matrix);
+    const inv_view = zm.inverse(self.rendered_view_matrix);
+
     const coord_space = get_coord_space();
     if (engine().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
@@ -584,6 +590,8 @@ pub fn update(self: *Self, transform: *Transform, inv_perspective: zm.Mat, inv_v
             }
         }
     }
+
+    return !(self.selected_control == null or self.selected_control == .None);
 }
 
 pub fn render(
@@ -595,6 +603,8 @@ pub fn render(
     camera: *const cm.Camera
 ) void {
     const gfx = &engine().gfx;
+    self.rendered_perspective_matrix = camera.generate_perspective_matrix(gfx.swapchain_aspect());
+    self.rendered_view_matrix = camera.transform.generate_view_matrix();
 
     // recreate selection textures if size has changed
     if (self.selection_textures.texture.desc.width != gfx.swapchain_size.width or self.selection_textures.texture.desc.height != gfx.swapchain_size.height) {

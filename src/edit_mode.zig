@@ -10,6 +10,7 @@ const st = @import("selection_textures.zig");
 const pe = @import("particle_editor.zig");
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
+const TerrainSystem = @import("terrain/terrain_system.zig");
 
 const zm = en.zmath;
 const sr = en.serialize;
@@ -51,40 +52,70 @@ pub fn init() !Self {
     };
 }
 
-pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32)) !void {
+pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
     self.editor_camera.fly_camera_update(&engine().window, &engine().input, &engine().time);
 
-    // new entity button
-    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.E)) {
-        self.create_new_entity();
-    }
+    if (!engine().imui.has_focus()) {
+        // new entity button
+        if (engine().input.get_key_down(KeyCode.E)) {
+            self.create_new_entity();
+        }
 
-    // delete entity button
-    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.Delete)) {
-        self.remove_selected_entity();
-    }
+        // delete entity button
+        if (engine().input.get_key_down(KeyCode.Delete)) {
+            self.remove_selected_entity();
+        }
 
-    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.MouseLeft) and engine().input.get_key(KeyCode.Shift)) {
-        const selection_entity_id = selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx) catch |err| {
-            std.log.err("cannot get value at position: {}", .{err});
-            return;
-        };
+        var interaction_available = true;
 
-        if (selection_entity_id == 0) {
-            self.selected_entity = null;
-        } else if (self.selected_entity != null and self.selected_entity.?.index == selection_entity_id) {
-            self.selected_entity = null;
-        } else {
-            const entity = engine().entities.get_dont_check_generation(selection_entity_id);
-            if (entity) |ent| {
-                std.log.info("entity name: {s}", .{ent.name orelse "unnamed"});
-                self.selected_entity = .{
-                    .index = selection_entity_id,
-                    .generation = engine().entities.list.data.items[selection_entity_id].generation,
-                };
-                self.entity_editor_ui_data.inited = false;
+        if (interaction_available) {
+            if (self.selected_entity) |selected_entity| blk: {
+                const entity = engine().entities.get(selected_entity) orelse break :blk;
+                if (self.gizmo.update(&entity.transform)) {
+                    interaction_available = false;
+                }
+            }
+        }
+
+        if (interaction_available) {
+            if (self.selected_entity) |selected_entity| blk: {
+                const ent = engine().entities.get(selected_entity) orelse break :blk;
+                if (ent.app.terrain) |*terrain| {
+                    const modified = terrain.edit_terrain(terrain_system) catch |err| {
+                        std.log.err("Failed to edit terrain: {}", .{err});
+                        break :blk;
+                    };
+                    if (modified) {
+                        interaction_available = false;
+                    }
+                }
+            }
+        }
+
+        // Select entity
+        if (interaction_available and engine().input.get_key_down(KeyCode.MouseLeft)) {
+            interaction_available = false;
+            const selection_entity_id = selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx) catch |err| {
+                std.log.err("cannot get value at position: {}", .{err});
+                return;
+            };
+
+            if (selection_entity_id == 0) {
+                self.selected_entity = null;
+            } else if (self.selected_entity != null and self.selected_entity.?.index == selection_entity_id) {
+                self.selected_entity = null;
             } else {
-                std.log.info("entity not found!", .{});
+                const entity = engine().entities.get_dont_check_generation(selection_entity_id);
+                if (entity) |ent| {
+                    std.log.info("entity name: {s}", .{ent.name orelse "unnamed"});
+                    self.selected_entity = .{
+                        .index = selection_entity_id,
+                        .generation = engine().entities.list.data.items[selection_entity_id].generation,
+                    };
+                    self.entity_editor_ui_data.inited = false;
+                } else {
+                    std.log.info("entity not found!", .{});
+                }
             }
         }
     }
@@ -257,7 +288,6 @@ pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gf
                 .top_left_y = 0.0,
             };
             engine().gfx.cmd_set_viewport(viewport);
-            self.gizmo.update(&entity.transform, zm.inverse(self.editor_camera.generate_perspective_matrix(engine().gfx.swapchain_aspect())), zm.inverse(self.editor_camera.transform.generate_view_matrix()));
             self.gizmo.render(&entity.transform, camera_data_buffer, rtv, dsv, &self.editor_camera);
         } 
     }

@@ -106,7 +106,6 @@ camera: cm.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
 character_idx: gen.GenerationalIndex,
-//character_ignore_self_filter: *ph.IgnoreIdsBodyFilter,
 
 app_life_asset_pack_id: assets.AssetPackId,
 turntable_model_id: assets.ModelAssetId,
@@ -159,6 +158,8 @@ pub fn init(self: *Self) !void {
     try asset_pack.define_animation("character run", "character", 48);
     try asset_pack.define_animation("character walk", "character", 72);
     try asset_pack.define_animation("character attack", "character", 1);
+
+    try asset_pack.add_texture2D("terrain-texture", assets.AssetPack.Texture2DAsset{ .path = "terrain.r32" });
 
     // try asset_pack.define_animation("character idle", "character", 0);
     // try asset_pack.define_animation("character run", "character", 1);
@@ -297,7 +298,7 @@ fn update(self: *Self) !void {
     var render_camera: *cm.Camera = undefined;
     switch (self.current_mode) {
         .EDIT => {
-            self.edit_mode.update(&self.selection_textures) catch |err| {
+            self.edit_mode.update(&self.selection_textures, &self.terrain_renderer) catch |err| {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
             render_camera = &self.edit_mode.editor_camera;
