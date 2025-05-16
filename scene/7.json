@@ -58,6 +58,7 @@
     "health_points": null,
     "anim_controller_desc": null,
     "particle_system_settings": null,
-    "light": null
+    "light": null,
+    "terrain": null
   }
 }

@@ -372,11 +372,17 @@ const EntityEditorUiData = struct {
         var model_names = std.ArrayList([]u8).init(alloc);
         defer model_names.deinit();
 
-        var asset_packs_iter = engine().asset_manager.loaded_asset_packs.iterator();
-        while (asset_packs_iter.next()) |pack| {
+        var asset_packs_iter = engine().asset_manager.asset_packs.iterator();
+        while (asset_packs_iter.next()) |it| {
+            const pack = it.value_ptr;
             var models_iter = pack.models.keyIterator();
             while (models_iter.next()) |k| {
-                try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}|{s}", .{pack.unique_name, pack.get_asset_name(k.*).?}));
+                const asset_id = assets.ModelAssetId{ .pack_id = pack.unique_name_hash, .asset_id = k.* };
+
+                const asset_identifier_string = try asset_id.serialize(alloc);
+                defer alloc.free(asset_identifier_string);
+
+                try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
             }
         }
 
@@ -460,7 +466,9 @@ const EntityEditorUiData = struct {
         self.name_edit_data.mark = self.name_edit_data.text.items.len;
 
         // set model text
-        const model_text = if (entity.model) |mid| sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable else "None";
+        const model_text = if (entity.model) |mid|
+            sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable
+            else "None";
         self.model_combobox_data.selected_index = null;
         for (self.model_combobox_data.options, 0..) |option, i| {
             if (std.mem.eql(u8, option, model_text)) {

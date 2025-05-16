@@ -25,14 +25,20 @@ heightmap: []f32,
 terrain_grid_scale: f32 = 1.0,
 height_scale: f32 = 1.0,
 
-modify_radius: f32 = 1.0,
-dbg_modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
-dbg_modify_cells: [2][2]f32 = [_][2]f32{ [2]f32{ 0.0, 0.0 }, [2]f32{ 0.0, 0.0 } },
-
 heightmap_texture: gf.Texture2D,
 heightmap_texture_view: gf.TextureView2D,
 
 physics_body_id: ?ph.zphy.BodyId = null,
+
+modify_radius: f32 = 1.0,
+dbg_modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
+dbg_modify_cells: [2][2]f32 = [_][2]f32{ [2]f32{ 0.0, 0.0 }, [2]f32{ 0.0, 0.0 } },
+modify_mode: ModifyMode = .Flatten,
+
+const ModifyMode = enum {
+    GradiantLift,
+    Flatten,
+};
 
 pub fn deinit(self: *Self) void {
     self.heightmap_texture.deinit();
@@ -155,6 +161,18 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
     }
     defer imui.pop_layout();
 
+    {
+        const ll = imui.push_layout(.X, key ++ .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
+
+        _ = imui.label("texture: ");
+        _ = imui.number_slider(&self.terrain_grid_scale, .{}, key ++ .{@src()});
+    }
+
     var physics_checkbox = (self.physics_body_id != null);
     const enable_physics_checkbox = imui.checkbox(&physics_checkbox, "physics", key ++ .{@src()});
     if (enable_physics_checkbox.clicked) {
@@ -247,14 +265,34 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
         self.dbg_modify_cells[1][0] = @as(f32, @floatFromInt(min_y)) / @as(f32, @floatFromInt(HeightFieldSize));
         self.dbg_modify_cells[1][1] = @as(f32, @floatFromInt(max_y)) / @as(f32, @floatFromInt(HeightFieldSize));
 
-        for (@intCast(min_x)..@intCast(max_x)) |x| {
-            for (@intCast(min_y)..@intCast(max_y)) |y| {
-                const idx: usize = x + y * HeightFieldSize;
-                const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
-                const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
-                const modify_strength = @max(0.0, (self.modify_radius - distance_to_cell) / @max(self.modify_radius * self.terrain_grid_scale, 0.01));
-                self.heightmap[idx] += modify_terrain * eng.engine().time.delta_time_f32() * modify_strength;
-            }
+        switch (self.modify_mode) {
+            .GradiantLift => {
+                for (@intCast(min_x)..@intCast(max_x)) |x| {
+                    for (@intCast(min_y)..@intCast(max_y)) |y| {
+                        const idx: usize = x + y * HeightFieldSize;
+                        const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
+                        const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
+                        const modify_strength = @max(0.0, (self.modify_radius - distance_to_cell) / @max(self.modify_radius * self.terrain_grid_scale, 0.01));
+                        self.heightmap[idx] += modify_terrain * eng.engine().time.delta_time_f32() * modify_strength;
+                    }
+                }
+            },
+            .Flatten => {
+                const center_cell_idx: usize = 
+                    @as(usize, @intFromFloat(@round(heightmap_modify_center[0]))) + 
+                    @as(usize, @intFromFloat(@round(heightmap_modify_center[1]))) * HeightFieldSize;
+                const center_cell_value = self.heightmap[center_cell_idx];
+                for (@intCast(min_x)..@intCast(max_x)) |x| {
+                    for (@intCast(min_y)..@intCast(max_y)) |y| {
+                        const idx: usize = x + y * HeightFieldSize;
+                        const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
+                        const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
+                        if (distance_to_cell <= self.modify_radius) {
+                            self.heightmap[idx] = center_cell_value;
+                        }
+                    }
+                }
+            },
         }
 
         if (self.heightmap_texture.map_write_discard(f32, &eng.engine().gfx)) |mapped_texture| {

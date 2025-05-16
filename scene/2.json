@@ -242,6 +242,7 @@
         "len": 1
       }
     },
-    "light": null
+    "light": null,
+    "terrain": null
   }
 }

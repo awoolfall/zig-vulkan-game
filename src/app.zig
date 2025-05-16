@@ -108,7 +108,6 @@ target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 character_idx: gen.GenerationalIndex,
 
 app_life_asset_pack_id: assets.AssetPackId,
-turntable_model_id: assets.ModelAssetId,
 
 player_attack_particle_system: particle.ParticleSystem,
 
@@ -143,35 +142,35 @@ pub fn init(self: *Self) !void {
     errdefer selection_textures.deinit();
 
     var asset_pack = try assets.AssetPack.init(engine().general_allocator, "default");
-    defer asset_pack.deinit();
+    errdefer asset_pack.deinit();
 
     //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
-    try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "KayKit_Adventure/Characters/gltf/Knight.glb" });
-    try asset_pack.add_model("model", assets.AssetPack.ModelAsset{ .Path = "sea_house.glb" });
-    try asset_pack.add_model("terrain", assets.AssetPack.ModelAsset{ .Plane = .{ .slices = 1, .stacks = 1, } });
-    try asset_pack.add_model("cone", assets.AssetPack.ModelAsset{ .Cone = .{ .slices = 8, } });
-    try asset_pack.add_model("sphere", assets.AssetPack.ModelAsset{ .Sphere = .{  } });
-    try asset_pack.add_model("cube", assets.AssetPack.ModelAsset{ .Cube = .{} });
-    try asset_pack.add_model("block", assets.AssetPack.ModelAsset{ .Path = "block.glb" });
+    try asset_pack.add_model("character", .{ .Path = "KayKit_Adventure/Characters/gltf/Knight.glb" });
+    try asset_pack.add_model("model", .{ .Path = "sea_house.glb" });
+    try asset_pack.add_model("terrain", .{ .Plane = .{ .slices = 1, .stacks = 1, } });
+    try asset_pack.add_model("cone", .{ .Cone = .{ .slices = 8, } });
+    try asset_pack.add_model("sphere", .{ .Sphere = .{} });
+    try asset_pack.add_model("cube", .{ .Cube = .{} });
+    try asset_pack.add_model("block", .{ .Path = "block.glb" });
 
     try asset_pack.define_animation("character idle", "character", 36);
     try asset_pack.define_animation("character run", "character", 48);
     try asset_pack.define_animation("character walk", "character", 72);
     try asset_pack.define_animation("character attack", "character", 1);
 
-    try asset_pack.add_texture2D("terrain-texture", assets.AssetPack.Texture2DAsset{ .path = "terrain.r32" });
+    try asset_pack.add_texture2D("terrain-texture", .{ .Path = "terrain.r32" });
 
     // try asset_pack.define_animation("character idle", "character", 0);
     // try asset_pack.define_animation("character run", "character", 1);
     // try asset_pack.define_animation("character walk", "character", 2);
     // try asset_pack.define_animation("character attack", "character", 2);
 
-    const asset_pack_id = try engine().asset_manager.load_asset_pack(&asset_pack, &engine().gfx);
+    const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
+    try engine().asset_manager.load_asset_pack(asset_pack_id);
     
-    const character_model_id = engine().asset_manager.find_model_id("character").?;
-    const turntable_model_id = engine().asset_manager.find_model_id("model").?;
+    const character_model_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
 
-    const character_model = engine().asset_manager.get_model(character_model_id) catch unreachable;
+    const character_model = engine().asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
     std.log.info("character model animations:", .{});
     for (character_model.animations, 0..) |*animation, i| {
         std.log.info("{}. anim: {s}", .{i, animation.name});
@@ -247,7 +246,6 @@ pub fn init(self: *Self) !void {
         //.character_ignore_self_filter = character_ignore_self_filter,
 
         .app_life_asset_pack_id = asset_pack_id,
-        .turntable_model_id = turntable_model_id,
 
         .player_attack_particle_system = player_attack_particle_system,
 
@@ -533,7 +531,7 @@ fn update(self: *Self) !void {
         if (it.item_data) |*entity| {
             // Find the transform of the entity to be rendered taking into account it's parent
             if (entity.model) |mid| {
-                const m = engine().asset_manager.get_model(mid) catch unreachable;
+                const m = engine().asset_manager.get_asset(assets.ModelAsset, mid) catch unreachable;
 
                 var pose: []zm.Mat = null_bone_transforms;
                 const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
@@ -570,7 +568,8 @@ fn update(self: *Self) !void {
                 ) catch unreachable;
             } else {
                 if (self.current_mode == .EDIT) {
-                    const m = engine().asset_manager.get_model(engine().asset_manager.find_model_id("sphere").?) catch unreachable;
+                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|sphere").?;
+                    const m = engine().asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
                     self.render_model(
                         @truncate(entity_id),
                         m,
@@ -923,10 +922,10 @@ const CollideShapeCollector = extern struct {
 };
 
 fn character_anim_description() anim.AnimController.Descriptor {
-    const character_animation_idle_id = engine().asset_manager.find_animation_id("character idle").?;
-    const character_animation_walk_id = engine().asset_manager.find_animation_id("character walk").?;
-    const character_animation_run_id = engine().asset_manager.find_animation_id("character run").?;
-    const character_animation_attack_id = engine().asset_manager.find_animation_id("character attack").?;
+    const character_animation_idle_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character idle").?;
+    const character_animation_walk_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character walk").?;
+    const character_animation_run_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character run").?;
+    const character_animation_attack_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character attack").?;
 
     var anim_nodes = [_]anim.Node{
         .{

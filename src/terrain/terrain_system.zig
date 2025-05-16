@@ -5,6 +5,7 @@ const eng = @import("engine");
 const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
+const as = eng.assets;
 const Terrain = @import("terrain.zig");
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
@@ -174,8 +175,8 @@ pub fn render(
         &self.instance_data_buffer,
     });
 
-    const texture_id = eng.engine().asset_manager.find_texture2d_id("terrain-texture").?;
-    const texture = eng.engine().asset_manager.get_texture2d(texture_id) catch unreachable;
+    const texture_id = eng.engine().asset_manager.find_asset_id(as.Texture2DAsset, "default|terrain-texture").?;
+    const texture = eng.engine().asset_manager.get_asset(as.Texture2DAsset, texture_id) catch unreachable;
 
     const texture_view = gf.TextureView2D.init_from_texture2d(texture, gfx) catch unreachable;
     defer texture_view.deinit();
