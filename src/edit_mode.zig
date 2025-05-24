@@ -182,10 +182,9 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
             if (self.file_dropdown_open) {
                 const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
                 const file_lfw_rect = file_lfw.computed.rect();
-                const file_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(file_lfw_rect.left), @floatFromInt(file_lfw_rect.top + file_lfw_rect.height), .{@src()});
+                const file_dropdown = imui.push_priority_floating_layout(.Y, file_lfw_rect.left, file_lfw_rect.bottom, .{@src()});
                 if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
                     file_dropdown_widget.flags.render = true;
-                    file_dropdown_widget.background_colour = imui.palette().background;
                 }
                 defer imui.pop_layout();
 
@@ -237,10 +236,9 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
             if (self.edit_dropdown_open) {
                 const edit_lfw = imui.get_widget_from_last_frame(edit_button.id.box) orelse break :edit_blk;
                 const edit_lfw_rect = edit_lfw.computed.rect();
-                const edit_dropdown = imui.push_priority_floating_layout(.Y, @floatFromInt(edit_lfw_rect.left), @floatFromInt(edit_lfw_rect.top + edit_lfw_rect.height), .{@src()});
+                const edit_dropdown = imui.push_priority_floating_layout(.Y, edit_lfw_rect.left, edit_lfw_rect.bottom, .{@src()});
                 if (imui.get_widget(edit_dropdown)) |edit_dropdown_widget| {
                     edit_dropdown_widget.flags.render = true;
-                    edit_dropdown_widget.background_colour = imui.palette().background;
                 }
                 defer imui.pop_layout();
 
@@ -482,14 +480,10 @@ const EntityEditorUiData = struct {
 };
 
 fn set_background_widget_layout(background_widget: *Imui.Widget) void {
-    const imui = &engine().imui;
-
     background_widget.semantic_size[0].minimum_pixel_size = 350;
     background_widget.flags.clickable = true;
     background_widget.flags.render = true;
     background_widget.flags.hover_effect = false;
-    background_widget.background_colour = imui.palette().background;
-    background_widget.border_colour = imui.palette().border;
     background_widget.border_width_px = .lr_tb(2, 5);
     background_widget.padding_px = .all(10);
     background_widget.corner_radii_px = .all(5);
