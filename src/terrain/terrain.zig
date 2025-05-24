@@ -7,12 +7,14 @@ const KeyCode = eng.input.KeyCode;
 const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
+const as = eng.assets;
 const path = eng.path;
 const Transform = eng.Transform;
 
 const HeightFieldSize = 32;
 
 pub const Descriptor = struct {
+    heightmap_asset_id: ?as.Texture2DAssetId = null,
     enable_physics: bool = true,
     terrain_grid_scale: f32 = 1.0,
     terrain_height_scale: f32 = 1.0,
@@ -20,6 +22,7 @@ pub const Descriptor = struct {
 
 alloc: std.mem.Allocator,
 
+heightmap_asset_id: ?as.Texture2DAssetId,
 heightmap: []f32,
 
 terrain_grid_scale: f32 = 1.0,
@@ -33,7 +36,7 @@ physics_body_id: ?ph.zphy.BodyId = null,
 modify_radius: f32 = 1.0,
 dbg_modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
 dbg_modify_cells: [2][2]f32 = [_][2]f32{ [2]f32{ 0.0, 0.0 }, [2]f32{ 0.0, 0.0 } },
-modify_mode: ModifyMode = .Flatten,
+modify_mode: ModifyMode = .GradiantLift,
 
 const ModifyMode = enum {
     GradiantLift,
@@ -89,6 +92,7 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gf
 
     var self = Self {
         .alloc = alloc,
+        .heightmap_asset_id = desc.heightmap_asset_id,
         .terrain_grid_scale = desc.terrain_grid_scale,
         .height_scale = desc.terrain_height_scale,
         .heightmap_texture = heightmap_texture,
@@ -106,6 +110,7 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gf
 pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
     _ = alloc;
     return Descriptor {
+        .heightmap_asset_id = self.heightmap_asset_id,
         .enable_physics = (self.physics_body_id != null),
         .terrain_grid_scale = self.terrain_grid_scale,
         .terrain_height_scale = self.height_scale,
@@ -242,6 +247,8 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
             return false;
         }
 
+        const heightfield_size_f32 = @as(f32, @floatFromInt(HeightFieldSize));
+
         const terrain_uv = terrain_system.selection_textures
             .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1]), &eng.engine().gfx) catch {
                 return false;
@@ -250,20 +257,20 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
             return false;
         }
         const terrain_uv_v = zm.loadArr2(terrain_uv);
-        const heightfield_size_f32_m1 = @as(f32, @floatFromInt(HeightFieldSize - 1));
-        const heightmap_modify_center = terrain_uv_v * zm.f32x4s(heightfield_size_f32_m1);
+    
+        const heightmap_modify_center = terrain_uv_v * zm.f32x4s(heightfield_size_f32);
 
-        const max_modify_distance_cells: f32 = self.modify_radius / self.terrain_grid_scale;
+        const max_modify_distance_cells: f32 = (self.modify_radius / self.terrain_grid_scale) * 1.5;
         const min_x: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[0] - max_modify_distance_cells), 0.0));
-        const max_x: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[0] + max_modify_distance_cells), @as(f32, @floatFromInt(HeightFieldSize - 1))));
+        const max_x: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[0] + max_modify_distance_cells), heightfield_size_f32));
         const min_y: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[1] - max_modify_distance_cells), 0.0));
-        const max_y: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[1] + max_modify_distance_cells), @as(f32, @floatFromInt(HeightFieldSize - 1))));
+        const max_y: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[1] + max_modify_distance_cells), heightfield_size_f32));
 
         self.dbg_modify_center = terrain_uv;
-        self.dbg_modify_cells[0][0] = @as(f32, @floatFromInt(min_x)) / @as(f32, @floatFromInt(HeightFieldSize));
-        self.dbg_modify_cells[0][1] = @as(f32, @floatFromInt(max_x)) / @as(f32, @floatFromInt(HeightFieldSize));
-        self.dbg_modify_cells[1][0] = @as(f32, @floatFromInt(min_y)) / @as(f32, @floatFromInt(HeightFieldSize));
-        self.dbg_modify_cells[1][1] = @as(f32, @floatFromInt(max_y)) / @as(f32, @floatFromInt(HeightFieldSize));
+        self.dbg_modify_cells[0][0] = @as(f32, @floatFromInt(min_x)) / heightfield_size_f32;
+        self.dbg_modify_cells[0][1] = @as(f32, @floatFromInt(max_x)) / heightfield_size_f32;
+        self.dbg_modify_cells[1][0] = @as(f32, @floatFromInt(min_y)) / heightfield_size_f32;
+        self.dbg_modify_cells[1][1] = @as(f32, @floatFromInt(max_y)) / heightfield_size_f32;
 
         switch (self.modify_mode) {
             .GradiantLift => {
@@ -272,7 +279,8 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
                         const idx: usize = x + y * HeightFieldSize;
                         const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
                         const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
-                        const modify_strength = @max(0.0, (self.modify_radius - distance_to_cell) / @max(self.modify_radius * self.terrain_grid_scale, 0.01));
+                        const modify_radius_cells = self.modify_radius / self.terrain_grid_scale;
+                        const modify_strength = @max(0.0, (modify_radius_cells - distance_to_cell) / @max(modify_radius_cells, 0.01));
                         self.heightmap[idx] += modify_terrain * eng.engine().time.delta_time_f32() * modify_strength;
                     }
                 }
@@ -287,7 +295,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
                         const idx: usize = x + y * HeightFieldSize;
                         const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
                         const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
-                        if (distance_to_cell <= self.modify_radius) {
+                        if (distance_to_cell <= (self.modify_radius / self.terrain_grid_scale)) {
                             self.heightmap[idx] = center_cell_value;
                         }
                     }

@@ -1,11 +1,13 @@
 const std = @import("std");
-const engine = @import("engine");
+const en = @import("engine");
 const builtin = @import("builtin");
+
+// extern "game" fn run(engine: *en.Engine) void;
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
-    const gpa, const is_debug = gpa: {
+    var gpa, const is_debug = gpa: {
         if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
@@ -19,6 +21,9 @@ pub fn main() !void {
         }
     };
 
-    try engine.Engine.run(gpa);
+    const engine = en.Engine.init_engine(&gpa) orelse return error.FailedToInitEngine;
+    defer engine.deinit();
+
+    engine.run();
 }
 

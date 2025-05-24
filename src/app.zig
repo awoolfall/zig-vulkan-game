@@ -160,11 +160,6 @@ pub fn init(self: *Self) !void {
 
     try asset_pack.add_texture2D("terrain-texture", .{ .Path = "terrain.r32" });
 
-    // try asset_pack.define_animation("character idle", "character", 0);
-    // try asset_pack.define_animation("character run", "character", 1);
-    // try asset_pack.define_animation("character walk", "character", 2);
-    // try asset_pack.define_animation("character attack", "character", 2);
-
     const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
     try engine().asset_manager.load_asset_pack(asset_pack_id);
     

@@ -161,13 +161,8 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         const file_button = imui.button("File", .{@src()});
         if (imui.get_widget(file_button.id.box)) |file_widget| {
             file_widget.background_colour = zm.f32x4s(0.0);
-            file_widget.border_width_px = 0;
-            file_widget.padding_px = .{
-                .top = 5,
-                .bottom = 5,
-                .left = 10,
-                .right = 10,
-            };
+            file_widget.border_width_px = .{};
+            file_widget.padding_px = .lr_tb(10, 5);
         }
         if (imui.get_widget(file_button.id.text)) |text_widget| {
             text_widget.text_content.?.colour = imui.palette().text_dark;
@@ -221,13 +216,8 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         const edit_button = imui.button("Edit", .{@src()});
         if (imui.get_widget(edit_button.id.box)) |edit_widget| {
             edit_widget.background_colour = zm.f32x4s(0.0);
-            edit_widget.border_width_px = 0;
-            edit_widget.padding_px = .{
-                .top = 5,
-                .bottom = 5,
-                .left = 10,
-                .right = 10,
-            };
+            edit_widget.border_width_px = .{};
+            edit_widget.padding_px = .lr_tb(10, 5);
         }
         if (imui.get_widget(edit_button.id.text)) |text_widget| {
             text_widget.text_content.?.colour = imui.palette().text_dark;
@@ -500,19 +490,9 @@ fn set_background_widget_layout(background_widget: *Imui.Widget) void {
     background_widget.flags.hover_effect = false;
     background_widget.background_colour = imui.palette().background;
     background_widget.border_colour = imui.palette().border;
-    background_widget.border_width_px = 2;
-    background_widget.padding_px = .{
-        .left = 10,
-        .right = 10,
-        .top = 10,
-        .bottom = 10,
-    };
-    background_widget.corner_radii_px = .{
-        .top_left = 10,
-        .top_right = 10,
-        .bottom_left = 10,
-        .bottom_right = 10,
-    };
+    background_widget.border_width_px = .lr_tb(2, 5);
+    background_widget.padding_px = .all(10);
+    background_widget.corner_radii_px = .all(5);
     background_widget.children_gap = 5;
 }
 
@@ -729,20 +709,22 @@ fn entity_editor_ui(
     }
 
     _ = imui.collapsible(&data.particle_checkbox, "Particle System", key ++ .{@src()});
-    if (data.particle_checkbox) {
-        const background = imui.push_floating_layout(.Y, data.particle_position[0], data.particle_position[1], key ++ .{@src()});
-        defer imui.pop_layout();
+    defer { 
+        if (data.particle_checkbox) {
+            const background = imui.push_floating_layout(.Y, data.particle_position[0], data.particle_position[1], key ++ .{@src()});
+            defer imui.pop_layout();
 
-        if (imui.get_widget(background)) |background_widget| {
-            set_background_widget_layout(background_widget);
+            if (imui.get_widget(background)) |background_widget| {
+                set_background_widget_layout(background_widget);
+            }
+
+            if (imui.generate_widget_signals(background).dragged) {
+                data.particle_position[0] += engine().input.mouse_delta[0];
+                data.particle_position[1] += engine().input.mouse_delta[1];
+            }
+
+            pe.particle_editor(&data.particle_editor_data, entity, key ++ .{@src()});
         }
-
-        if (imui.generate_widget_signals(background).dragged) {
-            data.particle_position[0] += engine().input.mouse_delta[0];
-            data.particle_position[1] += engine().input.mouse_delta[1];
-        }
-
-        pe.particle_editor(&data.particle_editor_data, entity, key ++ .{@src()});
     }
 
     _ = imui.collapsible(&data.light_checkbox, "Light", key ++ .{@src()});
