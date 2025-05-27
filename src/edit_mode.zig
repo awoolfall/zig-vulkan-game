@@ -486,8 +486,18 @@ fn set_background_widget_layout(background_widget: *Imui.Widget) void {
     background_widget.flags.hover_effect = false;
     background_widget.border_width_px = .lr_tb(2, 5);
     background_widget.padding_px = .all(10);
-    background_widget.corner_radii_px = .all(5);
+    background_widget.corner_radii_px = .all(10);
     background_widget.children_gap = 5;
+
+    // const offset: f32 = @floatCast(2.0 * (1.0 + std.math.sin(en.engine().time.time_since_start_of_app())));
+    // const offsett: f32 = @floatCast(2.0 * (1.0 + std.math.cos(en.engine().time.time_since_start_of_app())));
+    // background_widget.border_width_px = //.all(1);
+    // .{
+    //     .top = 1.0 + offset,
+    //     .bottom = 5.0 - offset,
+    //     .left = 1.0 + offsett,
+    //     .right = 5.0 - offsett,
+    // };
 }
 
 const EntityEditorTabWidth = 10;
