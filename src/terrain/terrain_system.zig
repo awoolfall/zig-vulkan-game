@@ -125,7 +125,7 @@ pub fn render(
     gfx: *gf.GfxState
 ) void {
     if (self.watch.was_modified_since_last_check()) blk: {
-        const shaders = self.compile_shaders(eng.engine().general_allocator, gfx) catch break :blk;
+        const shaders = self.compile_shaders(eng.get().general_allocator, gfx) catch break :blk;
         self.vertex_shader.deinit();
         self.pixel_shader.deinit();
         self.vertex_shader = shaders.vertex_shader;
@@ -175,8 +175,8 @@ pub fn render(
         &self.instance_data_buffer,
     });
 
-    const texture_id = eng.engine().asset_manager.find_asset_id(as.Texture2DAsset, "default|terrain-texture").?;
-    const texture = eng.engine().asset_manager.get_asset(as.Texture2DAsset, texture_id) catch unreachable;
+    const texture_id = eng.get().asset_manager.find_asset_id(as.Texture2DAsset, "default|terrain-texture").?;
+    const texture = eng.get().asset_manager.get_asset(as.Texture2DAsset, texture_id) catch unreachable;
 
     const texture_view = gf.TextureView2D.init_from_texture2d(texture, gfx) catch unreachable;
     defer texture_view.deinit();

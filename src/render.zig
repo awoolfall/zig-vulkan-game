@@ -1,13 +1,12 @@
 const Self = @This();
 
 const std = @import("std");
-const en = @import("engine");
-const engine = en.engine;
-const zm = en.zmath;
-const ms = en.mesh;
-const gfx = en.gfx;
-const path = en.path;
-const cm = en.camera;
+const eng = @import("engine");
+const zm = eng.zmath;
+const ms = eng.mesh;
+const gfx = eng.gfx;
+const path = eng.path;
+const cm = eng.camera;
 const SelectionTextures = @import("selection_textures.zig");
 const DepthTextures = @import("depth_textures.zig");
 
@@ -98,7 +97,7 @@ const Shaders = struct {
 };
 
 shaders: Shaders,
-shader_watcher: en.assets.FileWatcher,
+shader_watcher: eng.assets.FileWatcher,
 
 camera_data_buffer: gfx.Buffer,
 
@@ -134,11 +133,11 @@ pub fn init() !Self {
     const shaders = try init_shaders();
 
     const shader_path = path.Path{.ExeRelative = "../../src/shader.hlsl"};
-    const full_shader_path = try shader_path.resolve_path(engine().frame_allocator);
-    defer engine().frame_allocator.free(full_shader_path);
+    const full_shader_path = try shader_path.resolve_path(eng.get().frame_allocator);
+    defer eng.get().frame_allocator.free(full_shader_path);
 
     std.log.info("shader path: '{s}'", .{full_shader_path});
-    var shader_watcher = try en.assets.FileWatcher.init(engine().general_allocator, full_shader_path, 500);
+    var shader_watcher = try eng.assets.FileWatcher.init(eng.get().general_allocator, full_shader_path, 500);
     errdefer shader_watcher.deinit();
 
     // Create camera constant buffer
@@ -146,7 +145,7 @@ pub fn init() !Self {
         @sizeOf(CameraStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer camera_constant_buffer.deinit();
 
@@ -156,7 +155,7 @@ pub fn init() !Self {
             @sizeOf(InstanceStruct),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
-            &engine().gfx
+            &eng.get().gfx
         );
     }
     errdefer {
@@ -170,7 +169,7 @@ pub fn init() !Self {
         @sizeOf(zm.Mat) * Self.bone_matrix_buffer_size,
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer bone_matrix_buffer.deinit();
 
@@ -178,7 +177,7 @@ pub fn init() !Self {
         @sizeOf(LightsStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer lights_buffer.deinit();
 
@@ -191,10 +190,10 @@ pub fn init() !Self {
         .bone_matrix_buffer = bone_matrix_buffer,
         .lights_buffer = lights_buffer,
 
-        .render_objects = try std.ArrayList(RenderObject).initCapacity(engine().general_allocator, 128),
-        .skeletal_render_objects = try std.ArrayList(AnimatedRenderObject).initCapacity(engine().general_allocator, 32),
-        .render_bones = try std.ArrayList(zm.Mat).initCapacity(engine().general_allocator, Self.bone_matrix_buffer_size),
-        .lights = try std.ArrayList(Light).initCapacity(engine().general_allocator, 4),
+        .render_objects = try std.ArrayList(RenderObject).initCapacity(eng.get().general_allocator, 128),
+        .skeletal_render_objects = try std.ArrayList(AnimatedRenderObject).initCapacity(eng.get().general_allocator, 32),
+        .render_bones = try std.ArrayList(zm.Mat).initCapacity(eng.get().general_allocator, Self.bone_matrix_buffer_size),
+        .lights = try std.ArrayList(Light).initCapacity(eng.get().general_allocator, 4),
     };
 }
 
@@ -212,7 +211,7 @@ fn init_shaders() !Shaders {
     };
 
     shaders.skeletal.vertex_shader = try gfx.VertexShader.init_file(
-        engine().general_allocator, 
+        eng.get().general_allocator, 
         shader_path, 
         "vs_main",
         ([_]gfx.VertexInputLayoutEntry {
@@ -229,12 +228,12 @@ fn init_shaders() !Shaders {
                 .{ "SKELETAL_RENDERING", "1" },
             },
         },
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer shaders.skeletal.vertex_shader.deinit();
 
     shaders.skeletal.pixel_shader = try gfx.PixelShader.init_file(
-        engine().general_allocator, 
+        eng.get().general_allocator, 
         shader_path,
         "ps_main",
         .{
@@ -242,7 +241,7 @@ fn init_shaders() !Shaders {
                 .{ "SKELETAL_RENDERING", "1" },
             },
         },
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer shaders.skeletal.pixel_shader.deinit();
 
@@ -252,7 +251,7 @@ fn init_shaders() !Shaders {
     };
 
     shaders.static.vertex_shader = try gfx.VertexShader.init_file(
-        engine().general_allocator, 
+        eng.get().general_allocator, 
         shader_path, 
         "vs_main",
         ([_]gfx.VertexInputLayoutEntry {
@@ -263,16 +262,16 @@ fn init_shaders() !Shaders {
             .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
         })[0..],
         .{},
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer shaders.static.vertex_shader.deinit();
 
     shaders.static.pixel_shader = try gfx.PixelShader.init_file(
-        engine().general_allocator, 
+        eng.get().general_allocator, 
         shader_path,
         "ps_main",
         .{},
-        &engine().gfx
+        &eng.get().gfx
     );
     errdefer shaders.static.pixel_shader.deinit();
 
@@ -306,14 +305,14 @@ pub fn clear(self: *Self) void {
 }
 
 pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
-    const mapped_buffer = self.camera_data_buffer.map(CameraStruct, &engine().gfx) catch unreachable;
+    const mapped_buffer = self.camera_data_buffer.map(CameraStruct, &eng.get().gfx) catch unreachable;
     defer mapped_buffer.unmap();
 
     mapped_buffer.data().* = .{
-        .projection = camera.generate_perspective_matrix(engine().gfx.swapchain_aspect()),
+        .projection = camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()),
         .view = camera.transform.generate_view_matrix(),
         .position = camera.transform.position,
-        .time = @floatCast(engine().time.time_since_start_of_app()),
+        .time = @floatCast(eng.get().time.time_since_start_of_app()),
     };
 }
 
@@ -337,38 +336,38 @@ pub fn render(
         }
     }
 
-    engine().gfx.cmd_set_render_target(&.{rtv, selection_rtv}, depth_view);
+    eng.get().gfx.cmd_set_render_target(&.{rtv, selection_rtv}, depth_view);
 
     const viewport = gfx.Viewport {
-        .width = @floatFromInt(engine().gfx.swapchain_size.width),
-        .height = @floatFromInt(engine().gfx.swapchain_size.height),
+        .width = @floatFromInt(eng.get().gfx.swapchain_size.width),
+        .height = @floatFromInt(eng.get().gfx.swapchain_size.height),
         .min_depth = 0.0,
         .max_depth = 1.0,
         .top_left_x = 0.0,
         .top_left_y = 0.0,
     };
-    engine().gfx.cmd_set_viewport(viewport);
+    eng.get().gfx.cmd_set_viewport(viewport);
 
-    engine().gfx.cmd_set_blend_state(null);
+    eng.get().gfx.cmd_set_blend_state(null);
 
-    engine().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
+    eng.get().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
         &self.camera_data_buffer,
         &self.instance_buffers[0],
         &self.instance_buffers[0],
         &self.bone_matrix_buffer, // TODO
     });
-    engine().gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
+    eng.get().gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gfx.Buffer{
         &self.camera_data_buffer,
         &self.instance_buffers[0], // slot 1 will be overwritten by later
         &self.lights_buffer,
         &self.instance_buffers[0],
     });
 
-    engine().gfx.cmd_set_topology(.TriangleList);
+    eng.get().gfx.cmd_set_topology(.TriangleList);
 
     // render boneless objects
-    engine().gfx.cmd_set_vertex_shader(&self.shaders.static.vertex_shader);
-    engine().gfx.cmd_set_pixel_shader(&self.shaders.static.pixel_shader);
+    eng.get().gfx.cmd_set_vertex_shader(&self.shaders.static.vertex_shader);
+    eng.get().gfx.cmd_set_pixel_shader(&self.shaders.static.pixel_shader);
 
     var top_bone_idx: usize = 0;
     var start_bone_idx: usize = 0;
@@ -378,7 +377,7 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(InstanceStruct, &engine().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(InstanceStruct, &eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
@@ -394,39 +393,39 @@ pub fn render(
         }
 
         // Render the render object
-        engine().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
-        engine().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
+        eng.get().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
+        eng.get().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
 
-        engine().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
 
         if (ro.material.double_sided) {
-            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
+            eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
         } else {
-            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
+            eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
         }
 
-        var diffuse = &engine().gfx.default.diffuse;
-        var diffuse_sampler = &engine().gfx.default.sampler;
+        var diffuse = &eng.get().gfx.default.diffuse;
+        var diffuse_sampler = &eng.get().gfx.default.sampler;
         if (ro.material.diffuse_map) |*d| {
             diffuse = &d.map;
             if (d.sampler) |*s| { diffuse_sampler = s; }
         }
-        engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
-        engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
+        eng.get().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
+        eng.get().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
 
         self.update_lights_buffer(&ro.transform);
 
         if (ro.index_buffer) |ib| {
-            engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
-            engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
+            eng.get().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
+            eng.get().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
         } else {
-            engine().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
+            eng.get().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
         }
     }
 
     // render skeletal objects
-    engine().gfx.cmd_set_vertex_shader(&self.shaders.skeletal.vertex_shader);
-    engine().gfx.cmd_set_pixel_shader(&self.shaders.skeletal.pixel_shader);
+    eng.get().gfx.cmd_set_vertex_shader(&self.shaders.skeletal.vertex_shader);
+    eng.get().gfx.cmd_set_pixel_shader(&self.shaders.skeletal.pixel_shader);
 
     top_bone_idx = 0;
     start_bone_idx = 0;
@@ -439,7 +438,7 @@ pub fn render(
             start_bone_idx = top_bone_idx;
 
             // Update bone matrix buffer
-            const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &engine().gfx) catch unreachable;
+            const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const copy_amount = @min(self.render_bones.items.len - start_bone_idx, Self.bone_matrix_buffer_size);
@@ -455,7 +454,7 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(InstanceStruct, &engine().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(InstanceStruct, &eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
@@ -471,33 +470,33 @@ pub fn render(
         }
 
         // Render the render object
-        engine().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
-        engine().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
+        eng.get().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
+        eng.get().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
 
-        engine().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
 
         if (ro.material.double_sided) {
-            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
+            eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
         } else {
-            engine().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
+            eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
         }
 
-        var diffuse = &engine().gfx.default.diffuse;
-        var diffuse_sampler = &engine().gfx.default.sampler;
+        var diffuse = &eng.get().gfx.default.diffuse;
+        var diffuse_sampler = &eng.get().gfx.default.sampler;
         if (ro.material.diffuse_map) |*d| {
             diffuse = &d.map;
             if (d.sampler) |*s| { diffuse_sampler = s; }
         }
-        engine().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
-        engine().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
+        eng.get().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
+        eng.get().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
 
         self.update_lights_buffer(&ro.transform);
 
         if (ro.index_buffer) |ib| {
-            engine().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
-            engine().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
+            eng.get().gfx.cmd_set_index_buffer(ib.buffer_info.buffer, .U32, 0);
+            eng.get().gfx.cmd_draw_indexed(@truncate(ib.index_count), ib.buffer_info.offset, @intCast(ro.pos_offset));
         } else {
-            engine().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
+            eng.get().gfx.cmd_draw(@truncate(ro.vertex_count), 0);
         }
     }
 }
@@ -514,7 +513,7 @@ fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
     std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
 
     { // Update lights buffer
-        const mapped_buffer = self.lights_buffer.map(LightsStruct, &engine().gfx) catch unreachable;
+        const mapped_buffer = self.lights_buffer.map(LightsStruct, &eng.get().gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
         var i: usize = 0;

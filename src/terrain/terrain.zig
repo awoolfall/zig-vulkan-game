@@ -120,7 +120,7 @@ pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
 /// Removes the physics body from the terrain if it exists
 fn remove_physics_body(self: *Self) void {
     if (self.physics_body_id) |*b| {
-        const body_interface = eng.engine().physics.zphy.getBodyInterfaceMut();
+        const body_interface = eng.get().physics.zphy.getBodyInterfaceMut();
         body_interface.removeAndDestroyBody(b.*);
         self.physics_body_id = null;
     }
@@ -128,7 +128,7 @@ fn remove_physics_body(self: *Self) void {
 
 /// Regenerates the heightmap physics body using the internal heightmap data
 fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
-    const body_interface = eng.engine().physics.zphy.getBodyInterfaceMut();
+    const body_interface = eng.get().physics.zphy.getBodyInterfaceMut();
 
     // create the new physics body
     const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, HeightFieldSize);
@@ -157,7 +157,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 }
 
 pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: anytype) void {
-    const imui = &eng.engine().imui;
+    const imui = &eng.get().imui;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
     if (imui.get_widget(container)) |w| {
@@ -229,8 +229,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
 
 pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
     var modify_terrain: f32 = 0.0;
-    if (eng.engine().input.get_key(KeyCode.MouseLeft)) {
-        if (eng.engine().input.get_key(KeyCode.Shift)) {
+    if (eng.get().input.get_key(KeyCode.MouseLeft)) {
+        if (eng.get().input.get_key(KeyCode.Shift)) {
             modify_terrain -= 1.0;
         } else {
             modify_terrain += 1.0;
@@ -242,7 +242,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
     self.dbg_modify_center = .{ 0.0, 0.0 };
 
     if (modify_terrain != 0.0) {
-        const mouse_pos = eng.engine().input.cursor_position;
+        const mouse_pos = eng.get().input.cursor_position;
         if (mouse_pos[0] < 0 or mouse_pos[1] < 0) {
             return false;
         }
@@ -250,7 +250,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
         const heightfield_size_f32 = @as(f32, @floatFromInt(HeightFieldSize));
 
         const terrain_uv = terrain_system.selection_textures
-            .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1]), &eng.engine().gfx) catch {
+            .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1]), &eng.get().gfx) catch {
                 return false;
             };
         if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0) {
@@ -281,7 +281,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
                         const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
                         const modify_radius_cells = self.modify_radius / self.terrain_grid_scale;
                         const modify_strength = @max(0.0, (modify_radius_cells - distance_to_cell) / @max(modify_radius_cells, 0.01));
-                        self.heightmap[idx] += modify_terrain * eng.engine().time.delta_time_f32() * modify_strength;
+                        self.heightmap[idx] += modify_terrain * eng.get().time.delta_time_f32() * modify_strength;
                     }
                 }
             },
@@ -303,7 +303,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
             },
         }
 
-        if (self.heightmap_texture.map_write_discard(f32, &eng.engine().gfx)) |mapped_texture| {
+        if (self.heightmap_texture.map_write_discard(f32, &eng.get().gfx)) |mapped_texture| {
             defer mapped_texture.unmap();
             // TODO: this is incorrect, d3d11 row pitch is 128 but row length is 64. (when 16 HeightFieldSize)
             // probably need to do data() array access inside platform code

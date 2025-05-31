@@ -1,9 +1,8 @@
 const Self = @This();
 const std = @import("std");
 
-const en = @import("engine");
-const engine = en.engine;
-const gfx = en.gfx;
+const eng = @import("engine");
+const gfx = eng.gfx;
 
 const Gizmo = @import("gizmo/gizmo.zig");
 const st = @import("selection_textures.zig");
@@ -12,15 +11,15 @@ const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
 const TerrainSystem = @import("terrain/terrain_system.zig");
 
-const zm = en.zmath;
-const sr = en.serialize;
-const assets = en.assets;
-const KeyCode = en.input.KeyCode;
-const EntityDescriptor = en.Engine.EntityDescriptor;
-const Transform = en.Transform;
-const Camera = en.camera.Camera;
-const Imui = en.ui.Imui;
-const GenerationalIndex = en.gen.GenerationalIndex;
+const zm = eng.zmath;
+const sr = eng.serialize;
+const assets = eng.assets;
+const KeyCode = eng.input.KeyCode;
+const EntityDescriptor = eng.Engine.EntityDescriptor;
+const Transform = eng.Transform;
+const Camera = eng.camera.Camera;
+const Imui = eng.ui.Imui;
+const GenerationalIndex = eng.gen.GenerationalIndex;
 
 editor_camera: Camera,
 gizmo: Gizmo,
@@ -37,10 +36,10 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     return Self {
-        .gizmo = try Gizmo.init(engine().general_allocator, &engine().gfx),
-        .entity_editor_ui_data = try EntityEditorUiData.init(engine().general_allocator),
+        .gizmo = try Gizmo.init(eng.get().general_allocator, &eng.get().gfx),
+        .entity_editor_ui_data = try EntityEditorUiData.init(eng.get().general_allocator),
         .editor_camera = Camera {
-            .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
+            .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 1000.0,
             .move_speed = 10.0,
@@ -53,16 +52,16 @@ pub fn init() !Self {
 }
 
 pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
-    self.editor_camera.fly_camera_update(&engine().window, &engine().input, &engine().time);
+    self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
 
-    if (!engine().imui.has_focus()) {
+    if (!eng.get().imui.has_focus()) {
         // new entity button
-        if (engine().input.get_key_down(KeyCode.E)) {
+        if (eng.get().input.get_key_down(KeyCode.E)) {
             self.create_new_entity();
         }
 
         // delete entity button
-        if (engine().input.get_key_down(KeyCode.Delete)) {
+        if (eng.get().input.get_key_down(KeyCode.Delete)) {
             self.remove_selected_entity();
         }
 
@@ -70,7 +69,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const entity = engine().entities.get(selected_entity) orelse break :blk;
+                const entity = eng.get().entities.get(selected_entity) orelse break :blk;
                 if (self.gizmo.update(&entity.transform)) {
                     interaction_available = false;
                 }
@@ -79,7 +78,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const ent = engine().entities.get(selected_entity) orelse break :blk;
+                const ent = eng.get().entities.get(selected_entity) orelse break :blk;
                 if (ent.app.terrain) |*terrain| {
                     const modified = terrain.edit_terrain(terrain_system) catch |err| {
                         std.log.err("Failed to edit terrain: {}", .{err});
@@ -93,9 +92,9 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         }
 
         // Select entity
-        if (interaction_available and engine().input.get_key_down(KeyCode.MouseLeft)) {
+        if (interaction_available and eng.get().input.get_key_down(KeyCode.MouseLeft)) {
             interaction_available = false;
-            const selection_entity_id = selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx) catch |err| {
+            const selection_entity_id = selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]), &eng.get().gfx) catch |err| {
                 std.log.err("cannot get value at position: {}", .{err});
                 return;
             };
@@ -105,12 +104,12 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
             } else if (self.selected_entity != null and self.selected_entity.?.index == selection_entity_id) {
                 self.selected_entity = null;
             } else {
-                const entity = engine().entities.get_dont_check_generation(selection_entity_id);
+                const entity = eng.get().entities.get_dont_check_generation(selection_entity_id);
                 if (entity) |ent| {
                     std.log.info("entity name: {s}", .{ent.name orelse "unnamed"});
                     self.selected_entity = .{
                         .index = selection_entity_id,
-                        .generation = engine().entities.list.data.items[selection_entity_id].generation,
+                        .generation = eng.get().entities.list.data.items[selection_entity_id].generation,
                     };
                     self.entity_editor_ui_data.inited = false;
                 } else {
@@ -120,7 +119,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         }
     }
 
-    const imui = &engine().imui;
+    const imui = &eng.get().imui;
 
     self.entity_editor_ui(&self.entity_editor_ui_data, .{@src()});
 
@@ -172,7 +171,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         }
         defer {
             if (!file_button.clicked) {
-                if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+                if (eng.get().input.get_key_down(KeyCode.MouseLeft)) {
                     self.file_dropdown_open = false;
                 }
             }
@@ -197,9 +196,9 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
                 }
                 const load_button = imui.badge("Load Scene", .{@src()});
                 if (load_button.clicked) {
-                    for (engine().entities.list.data.items, 0..) |*it, idx| {
+                    for (eng.get().entities.list.data.items, 0..) |*it, idx| {
                         if (it.item_data) |_| {
-                            engine().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
+                            eng.get().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
                         }
                     }
                     create_scene_entities("scene") catch |err| {
@@ -226,7 +225,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         }
         defer {
             if (!edit_button.clicked) {
-                if (engine().input.get_key_down(KeyCode.MouseLeft)) {
+                if (eng.get().input.get_key_down(KeyCode.MouseLeft)) {
                     self.edit_dropdown_open = false;
                 }
             }
@@ -266,23 +265,23 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
 
 pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gfx.RenderTargetView, dsv: *const gfx.DepthStencilView) !void {
     if (self.selected_entity) |s| {
-        if (engine().entities.get(s)) |entity| {
+        if (eng.get().entities.get(s)) |entity| {
             const viewport = gfx.Viewport {
-                .width = @floatFromInt(engine().gfx.swapchain_size.width),
-                .height = @floatFromInt(engine().gfx.swapchain_size.height),
+                .width = @floatFromInt(eng.get().gfx.swapchain_size.width),
+                .height = @floatFromInt(eng.get().gfx.swapchain_size.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
                 .top_left_x = 0.0,
                 .top_left_y = 0.0,
             };
-            engine().gfx.cmd_set_viewport(viewport);
+            eng.get().gfx.cmd_set_viewport(viewport);
             self.gizmo.render(&entity.transform, camera_data_buffer, rtv, dsv, &self.editor_camera);
         } 
     }
 }
 
 fn create_new_entity(self: *Self) void {
-    _ = engine().entities.new_entity(EntityDescriptor {
+    _ = eng.get().entities.new_entity(EntityDescriptor {
         .name = "new entity",
         .should_serialize = true,
         .model = null,
@@ -296,7 +295,7 @@ fn create_new_entity(self: *Self) void {
 
 fn duplicate_selected_entity(self: *Self) void {
     if (self.selected_entity) |selected_entity| {
-        var descriptor = engine().entities.get(selected_entity).?.descriptor(engine().frame_allocator) catch |err| {
+        var descriptor = eng.get().entities.get(selected_entity).?.descriptor(eng.get().frame_allocator) catch |err| {
             std.log.err("Failed to create descriptor for entity: {}", .{err});
             return;
         };
@@ -304,18 +303,18 @@ fn duplicate_selected_entity(self: *Self) void {
         // clear the serialize id so that it will be generated on the next save
         descriptor.serialize_id = null;
 
-        const new_entity = engine().entities.new_entity(descriptor) catch |err| {
+        const new_entity = eng.get().entities.new_entity(descriptor) catch |err| {
             std.log.err("Failed to duplicate entity: {}", .{err});
             return;
         };
         self.selected_entity = new_entity;
-        //std.log.info("duplicated entity: {}", .{engine().entities.get(new_entity).?});
+        //std.log.info("duplicated entity: {}", .{eng.get().entities.get(new_entity).?});
     }
 }
 
 fn remove_selected_entity(self: *Self) void {
     if (self.selected_entity) |selected_entity| {
-        engine().entities.remove_entity(selected_entity) catch |err| {
+        eng.get().entities.remove_entity(selected_entity) catch |err| {
             std.log.err("Failed to remove entity: {}", .{err});
         };
         self.selected_entity = null;
@@ -334,7 +333,7 @@ const EntityEditorUiData = struct {
     physics_checkbox: bool = false,
     physics_combobox_data: Imui.ComboBoxData,
     shape_combobox_data: Imui.ComboBoxData,
-    running_physics_desc: ?en.entity.PhysicsOptionsDescriptor = null,
+    running_physics_desc: ?eng.entity.PhysicsOptionsDescriptor = null,
 
     particle_checkbox: bool = false,
     particle_editor_data: pe.ParticleEditorData,
@@ -360,7 +359,7 @@ const EntityEditorUiData = struct {
         var model_names = std.ArrayList([]u8).init(alloc);
         defer model_names.deinit();
 
-        var asset_packs_iter = engine().asset_manager.asset_packs.iterator();
+        var asset_packs_iter = eng.get().asset_manager.asset_packs.iterator();
         while (asset_packs_iter.next()) |it| {
             const pack = it.value_ptr;
             var models_iter = pack.models.keyIterator();
@@ -380,7 +379,7 @@ const EntityEditorUiData = struct {
         }
 
         // generate physics option names from enum
-        const physics_options_fields = @typeInfo(en.entity.PhysicsOptionsEnum).@"enum".fields;
+        const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
         const physics_option_names = arena.allocator().alloc([]const u8, physics_options_fields.len) catch unreachable;
         inline for (physics_options_fields, 0..) |field, field_idx| {
             physics_option_names[field_idx] = field.name;
@@ -393,7 +392,7 @@ const EntityEditorUiData = struct {
         };
 
         // generate shape option names from asset packs
-        const shape_options_fields = @typeInfo(en.physics.ShapeSettingsEnum).@"enum".fields;
+        const shape_options_fields = @typeInfo(eng.physics.ShapeSettingsEnum).@"enum".fields;
         const shape_option_names = arena.allocator().alloc([]const u8, shape_options_fields.len) catch unreachable;
         inline for (shape_options_fields, 0..) |field, field_idx| {
             shape_option_names[field_idx] = field.name;
@@ -405,7 +404,7 @@ const EntityEditorUiData = struct {
             .options = shape_option_names,
         };
 
-        const particle_editor_data = pe.ParticleEditorData.init(engine().general_allocator);
+        const particle_editor_data = pe.ParticleEditorData.init(eng.get().general_allocator);
         errdefer particle_editor_data.deinit();
 
         // generate light type option names from enum
@@ -427,7 +426,7 @@ const EntityEditorUiData = struct {
                 .default_text = "None",
                 .options = options,
             },
-            .name_edit_data = Imui.TextInputState.init(engine().general_allocator),
+            .name_edit_data = Imui.TextInputState.init(eng.get().general_allocator),
             .physics_combobox_data = physics_combobox_data,
             .shape_combobox_data = shape_combobox_data,
             .particle_editor_data = particle_editor_data,
@@ -435,16 +434,16 @@ const EntityEditorUiData = struct {
         };
     }
 
-    pub fn reinit(self: *EntityEditorUiData, entity: *en.entity.EntitySuperStruct) void {
+    pub fn reinit(self: *EntityEditorUiData, entity: *eng.entity.EntitySuperStruct) void {
         defer self.inited = true;
 
-        var arena = std.heap.ArenaAllocator.init(engine().frame_allocator);
+        var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
         defer arena.deinit();
 
         self.particle_editor_data.reinit(entity);
         self.particle_position = .{
-            @as(f32, @floatFromInt(en.engine().gfx.swapchain_size.width)) * 0.5,
-            @as(f32, @floatFromInt(en.engine().gfx.swapchain_size.height)) * 0.5,
+            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size.width)) * 0.5,
+            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size.height)) * 0.5,
         };
 
         // set name text
@@ -484,20 +483,10 @@ fn set_background_widget_layout(background_widget: *Imui.Widget) void {
     background_widget.flags.clickable = true;
     background_widget.flags.render = true;
     background_widget.flags.hover_effect = false;
-    background_widget.border_width_px = .lr_tb(2, 5);
+    background_widget.border_width_px = .all(3);
     background_widget.padding_px = .all(10);
     background_widget.corner_radii_px = .all(10);
     background_widget.children_gap = 5;
-
-    // const offset: f32 = @floatCast(2.0 * (1.0 + std.math.sin(en.engine().time.time_since_start_of_app())));
-    // const offsett: f32 = @floatCast(2.0 * (1.0 + std.math.cos(en.engine().time.time_since_start_of_app())));
-    // background_widget.border_width_px = //.all(1);
-    // .{
-    //     .top = 1.0 + offset,
-    //     .bottom = 5.0 - offset,
-    //     .left = 1.0 + offsett,
-    //     .right = 5.0 - offsett,
-    // };
 }
 
 const EntityEditorTabWidth = 10;
@@ -506,11 +495,11 @@ fn entity_editor_ui(
     data: *EntityEditorUiData,
     key: anytype,
 ) void {
-    const imui = &engine().imui;
+    const imui = &eng.get().imui;
     if (self.selected_entity == null) return;
-    const entity = engine().entities.get(self.selected_entity.?) orelse return;
+    const entity = eng.get().entities.get(self.selected_entity.?) orelse return;
     
-    var arena = std.heap.ArenaAllocator.init(engine().frame_allocator);
+    var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer arena.deinit();
 
     if (!data.inited) {
@@ -527,8 +516,8 @@ fn entity_editor_ui(
         background_widget.pivot = .{ 1.0, 0.0 };
     }
     if (imui.generate_widget_signals(background_box).dragged) {
-        data.position[0] += engine().input.mouse_delta[0];
-        data.position[1] += engine().input.mouse_delta[1];
+        data.position[0] += eng.get().input.mouse_delta[0];
+        data.position[1] += eng.get().input.mouse_delta[1];
     }
 
     const entity_editor_title_text = imui.label("Entity Editor");
@@ -554,8 +543,8 @@ fn entity_editor_ui(
         // if name line edit has changed then update the entity's name
         if (name_edit.data_changed) {
             if (entity.name) |_| {
-                engine().general_allocator.free(entity.name.?);
-                entity.name = std.fmt.allocPrint(engine().general_allocator, "{s}", .{data.name_edit_data.text.items}) catch unreachable;
+                eng.get().general_allocator.free(entity.name.?);
+                entity.name = std.fmt.allocPrint(eng.get().general_allocator, "{s}", .{data.name_edit_data.text.items}) catch unreachable;
             }
         }
     }
@@ -665,9 +654,9 @@ fn entity_editor_ui(
         const physics_button = imui.badge("Set Physics", key ++ .{@src()});
         if (physics_button.clicked) {
             if (data.physics_combobox_data.selected_index) |_| {
-                entity.set_physics(self.selected_entity.?, data.running_physics_desc.?, &engine().physics) catch unreachable;
+                entity.set_physics(self.selected_entity.?, data.running_physics_desc.?, &eng.get().physics) catch unreachable;
             } else {
-                entity.remove_physics(&engine().physics);
+                entity.remove_physics(&eng.get().physics);
             }
         }
 
@@ -675,7 +664,7 @@ fn entity_editor_ui(
         const physics_combobox = imui.combobox(&data.physics_combobox_data, key ++ .{@src()});
         if (physics_combobox.data_changed) {
             if (data.physics_combobox_data.selected_index) |si| {
-                switch (@as(en.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
+                switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
                     .Body => data.running_physics_desc = .{ .Body = .{} },
                     .Character => data.running_physics_desc = .{ .Character = .{} },
                     .CharacterVirtual => data.running_physics_desc = .{ .CharacterVirtual = .{} },
@@ -723,8 +712,8 @@ fn entity_editor_ui(
             }
 
             if (imui.generate_widget_signals(background).dragged) {
-                data.particle_position[0] += engine().input.mouse_delta[0];
-                data.particle_position[1] += engine().input.mouse_delta[1];
+                data.particle_position[0] += eng.get().input.mouse_delta[0];
+                data.particle_position[1] += eng.get().input.mouse_delta[1];
             }
 
             pe.particle_editor(&data.particle_editor_data, entity, key ++ .{@src()});
@@ -749,12 +738,12 @@ fn entity_editor_ui(
         }
         if (entity.app.light) |*light| {
             {
-                const ll = engine().imui.push_layout(.X, key ++ .{@src()});
-                if (engine().imui.get_widget(ll)) |ll_widget| {
+                const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
+                if (eng.get().imui.get_widget(ll)) |ll_widget| {
                     ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
                     ll_widget.children_gap = 4;
                 }
-                defer engine().imui.pop_layout();
+                defer eng.get().imui.pop_layout();
 
                 _ = imui.label("colour: ");
                 _ = imui.number_slider(&light.colour[0], .{}, key ++ .{@src()});
@@ -780,7 +769,7 @@ fn entity_editor_ui(
         const terrain_checkbox = imui.checkbox(&data.enable_terrain_checkbox, "Enable Terrain", key ++ .{@src()});
         if (terrain_checkbox.clicked) {
             if (data.enable_terrain_checkbox) {
-                entity.app.terrain = Terrain.init(engine().general_allocator, .{}, entity.transform, &engine().gfx) catch |err| {
+                entity.app.terrain = Terrain.init(eng.get().general_allocator, .{}, entity.transform, &eng.get().gfx) catch |err| {
                     std.log.err("Failed to create terrain: {}", .{err});
                     return;
                 };
@@ -799,17 +788,17 @@ fn entity_editor_ui(
 }
 
 fn physics_shape_editor_ui(
-    entity: *en.entity.EntitySuperStruct,
-    shape_settings: *en.physics.ShapeSettings, 
+    entity: *eng.entity.EntitySuperStruct,
+    shape_settings: *eng.physics.ShapeSettings, 
     data: *EntityEditorUiData, 
     key: anytype
 ) void {
-    const imui = &engine().imui;
+    const imui = &eng.get().imui;
     data.shape_combobox_data.selected_index = @intFromEnum(shape_settings.shape);
     const shape_combobox = imui.combobox(&data.shape_combobox_data, key ++ .{@src()});
     if (shape_combobox.data_changed) {
         if (data.shape_combobox_data.selected_index) |si| {
-            switch (@as(en.physics.ShapeSettingsEnum, @enumFromInt(si))) {
+            switch (@as(eng.physics.ShapeSettingsEnum, @enumFromInt(si))) {
                 .Capsule => shape_settings.shape = .{ .Capsule = .{
                     .half_height = 0.7,
                     .radius = 0.2,
@@ -864,22 +853,22 @@ fn labeled_number_slider(
     value: *f32, 
     key: anytype
 ) void {
-    const ll = engine().imui.push_layout(.X, key ++ .{@src()});
-    if (engine().imui.get_widget(ll)) |ll_widget| {
+    const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
+    if (eng.get().imui.get_widget(ll)) |ll_widget| {
         ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
         ll_widget.children_gap = 4;
     }
-    defer engine().imui.pop_layout();
+    defer eng.get().imui.pop_layout();
 
-    const label = engine().imui.label(text);
-    if (engine().imui.get_widget(label.id)) |label_widget| {
+    const label = eng.get().imui.label(text);
+    if (eng.get().imui.get_widget(label.id)) |label_widget| {
         label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
     }
-    _ = engine().imui.number_slider(value, .{}, key ++ .{@src()});
+    _ = eng.get().imui.number_slider(value, .{}, key ++ .{@src()});
 }
 
 fn create_scene_entities(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator);
+    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
     defer arena.deinit();
 
     var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
@@ -902,7 +891,7 @@ fn create_scene_entities(scene_name: []const u8) !void {
             defer arena.allocator().free(ent_str);
 
             const ent_s = std.json.parseFromSliceLeaky(
-                sr.Serializable(en.entity.EntityDescriptor),
+                sr.Serializable(eng.entity.EntityDescriptor),
                 arena.allocator(),
                 ent_str,
                 .{ .ignore_unknown_fields = true, }
@@ -911,22 +900,22 @@ fn create_scene_entities(scene_name: []const u8) !void {
                 continue;
             };
 
-            const ent = sr.deserialize(en.entity.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
+            const ent = sr.deserialize(eng.entity.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
                 std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
                 continue;
             };
 
-            const loaded_entity = engine().entities.new_entity(ent) catch |err| {
+            const loaded_entity = eng.get().entities.new_entity(ent) catch |err| {
                 std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
                 continue;
             };
-            std.log.info("Loaded entity: {}", .{engine().entities.get(loaded_entity).?});
+            std.log.info("Loaded entity: {}", .{eng.get().entities.get(loaded_entity).?});
         }
     }
 }
 
 fn save_entities_to_scene(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(engine().general_allocator);
+    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
     defer arena.deinit();
 
     std.fs.cwd().deleteTree(scene_name) catch |err| {
@@ -940,7 +929,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
     };
     defer scene_dir.close();
 
-    var it = engine().entities.list.iterator();
+    var it = eng.get().entities.list.iterator();
 
     var largest_serialize_id: u32 = 0;
     while (it.next()) |entity| {
@@ -963,7 +952,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             continue;
         };
 
-        const entity_s = sr.serialize(en.entity.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
+        const entity_s = sr.serialize(eng.entity.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
             std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
             continue;
         };

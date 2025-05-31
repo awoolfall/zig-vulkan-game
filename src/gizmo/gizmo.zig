@@ -1,15 +1,14 @@
 const Self = @This();
 
 const std = @import("std");
-const en = @import("engine");
-const engine = en.engine;
+const eng = @import("engine");
 
-const zm = en.zmath;
-const zmesh = en.zmesh;
-const gf = en.gfx;
-const input = en.input;
-const cm = en.camera;
-const Transform = en.Transform;
+const zm = eng.zmath;
+const zmesh = eng.zmesh;
+const gf = eng.gfx;
+const input = eng.input;
+const cm = eng.camera;
+const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 
 const InstanceInfoStruct = extern struct {
@@ -134,7 +133,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
 }
 
 fn init_torus(line_width: f32) !RenderBuffers {
-    const gfx = &engine().gfx;
+    const gfx = &eng.get().gfx;
     
     const torus_shape = zmesh.Shape.initTorus(16, 64, line_width);
     defer torus_shape.deinit();
@@ -163,7 +162,7 @@ fn init_torus(line_width: f32) !RenderBuffers {
 }
 
 fn init_cylinder(line_width: f32) !RenderBuffers {
-    const gfx = &engine().gfx;
+    const gfx = &eng.get().gfx;
     
     var cylinder_shape = zmesh.Shape.initCylinder(16, 2);
     defer cylinder_shape.deinit();
@@ -193,7 +192,7 @@ fn init_cylinder(line_width: f32) !RenderBuffers {
 }
 
 fn init_sphere(line_width: f32) !RenderBuffers {
-    const gfx = &engine().gfx;
+    const gfx = &eng.get().gfx;
 
     var sphere_shape = zmesh.Shape.initParametricSphere(16, 16);
     defer sphere_shape.deinit();
@@ -311,7 +310,7 @@ const Ray = struct {
 
 fn ray_out_point_on_screen_px(point_px: [2]i32, inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
     var ndc_cursor = zm.f32x4(@floatFromInt(point_px[0]), @floatFromInt(point_px[1]), 1.0, 1.0);
-    ndc_cursor /= zm.f32x4(@floatFromInt(engine().gfx.swapchain_size.width), @floatFromInt(engine().gfx.swapchain_size.height), 1.0, 1.0);
+    ndc_cursor /= zm.f32x4(@floatFromInt(eng.get().gfx.swapchain_size.width), @floatFromInt(eng.get().gfx.swapchain_size.height), 1.0, 1.0);
     ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
     ndc_cursor -= zm.f32x4(1.0, -1.0, 0.0, 0.0);
 
@@ -480,16 +479,16 @@ fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: R
 
 fn scale_with_cursor(self: *const Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat, scale_dir: zm.F32x4) void {
     _ = self;
-    const cursor_ray_this_frame = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
+    const cursor_ray_this_frame = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
     const closest_point_this_frame = closest_points_between_rays(cursor_ray_this_frame, Ray{
         .origin = transform.position,
         .direction = scale_dir,
     }).point_on_ray2;
 
-    const mouse_delta = [2]i32{@intFromFloat(engine().input.mouse_delta[0]), @intFromFloat(engine().input.mouse_delta[1])};
+    const mouse_delta = [2]i32{@intFromFloat(eng.get().input.mouse_delta[0]), @intFromFloat(eng.get().input.mouse_delta[1])};
     const cursor_pos_last_frame = [2]i32 {
-        engine().input.cursor_position[0] - mouse_delta[0],
-        engine().input.cursor_position[1] - mouse_delta[1],
+        eng.get().input.cursor_position[0] - mouse_delta[0],
+        eng.get().input.cursor_position[1] - mouse_delta[1],
     };
     const cursor_ray_last_frame = ray_out_point_on_screen_px(cursor_pos_last_frame, inv_perspective, inv_view);
     const closest_point_last_frame = closest_points_between_rays(cursor_ray_last_frame, Ray{
@@ -526,7 +525,7 @@ fn rotate_with_cursor(self: *Self, transform: *Transform, cursor_ray: Ray, rotat
 }
 
 inline fn get_coord_space() CoordSpace {
-    return if (engine().input.get_key(input.KeyCode.Control)) .local else .world;
+    return if (eng.get().input.get_key(input.KeyCode.Control)) .local else .world;
 }
 
 pub fn update(self: *Self, transform: *Transform) bool {
@@ -534,13 +533,13 @@ pub fn update(self: *Self, transform: *Transform) bool {
     const inv_view = zm.inverse(self.rendered_view_matrix);
 
     const coord_space = get_coord_space();
-    if (engine().input.get_key_down(input.KeyCode.MouseLeft)) {
+    if (eng.get().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
-        if (self.selection_textures.get_value_at_position(@intCast(engine().input.cursor_position[0]), @intCast(engine().input.cursor_position[1]), &engine().gfx)) |s| {
+        if (self.selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]), &eng.get().gfx)) |s| {
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
             switch (self.selected_control.?) {
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
                     const closest_points = closest_points_between_rays(cursor_ray, Ray{
                         .origin = transform.position,
                         .direction = self.selected_control.?.direction(transform, coord_space),
@@ -548,7 +547,7 @@ pub fn update(self: *Self, transform: *Transform) bool {
                     self.selected_offset = closest_points.point_on_ray2 - transform.position;
                 },
                 .RotateX, .RotateY, .RotateZ => {
-                    const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
                     const local_direction = self.selected_control.?.direction(transform, coord_space);
                     const plane = Plane {
                         .point = transform.position,
@@ -568,17 +567,17 @@ pub fn update(self: *Self, transform: *Transform) bool {
             }
         } else |_| {}
     }
-    if (engine().input.get_key_up(input.KeyCode.MouseLeft)) {
+    if (eng.get().input.get_key_up(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
         self.selected_offset = zm.f32x4s(0.0);
     }
-    if (engine().input.get_key(input.KeyCode.MouseLeft)) {
+    if (eng.get().input.get_key(input.KeyCode.MouseLeft)) {
         if (self.selected_control) |s| {
-            const cursor_ray = ray_out_point_on_screen_px(engine().input.cursor_position, inv_perspective, inv_view);
+            const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
             switch (s) {
                 .None => {},
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    if (engine().input.get_key(input.KeyCode.Z)) {
+                    if (eng.get().input.get_key(input.KeyCode.Z)) {
                         self.scale_with_cursor(transform, inv_perspective, inv_view, s.direction(transform, coord_space));
                     } else {
                         self.translate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
@@ -602,7 +601,7 @@ pub fn render(
     dsv: *const gf.DepthStencilView, 
     camera: *const cm.Camera
 ) void {
-    const gfx = &engine().gfx;
+    const gfx = &eng.get().gfx;
     self.rendered_perspective_matrix = camera.generate_perspective_matrix(gfx.swapchain_aspect());
     self.rendered_view_matrix = camera.transform.generate_view_matrix();
 
@@ -638,7 +637,7 @@ pub fn render(
     self.render_objects(transform, camera, dsv, .Visual);
 
     // render id objects
-    self.selection_textures.clear(&engine().gfx, 0);
+    self.selection_textures.clear(&eng.get().gfx, 0);
     gfx.cmd_set_render_target(&.{&self.selection_textures.rtv}, dsv);
     gfx.cmd_set_pixel_shader(&self.id_pixel_shader);
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
@@ -646,7 +645,7 @@ pub fn render(
 }
 
 fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Camera, dsv: *const gf.DepthStencilView, ty: enum { Visual, Id }) void {
-    const gfx = &engine().gfx;
+    const gfx = &eng.get().gfx;
 
     // set torus vertex and index buffers
     var torus_vertex_bufer: gf.Buffer = undefined;

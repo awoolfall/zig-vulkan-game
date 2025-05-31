@@ -1,13 +1,13 @@
 const std = @import("std");
-const en = @import("engine");
-const zm = en.zmath;
+const eng = @import("engine");
+const zm = eng.zmath;
 const Imui = @import("engine").ui.Imui;
-const ps = en.particles;
-const es = en.easings;
+const ps = eng.particles;
+const es = eng.easings;
 
 pub const ParticleEditorData = struct {
     arena: std.heap.ArenaAllocator,
-    settings: en.particles.ParticleSystemSettings,
+    settings: eng.particles.ParticleSystemSettings,
 
     shape_combobox: Imui.ComboBoxData,
     alignment_combobox: Imui.ComboBoxData,
@@ -102,7 +102,7 @@ pub const ParticleEditorData = struct {
         };
     }
 
-    pub fn reinit(self: *ParticleEditorData, entity: *en.entity.EntitySuperStruct) void {
+    pub fn reinit(self: *ParticleEditorData, entity: *eng.entity.EntitySuperStruct) void {
         if (entity.app.particle_system) |sys| {
             self.settings = sys.settings;
         } else {
@@ -115,8 +115,8 @@ pub const ParticleEditorData = struct {
     }
 };
 
-pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuperStruct, key: anytype) void {
-    const imui = &en.engine().imui;
+pub fn particle_editor(data: *ParticleEditorData, entity: *eng.entity.EntitySuperStruct, key: anytype) void {
+    const imui = &eng.get().imui;
 
     const panel_layout = imui.push_layout(.Y, key ++ .{@src()});
     if (imui.get_widget(panel_layout)) |w| {
@@ -159,7 +159,7 @@ pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuper
 
         if (particle_system_check.data_changed) {
             if (should_have_particle_system) {
-                entity.app.particle_system = en.particles.ParticleSystem.init(en.engine().general_allocator, data.settings) catch unreachable;
+                entity.app.particle_system = eng.particles.ParticleSystem.init(eng.get().general_allocator, data.settings) catch unreachable;
             } else {
                 entity.app.particle_system.?.deinit();
                 entity.app.particle_system = null;
@@ -561,7 +561,7 @@ pub fn particle_editor(data: *ParticleEditorData, entity: *en.entity.EntitySuper
 }
 
 fn push_row_item_layout(text: []const u8, key: anytype) void {
-    const imui = &en.engine().imui;
+    const imui = &eng.get().imui;
     const xl = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(xl)) |xl_widget| {
         xl_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
@@ -577,20 +577,20 @@ fn push_row_item_layout(text: []const u8, key: anytype) void {
 fn labeled_number_slider(
     text: []const u8, 
     value: *f32, 
-    settings: en.ui.Imui.NumberSliderSettings,
+    settings: eng.ui.Imui.NumberSliderSettings,
     key: anytype
 ) void {
-    const ll = en.engine().imui.push_layout(.X, key ++ .{@src()});
-    if (en.engine().imui.get_widget(ll)) |ll_widget| {
+    const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
+    if (eng.get().imui.get_widget(ll)) |ll_widget| {
         ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
         ll_widget.children_gap = 4;
     }
-    defer en.engine().imui.pop_layout();
+    defer eng.get().imui.pop_layout();
 
-    const label = en.engine().imui.label(text);
-    if (en.engine().imui.get_widget(label.id)) |label_widget| {
+    const label = eng.get().imui.label(text);
+    if (eng.get().imui.get_widget(label.id)) |label_widget| {
         label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
     }
-    _ = en.engine().imui.number_slider(value, settings, key ++ .{@src()});
+    _ = eng.get().imui.number_slider(value, settings, key ++ .{@src()});
 }
 

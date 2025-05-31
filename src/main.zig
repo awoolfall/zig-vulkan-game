@@ -1,5 +1,5 @@
 const std = @import("std");
-const en = @import("engine");
+const eng = @import("engine");
 const builtin = @import("builtin");
 
 // extern "game" fn run(engine: *en.Engine) void;
@@ -21,7 +21,7 @@ pub fn main() !void {
         }
     };
 
-    const engine = en.Engine.init_engine(&gpa) orelse return error.FailedToInitEngine;
+    const engine = eng.Engine.init_engine(&gpa) orelse return error.FailedToInitEngine;
     defer engine.deinit();
 
     engine.run();

@@ -2,27 +2,27 @@ const Self = @This();
 
 const std = @import("std");
 
-const en = @import("engine");
-const engine = en.engine;
-const Engine = en.Engine;
+const eng = @import("engine");
+const engine = eng.get;
+const Engine = eng.Engine;
 
-const zphy = en.physics.zphy;
-const zm = en.zmath;
-const Transform = en.Transform;
-const gfx = en.gfx;
-const window = en.window;
-const input = en.input;
-const KeyCode = en.input.KeyCode;
-const cm = en.camera;
-const ms = en.mesh;
-const gen = en.gen;
-const ph = en.physics;
-const path = en.path;
-const particle = en.particles;
-const es = en.easings;
-const anim = en.animation;
-const assets = en.assets;
-const sr = en.serialize;
+const zphy = eng.physics.zphy;
+const zm = eng.zmath;
+const Transform = eng.Transform;
+const gfx = eng.gfx;
+const window = eng.window;
+const input = eng.input;
+const KeyCode = eng.input.KeyCode;
+const cm = eng.camera;
+const ms = eng.mesh;
+const gen = eng.gen;
+const ph = eng.physics;
+const path = eng.path;
+const particle = eng.particles;
+const es = eng.easings;
+const anim = eng.animation;
+const assets = eng.assets;
+const sr = eng.serialize;
 
 const Terrain = @import("terrain/terrain.zig");
 const TerrainSystem = @import("terrain/terrain_system.zig");
@@ -31,11 +31,11 @@ const DepthTextures = @import("depth_textures.zig");
 const StandardRenderer = @import("render.zig");
 const EditMode = @import("edit_mode.zig");
 
-const ui = en.ui;
+const ui = eng.ui;
 const FontEnum = ui.FontEnum;
 
-const gitrev = en.gitrev;
-const gitchanged = en.gitchanged;
+const gitrev = eng.gitrev;
+const gitchanged = eng.gitchanged;
 
 pub const EntityData = struct {
     health_points: ?i32,
@@ -248,24 +248,6 @@ pub fn init(self: *Self) !void {
         .terrain_renderer = try TerrainSystem.init(engine().general_allocator, &engine().gfx),
         .edit_mode = try EditMode.init(),
     };
-}
-
-fn vecAngle(v0: zm.F32x4, v1: zm.F32x4) f32 {
-    const angle = std.math.acos(zm.dot3(v0, v1)[0] / (zm.length3(v0)[0] * zm.length3(v1)[0]));
-    if (std.math.isNan(angle)) {
-        return 0.0;
-    }
-    return angle;
-}
-
-fn vecProject(v0: zm.F32x4, v1: zm.F32x4) f32 {
-    return zm.length3(v0)[0] * std.math.cos(vecAngle(v0, v1));
-}
-
-fn forward_vector_2d(transform: *const Transform) zm.F32x4 {
-    var forward_direction = transform.forward_direction();
-    forward_direction[1] = 0.0;
-    return zm.normalize3(forward_direction);
 }
 
 fn update(self: *Self) !void {
