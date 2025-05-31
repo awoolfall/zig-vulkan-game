@@ -222,9 +222,12 @@ fn init_sphere(line_width: f32) !RenderBuffers {
 }
 
 fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !void {
+    const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" });
+    defer shader_path.deinit();
+
     const new_vertex_shader = try gf.VertexShader.init_file(
         alloc,
-        .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
+        shader_path,
         "vs_main",
         (&[_]gf.VertexInputLayoutEntry {
             .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
@@ -236,7 +239,7 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
 
     const new_pixel_shader = try gf.PixelShader.init_file(
         alloc,
-        .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
+        shader_path,
         "ps_colour_main",
         .{},
         gfx
@@ -245,7 +248,7 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
 
     const new_id_pixel_shader = try gf.PixelShader.init_file(
         alloc,
-        .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" },
+        shader_path,
         "ps_id_main",
         .{},
         gfx

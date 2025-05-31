@@ -59,7 +59,9 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     var selection_textures = try st.SelectionTextures([2]f32).init(gfx);
     errdefer selection_textures.deinit();
 
-    const terrain_path = pt.Path{ .ExeRelative = "../../src/terrain/terrain.hlsl" };
+    const terrain_path = try pt.Path.init(eng.get().general_allocator, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
+    defer terrain_path.deinit();
+
     const terrain_path_abs = try terrain_path.resolve_path(alloc);
     defer alloc.free(terrain_path_abs);
 
@@ -86,9 +88,12 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !st
     pixel_shader: gf.PixelShader,
 } {
     _ = self;
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
+    defer path.deinit();
+
     const new_vertex_shader = try gf.VertexShader.init_file(
         alloc,
-        .{ .ExeRelative = "../../src/terrain/terrain.hlsl" },
+        path,
         "vs_main",
         (&[_]gf.VertexInputLayoutEntry {
             .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
@@ -101,7 +106,7 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !st
 
     const new_pixel_shader = try gf.PixelShader.init_file(
         alloc,
-        .{ .ExeRelative = "../../src/terrain/terrain.hlsl" },
+        path,
         "ps_main",
         .{},
         gfx

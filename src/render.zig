@@ -132,7 +132,9 @@ pub fn deinit(self: *Self) void {
 pub fn init() !Self {
     const shaders = try init_shaders();
 
-    const shader_path = path.Path{.ExeRelative = "../../src/shader.hlsl"};
+    const shader_path = try path.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.hlsl"});
+    defer shader_path.deinit();
+
     const full_shader_path = try shader_path.resolve_path(eng.get().frame_allocator);
     defer eng.get().frame_allocator.free(full_shader_path);
 
@@ -198,7 +200,8 @@ pub fn init() !Self {
 }
 
 fn init_shaders() !Shaders {
-    const shader_path = path.Path{.ExeRelative = "../../src/shader.hlsl"};
+    const shader_path = try path.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.hlsl"});
+    defer shader_path.deinit();
 
     var shaders = Shaders{
         .static = undefined,
