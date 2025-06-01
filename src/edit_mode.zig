@@ -29,8 +29,15 @@ selected_entity: ?GenerationalIndex = null,
 file_dropdown_open: bool = false,
 edit_dropdown_open: bool = false,
 
+loaded_scene_name: ?[]u8 = null,
+
+load_scene_popup_data: LoadScenePopup,
+load_scene_popup_is_open: bool = false,
+
 pub fn deinit(self: *Self) void {
     self.entity_editor_ui_data.deinit();
+    self.load_scene_popup_data.deinit();
+    self.set_loaded_scene_name(null) catch unreachable;
     self.gizmo.deinit();
 }
 
@@ -38,6 +45,7 @@ pub fn init() !Self {
     return Self {
         .gizmo = try Gizmo.init(eng.get().general_allocator, &eng.get().gfx),
         .entity_editor_ui_data = try EntityEditorUiData.init(eng.get().general_allocator),
+        .load_scene_popup_data = try LoadScenePopup.init(),
         .editor_camera = Camera {
             .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
@@ -49,6 +57,13 @@ pub fn init() !Self {
             .orbit_distance = 0.0,
         },
     };
+}
+
+fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
+    if (self.loaded_scene_name) |old_name| {
+        eng.get().general_allocator.free(old_name);
+    }
+    self.loaded_scene_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
 }
 
 pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
@@ -145,7 +160,11 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         top_widget.background_colour.?[3] = 0.5;
     }
 
-    const l = imui.label("Edit Mode");
+    const l = imui.label(try std.fmt.allocPrint(eng.get().frame_allocator, "Edit Mode{s}", .{
+        if (self.loaded_scene_name) |scene_name|
+            try std.fmt.allocPrint(eng.get().frame_allocator, ": {s}", .{scene_name})
+         else ""
+    }));
     if (imui.get_widget(l.id)) |label_widget| {
         label_widget.anchor = .{ 0.5, 0.5 };
         label_widget.pivot = .{ 0.5, 0.5 };
@@ -189,22 +208,25 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
 
                 const save_button = imui.badge("Save Scene", .{@src()});
                 if (save_button.clicked) {
-                    save_entities_to_scene("scene") catch |err| {
-                        std.log.err("Failed to save scene: {}", .{err});
-                    };
-                    std.log.debug("saved!", .{});
+                    if (self.loaded_scene_name) |scene_name| {
+                        save_entities_to_scene(scene_name) catch |err| {
+                            std.log.err("Failed to save scene: {}", .{err});
+                        };
+                        std.log.debug("saved scene {s}!", .{scene_name});
+                    }
                 }
                 const load_button = imui.badge("Load Scene", .{@src()});
                 if (load_button.clicked) {
-                    for (eng.get().entities.list.data.items, 0..) |*it, idx| {
-                        if (it.item_data) |_| {
-                            eng.get().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
-                        }
-                    }
-                    create_scene_entities("scene") catch |err| {
-                        std.log.err("Failed to load scene: {}", .{err});
-                    };
-                    std.log.debug("loaded!", .{});
+                    self.load_scene_popup_is_open = true;
+                    // for (eng.get().entities.list.data.items, 0..) |*it, idx| {
+                    //     if (it.item_data) |_| {
+                    //         eng.get().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
+                    //     }
+                    // }
+                    // create_scene_entities("scene") catch |err| {
+                    //     std.log.err("Failed to load scene: {}", .{err});
+                    // };
+                    // std.log.debug("loaded!", .{});
                 }
             }
         }
@@ -261,6 +283,17 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
 
     imui.pop_layout();
     imui.pop_layout();
+
+    if (self.load_scene_popup_is_open) {
+        const background_layout = imui.push_floating_layout(.X, 300.0, 300.0, .{@src()});
+        defer imui.pop_layout();
+        if (imui.get_widget(background_layout)) |bg| {
+            set_background_widget_layout(bg);
+        }
+
+        self.load_scene_popup(&self.load_scene_popup_data, .{@src()})
+            catch unreachable;
+    }
 }
 
 pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gfx.RenderTargetView, dsv: *const gfx.DepthStencilView) !void {
@@ -867,11 +900,89 @@ fn labeled_number_slider(
     _ = eng.get().imui.number_slider(value, .{}, key ++ .{@src()});
 }
 
+const LoadScenePopup = struct {
+    selected_name: ?[]u8 = null,
+
+    pub fn deinit(self: *LoadScenePopup) void {
+        self.set_selected_name(null) catch unreachable;
+    }
+
+    pub fn init() !LoadScenePopup {
+        return .{};
+    }
+
+    pub fn set_selected_name(self: *LoadScenePopup, name: ?[]const u8) !void {
+        if (self.selected_name) |s| {
+            eng.get().general_allocator.free(s);
+        }
+        self.selected_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
+    }
+};
+
+fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
+    const imui = &eng.get().imui;
+
+    _ = imui.push_layout(.Y, key ++ .{@src()});
+    defer imui.pop_layout();
+
+    var scenes_dir = try open_scenes_dir(true);
+    defer scenes_dir.close();
+
+    var iter = scenes_dir.iterate();
+
+    var idx: i32 = 0;
+    while (try iter.next()) |v| {
+        idx += 1;
+        if (v.kind != .directory) {
+            continue;
+        }
+
+        const b = imui.button(v.name, key ++ .{@src(), idx});
+        if (b.clicked) {
+           try data.set_selected_name(v.name);
+        }
+    }
+
+    const create_new_button = imui.button("create new", key ++ .{@src()});
+    if (create_new_button.clicked) {
+        std.log.info("should create new scene...", .{});
+    }
+
+    _ = imui.label(try std.fmt.allocPrint(eng.get().frame_allocator, "Scene to load: '{s}'", .{ data.selected_name orelse "None" }));
+
+    {
+        _ = imui.push_layout(.X, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        const load_button = imui.button("Load", key ++ .{@src()});
+        if (load_button.clicked) {
+            if (data.selected_name) |name| {
+                try create_scene_entities(name);
+                try self.set_loaded_scene_name(name);
+                self.load_scene_popup_is_open = false;
+                try data.set_selected_name(null);
+            }
+        }
+
+        const cancel_button = imui.button("Cancel", key ++ .{@src()});
+        if (cancel_button.clicked) {
+            self.load_scene_popup_is_open = false;
+        }
+    }
+}
+
+fn open_scenes_dir(enableIterate: bool) !std.fs.Dir {
+    return try std.fs.cwd().makeOpenPath("scenes", .{ .iterate = enableIterate, });
+}
+
 fn create_scene_entities(scene_name: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
     defer arena.deinit();
 
-    var dir = try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
+    var scenes_dir = try open_scenes_dir(true);
+    defer scenes_dir.close();
+
+    var dir = try scenes_dir.openDir(scene_name, .{.iterate = true,});
     defer dir.close();
 
     var iter = dir.iterate();
@@ -918,15 +1029,14 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
     defer arena.deinit();
 
-    std.fs.cwd().deleteTree(scene_name) catch |err| {
+    var scenes_dir = try open_scenes_dir(true);
+    defer scenes_dir.close();
+
+    scenes_dir.deleteTree(scene_name) catch |err| {
         std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
     };
 
-    var scene_dir: std.fs.Dir = undefined;
-    scene_dir = std.fs.cwd().openDir(scene_name, .{.iterate = true,}) catch blk: {
-        try std.fs.cwd().makeDir(scene_name);
-        break :blk try std.fs.cwd().openDir(scene_name, .{.iterate = true,});
-    };
+    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
     defer scene_dir.close();
 
     var it = eng.get().entities.list.iterator();
