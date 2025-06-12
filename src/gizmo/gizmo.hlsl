@@ -8,7 +8,7 @@ cbuffer instance_data : register(b1)
 {
     row_major float4x4 model_matrix;
     float4 colour;
-    unsigned int id;
+    uint id;
 }
 
 struct vs_in
@@ -21,6 +21,7 @@ struct vs_out
     float4 position : SV_POSITION;
 };
 
+[shader("vertex")]
 vs_out vs_main(vs_in input)
 {
     vs_out output = (vs_out) 0;
@@ -36,12 +37,14 @@ vs_out vs_main(vs_in input)
     return output;
 }
 
+[shader("pixel")]
 float4 ps_colour_main(vs_out input) : SV_TARGET
 {
     return float4(colour.rgb, 1.0);
 }
 
-unsigned int ps_id_main(vs_out input) : SV_TARGET
+[shader("pixel")]
+uint ps_id_main(vs_out input) : SV_TARGET
 {
     return id;
 }

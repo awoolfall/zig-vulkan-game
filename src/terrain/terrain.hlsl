@@ -33,6 +33,7 @@ struct vs_out
     float2 tex_coord : TEXCOORD0;
 };
 
+[shader("vertex")]
 vs_out vs_main(vs_in input)
 {
 
@@ -71,6 +72,7 @@ struct ps_out
     float2 tex_coord : SV_TARGET1;
 };
 
+[shader("pixel")]
 ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out) 0;

@@ -957,8 +957,18 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
         const load_button = imui.button("Load", key ++ .{@src()});
         if (load_button.clicked) {
             if (data.selected_name) |name| {
+                // Remove all existing entities
+                for (eng.get().entities.list.data.items, 0..) |*it, i| {
+                    if (it.item_data) |_| {
+                        eng.get().entities.remove_entity(GenerationalIndex{.index = i, .generation = it.generation}) catch unreachable;
+                    }
+                }
+
+                // Create new entities and set scene name
                 try create_scene_entities(name);
                 try self.set_loaded_scene_name(name);
+
+                // close the load scene popup
                 self.load_scene_popup_is_open = false;
                 try data.set_selected_name(null);
             }

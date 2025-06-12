@@ -139,10 +139,10 @@ pub fn render(
 
     // update instance data buffer
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .origin = transform.position,
             .height_scale = terrain.height_scale,
             .grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),

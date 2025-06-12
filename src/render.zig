@@ -308,10 +308,10 @@ pub fn clear(self: *Self) void {
 }
 
 pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
-    const mapped_buffer = self.camera_data_buffer.map(CameraStruct, &eng.get().gfx) catch unreachable;
+    const mapped_buffer = self.camera_data_buffer.map(&eng.get().gfx) catch unreachable;
     defer mapped_buffer.unmap();
 
-    mapped_buffer.data().* = .{
+    mapped_buffer.data(CameraStruct).* = .{
         .projection = camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()),
         .view = camera.transform.generate_view_matrix(),
         .position = camera.transform.position,
@@ -380,11 +380,11 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(InstanceStruct, &eng.get().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(&eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
-            mapped_buffer.data().* = InstanceStruct {
+            mapped_buffer.data(InstanceStruct).* = InstanceStruct {
                 .model_matrix = ro.transform,
                 .entity_id = entity_id,
                 .flags = .{
@@ -441,11 +441,11 @@ pub fn render(
             start_bone_idx = top_bone_idx;
 
             // Update bone matrix buffer
-            const mapped_buffer = self.bone_matrix_buffer.map([Self.bone_matrix_buffer_size]zm.Mat, &eng.get().gfx) catch unreachable;
+            const mapped_buffer = self.bone_matrix_buffer.map(&eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const copy_amount = @min(self.render_bones.items.len - start_bone_idx, Self.bone_matrix_buffer_size);
-            @memcpy(mapped_buffer.data().*[0..copy_amount], self.render_bones.items[start_bone_idx..][0..copy_amount]);
+            @memcpy(mapped_buffer.data([Self.bone_matrix_buffer_size]zm.Mat).*[0..copy_amount], self.render_bones.items[start_bone_idx..][0..copy_amount]);
 
             top_bone_idx += copy_amount;
         }
@@ -457,11 +457,11 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(InstanceStruct, &eng.get().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(&eng.get().gfx) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
-            mapped_buffer.data().* = InstanceStruct {
+            mapped_buffer.data(InstanceStruct).* = InstanceStruct {
                 .model_matrix = ro.transform,
                 .entity_id = entity_id,
                 .flags = .{
@@ -516,15 +516,15 @@ fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
     std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
 
     { // Update lights buffer
-        const mapped_buffer = self.lights_buffer.map(LightsStruct, &eng.get().gfx) catch unreachable;
+        const mapped_buffer = self.lights_buffer.map(&eng.get().gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
         var i: usize = 0;
         while (i < self.lights.items.len and i < MAX_LIGHTS) : (i += 1) {
-            mapped_buffer.data().lights[i] = self.lights.items[i];
+            mapped_buffer.data(LightsStruct).lights[i] = self.lights.items[i];
         }
         while (i < MAX_LIGHTS) : (i += 1) {
-            mapped_buffer.data().lights[i] = .{};
+            mapped_buffer.data(LightsStruct).lights[i] = .{};
         }
     }
 }

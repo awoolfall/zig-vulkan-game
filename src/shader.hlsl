@@ -4,14 +4,14 @@ cbuffer camera_data : register(b0)
     row_major float4x4 view;
     float4 camera_position;
     float time;
-}
+};
 
 cbuffer instance_data : register(b1)
 {
     row_major float4x4 model_matrix;
-    unsigned int entity_id;
-    unsigned int flags;
-    unsigned int start_bone_idx;
+    uint entity_id;
+    uint flags;
+    uint start_bone_idx;
 };
 #define IS_SELECTED_BIT 0x1
 #define IS_UNLIT_BIT 0x2
@@ -24,7 +24,7 @@ struct light
     float intensity;
     float umbra;
     float penumbra;
-    unsigned int type;
+    uint type;
 };
 #define LIGHT_TYPE_DIRECTIONAL 0
 #define LIGHT_TYPE_POINT 1
@@ -68,6 +68,7 @@ struct vs_out
     float2 tex_coord : TEXCOORD0;
 };
 
+[shader("vertex")]
 vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
 {
     vs_out output = (vs_out) 0;
@@ -90,8 +91,8 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     float4x4 vp = mul(view, projection);
     output.position = mul(output.position, vp);
 
-    output.normal = mul(input.normals.xyz, model_matrix);
-    output.tangent = mul(input.tangents.xyz, model_matrix);
+    output.normal = mul(float4(input.normals.xyz, 0.0), model_matrix).xyz;
+    output.tangent = mul(float4(input.tangents.xyz, 0.0), model_matrix).xyz;
 
     output.tex_coord = input.tex_coord;
     output.tex_coord.y = 1.0 - output.tex_coord.y;
@@ -102,15 +103,16 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
 struct ps_out
 {
     float4 colour : SV_TARGET0;
-    unsigned int entity_id : SV_TARGET1;
+    uint entity_id : SV_TARGET1;
 };
 
+[shader("pixel")]
 ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out) 0;
 
     float diffuse = 1.0;
-    if (~flags & IS_UNLIT_BIT) {
+    if ((~flags & IS_UNLIT_BIT) != 0) {
         float3 normals = normalize(input.normal);
         float3 tangents = normalize(input.tangent);
         float3 bitangents = normalize(cross(tangents, normals));
@@ -125,7 +127,7 @@ ps_out ps_main(vs_out input)
 
     output.entity_id = entity_id;
 
-    if (flags & IS_SELECTED_BIT) {
+    if ((flags & IS_SELECTED_BIT) != 0) {
         output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(time * 5.0 + (-input.world_pos.y) * 2.0)));
     }
 

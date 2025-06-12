@@ -65,6 +65,7 @@ pub fn deinit(self: *Self) void {
 
     self.vertex_shader.deinit();
     self.pixel_shader.deinit();
+    self.id_pixel_shader.deinit();
 
     self.instance_data_buffer.deinit();
     self.selection_textures.deinit();
@@ -679,10 +680,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render white torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = 
                 zm.mul(
                     zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(camera.transform.position - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
@@ -699,10 +700,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render red torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.RotateX, &base_rot, &base_tra),
             .colour = RED,
             .id = @intFromEnum(GizmoControl.RotateX),
@@ -712,10 +713,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render green torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.RotateY, &base_rot, &base_tra),
             .colour = GREEN,
             .id = @intFromEnum(GizmoControl.RotateY),
@@ -725,10 +726,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render blue torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.RotateZ, &base_rot, &base_tra),
             .colour = BLUE,
             .id = @intFromEnum(GizmoControl.RotateZ),
@@ -761,10 +762,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render red cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra),
             .colour = RED,
             .id = @intFromEnum(GizmoControl.TranslateX),
@@ -774,10 +775,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render green cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra),
             .colour = GREEN,
             .id = @intFromEnum(GizmoControl.TranslateY),
@@ -787,10 +788,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render blue cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra),
             .colour = BLUE,
             .id = @intFromEnum(GizmoControl.TranslateZ),
@@ -823,10 +824,10 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render white sphere
     {
-        const mapped_buffer = self.instance_data_buffer.map(InstanceInfoStruct, gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
         defer mapped_buffer.unmap();
 
-        mapped_buffer.data().* = .{
+        mapped_buffer.data(InstanceInfoStruct).* = .{
             .model_matrix = 
                 base_tra
             ,
