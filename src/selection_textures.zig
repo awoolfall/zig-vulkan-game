@@ -7,16 +7,16 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
     return struct {
         const Self = @This();
         const TextureFormat = switch (UnderlyingType) {
-            u32 => gfx.TextureFormat.R32_Uint,
-            f32 => gfx.TextureFormat.R32_Float,
-            [2]f32 => gfx.TextureFormat.Rg32_Float,
-            [4]f32 => gfx.TextureFormat.Rgba32_Float,
+            u32 => gfx.ImageFormat.R32_Uint,
+            f32 => gfx.ImageFormat.R32_Float,
+            [2]f32 => gfx.ImageFormat.Rg32_Float,
+            [4]f32 => gfx.ImageFormat.Rgba32_Float,
             else => @compileError("unsupported selection texture type"),
         };
 
-        texture: gfx.Texture2D,
-        rtv: gfx.RenderTargetView,
-        staging_texture: gfx.Texture2D,
+        texture: gfx.Image.Ref,
+        rtv: gfx.ImageView.Ref,
+        staging_texture: gfx.Image.Ref,
 
         pub fn deinit(self: *Self) void {
             self.texture.deinit();
@@ -24,43 +24,41 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             self.staging_texture.deinit();
         }
 
-        pub fn init(gf: *gfx.GfxState) !Self {
+        pub fn init() !Self {
             var self = Self {
                 .texture = undefined,
                 .rtv = undefined,
                 .staging_texture = undefined,
             };
-            try self.recreate(gf, true);
+            try self.recreate(true);
             return self;
         }
 
-        fn recreate(self: *Self, gf: *gfx.GfxState, first_time: bool) !void {
-            const texture = try gfx.Texture2D.init(
+        fn recreate(self: *Self, first_time: bool) !void {
+            const texture = try gfx.Image.init(
                 .{
-                    .width = @intCast(gf.swapchain_size.width),
-                    .height = @intCast(gf.swapchain_size.height),
+                    .match_swapchain_extent = true,
                     .format = Self.TextureFormat,
+
+                    .usage_flags = .{ .RenderTarget = true, .TransferSrc = true, },
+                    .access_flags = .{ .GpuWrite = true, }
                 },
-                .{ .RenderTarget = true, },
-                .{ .GpuWrite = true, },
                 null,
-                gf
             );
             errdefer texture.deinit();
 
-            const rtv = try gfx.RenderTargetView.init_from_texture2d(&texture, gf);
+            const rtv = try gfx.ImageView.init(.{ .image = texture, });
             errdefer rtv.deinit();
 
-            const staging_texture = try gfx.Texture2D.init(
+            const staging_texture = try gfx.Image.init(
                 .{
-                    .width = @intCast(gf.swapchain_size.width),
-                    .height = @intCast(gf.swapchain_size.height),
+                    .match_swapchain_extent = true,
                     .format = Self.TextureFormat,
+
+                    .usage_flags = .{ .TransferDst = true, },
+                    .access_flags = .{ .CpuRead = true, .GpuWrite = true, },
                 },
-                .{},
-                .{ .CpuRead = true, .CpuWrite = true, .GpuWrite = true, },
                 null,
-                gf
             );
             errdefer texture.deinit();
 
@@ -75,14 +73,15 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
         }
 
         pub fn on_resize(self: *Self, gf: *gfx.GfxState) void {
-            if (self.texture.desc.width != gf.swapchain_size.width or self.texture.desc.height != gf.swapchain_size.height) {
-                self.recreate(gf, false) catch |err| {
+            const image = self.texture.get() catch unreachable;
+            if (image.info.width != gf.swapchain_size()[0] or image.info.height != gf.swapchain_size()[1]) {
+                self.recreate(false) catch |err| {
                     std.log.err("unable to recreate depth texture: {}", .{err});
                 };
             }
         }
 
-        pub fn clear(self: *Self, gf: *gfx.GfxState, value: UnderlyingType) void {
+        pub fn clear(self: *Self, value: UnderlyingType) void {
             const v = switch (UnderlyingType) {
                 u32 => zm.f32x4s(@floatFromInt(value)),
                 f32 => zm.f32x4s(value),
@@ -90,25 +89,27 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
                 [4]f32 => zm.f32x4(value[0], value[1], value[2], value[3]),
                 else => @compileError("unsupported selection texture type"),
             };
-            gf.cmd_clear_render_target(&self.rtv, v);
+            gfx.GfxState.get().cmd_clear_render_target(self.rtv, v);
         }
 
         pub fn get_value_at_position(self: *const Self, x: usize, y: usize, gf: *gfx.GfxState) !UnderlyingType {
-            if (x >= self.texture.desc.width or y >= self.texture.desc.height) {
+            const image = try self.texture.get();
+            if (x >= image.info.width or y >= image.info.height) {
                 return error.OutOfBounds;
             }
 
             gf.flush();
-            gf.cmd_copy_texture_to_texture(&self.staging_texture, &self.texture);
+            gf.cmd_copy_texture_to_texture(self.staging_texture, self.texture);
 
-            const mapped_texture = self.staging_texture.map(UnderlyingType, gf) catch |err| {
+            const staging_image = try self.staging_texture.get();
+            const mapped_texture = staging_image.map(.{ .read = true, }) catch |err| {
                 std.log.err("cannot map: {}", .{err});
                 return error.CannotMapStagingTexture;
             };
             defer mapped_texture.unmap();
 
-            const idx: usize = @intCast(y * self.texture.desc.width + x);
-            return mapped_texture.data()[idx];
+            const idx: usize = @intCast(y * image.info.width + x);
+            return mapped_texture.data(UnderlyingType)[idx];
         }
     };
 }

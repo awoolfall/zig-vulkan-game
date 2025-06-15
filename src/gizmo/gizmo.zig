@@ -71,7 +71,7 @@ pub fn deinit(self: *Self) void {
     self.selection_textures.deinit();
 }
 
-pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
+pub fn init(alloc: std.mem.Allocator) !Self {
     const visual_line_width = 0.03;
     const id_line_width = 0.07;
 
@@ -97,11 +97,10 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
         @sizeOf(InstanceInfoStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        gfx
     );
     errdefer instance_data_buffer.deinit();
 
-    var selection_textures = try st.SelectionTextures(u32).init(gfx);
+    var selection_textures = try st.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
     var self = Self {
@@ -120,7 +119,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
         .id_pixel_shader = undefined,
     };
 
-    self.compile_shaders(alloc, gfx) catch |err| {
+    self.compile_shaders(alloc) catch |err| {
         std.log.err("unable to compile shaders: {}", .{err});
         return err;
     };
@@ -134,8 +133,6 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
 }
 
 fn init_torus(line_width: f32) !RenderBuffers {
-    const gfx = &eng.get().gfx;
-    
     const torus_shape = zmesh.Shape.initTorus(16, 64, line_width);
     defer torus_shape.deinit();
 
@@ -143,7 +140,6 @@ fn init_torus(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(torus_shape.positions),
         .{ .VertexBuffer = true, },
         .{},
-        gfx
     );
     errdefer torus_vertex_buffer.deinit();
 
@@ -151,7 +147,6 @@ fn init_torus(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(torus_shape.indices),
         .{ .IndexBuffer = true, },
         .{},
-        gfx
     );
     errdefer torus_index_buffer.deinit();
 
@@ -163,8 +158,6 @@ fn init_torus(line_width: f32) !RenderBuffers {
 }
 
 fn init_cylinder(line_width: f32) !RenderBuffers {
-    const gfx = &eng.get().gfx;
-    
     var cylinder_shape = zmesh.Shape.initCylinder(16, 2);
     defer cylinder_shape.deinit();
     cylinder_shape.scale(line_width, line_width, 1.0);
@@ -173,7 +166,6 @@ fn init_cylinder(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(cylinder_shape.positions),
         .{ .VertexBuffer = true, },
         .{},
-        gfx
     );
     errdefer cylinder_vertex_buffer.deinit();
 
@@ -181,7 +173,6 @@ fn init_cylinder(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(cylinder_shape.indices),
         .{ .IndexBuffer = true, },
         .{},
-        gfx
     );
     errdefer cylinder_index_buffer.deinit();
 
@@ -193,8 +184,6 @@ fn init_cylinder(line_width: f32) !RenderBuffers {
 }
 
 fn init_sphere(line_width: f32) !RenderBuffers {
-    const gfx = &eng.get().gfx;
-
     var sphere_shape = zmesh.Shape.initParametricSphere(16, 16);
     defer sphere_shape.deinit();
     sphere_shape.scale(line_width * 2.0, line_width * 2.0, line_width * 2.0);
@@ -203,7 +192,6 @@ fn init_sphere(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(sphere_shape.positions),
         .{ .VertexBuffer = true, },
         .{},
-        gfx
     );
     errdefer sphere_vertex_buffer.deinit();
 
@@ -211,7 +199,6 @@ fn init_sphere(line_width: f32) !RenderBuffers {
         std.mem.sliceAsBytes(sphere_shape.indices),
         .{ .IndexBuffer = true, },
         .{},
-        gfx
     );
     errdefer sphere_index_buffer.deinit();
 
@@ -222,7 +209,7 @@ fn init_sphere(line_width: f32) !RenderBuffers {
     };
 }
 
-fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !void {
+fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !void {
     const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" });
     defer shader_path.deinit();
 
@@ -234,7 +221,6 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
             .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
         }),
         .{},
-        gfx
     ); 
     errdefer new_vertex_shader.deinit();
 
@@ -243,7 +229,6 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
         shader_path,
         "ps_colour_main",
         .{},
-        gfx
     );
     errdefer new_pixel_shader.deinit();
 
@@ -252,7 +237,6 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !vo
         shader_path,
         "ps_id_main",
         .{},
-        gfx
     );
     errdefer new_id_pixel_shader.deinit();
 
@@ -314,7 +298,7 @@ const Ray = struct {
 
 fn ray_out_point_on_screen_px(point_px: [2]i32, inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
     var ndc_cursor = zm.f32x4(@floatFromInt(point_px[0]), @floatFromInt(point_px[1]), 1.0, 1.0);
-    ndc_cursor /= zm.f32x4(@floatFromInt(eng.get().gfx.swapchain_size.width), @floatFromInt(eng.get().gfx.swapchain_size.height), 1.0, 1.0);
+    ndc_cursor /= zm.f32x4(@floatFromInt(eng.get().gfx.swapchain_size()[0]), @floatFromInt(eng.get().gfx.swapchain_size()[1]), 1.0, 1.0);
     ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
     ndc_cursor -= zm.f32x4(1.0, -1.0, 0.0, 0.0);
 
@@ -601,8 +585,8 @@ pub fn render(
     self: *Self, 
     transform: *const Transform, 
     camera_buffer: *const gf.Buffer, 
-    rtv: *const gf.RenderTargetView, 
-    dsv: *const gf.DepthStencilView, 
+    rtv: gf.ImageView.Ref, 
+    dsv: gf.ImageView.Ref, 
     camera: *const cm.Camera
 ) void {
     const gfx = &eng.get().gfx;
@@ -610,7 +594,8 @@ pub fn render(
     self.rendered_view_matrix = camera.transform.generate_view_matrix();
 
     // recreate selection textures if size has changed
-    if (self.selection_textures.texture.desc.width != gfx.swapchain_size.width or self.selection_textures.texture.desc.height != gfx.swapchain_size.height) {
+    const selection_image = self.selection_textures.texture.get() catch unreachable;
+    if (selection_image.info.width != gfx.swapchain_size()[0] or selection_image.info.height != gfx.swapchain_size()[1]) {
         self.selection_textures.on_resize(gfx);
     }
 
@@ -621,7 +606,6 @@ pub fn render(
     gfx.cmd_set_vertex_shader(&self.vertex_shader);
 
     // set render state
-    gfx.cmd_set_blend_state(null);
     gfx.cmd_set_topology(.TriangleList);
     gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
 
@@ -641,14 +625,14 @@ pub fn render(
     self.render_objects(transform, camera, dsv, .Visual);
 
     // render id objects
-    self.selection_textures.clear(&eng.get().gfx, 0);
-    gfx.cmd_set_render_target(&.{&self.selection_textures.rtv}, dsv);
+    self.selection_textures.clear(0);
+    gfx.cmd_set_render_target(&.{self.selection_textures.rtv}, dsv);
     gfx.cmd_set_pixel_shader(&self.id_pixel_shader);
     gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
     self.render_objects(transform, camera, dsv, .Id);
 }
 
-fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Camera, dsv: *const gf.DepthStencilView, ty: enum { Visual, Id }) void {
+fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Camera, dsv: gf.ImageView.Ref, ty: enum { Visual, Id }) void {
     const gfx = &eng.get().gfx;
 
     // set torus vertex and index buffers
@@ -680,7 +664,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render white torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -700,7 +684,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render red torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -713,7 +697,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render green torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -726,7 +710,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render blue torus
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -762,7 +746,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render red cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -775,7 +759,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render green cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -788,7 +772,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render blue cylinder
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -824,7 +808,7 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
 
     // render white sphere
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{

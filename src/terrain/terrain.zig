@@ -28,8 +28,8 @@ heightmap: []f32,
 terrain_grid_scale: f32 = 1.0,
 height_scale: f32 = 1.0,
 
-heightmap_texture: gf.Texture2D,
-heightmap_texture_view: gf.TextureView2D,
+heightmap_texture: gf.Image.Ref,
+heightmap_texture_view: gf.ImageView.Ref,
 
 physics_body_id: ?ph.zphy.BodyId = null,
 
@@ -50,7 +50,7 @@ pub fn deinit(self: *Self) void {
     self.alloc.free(self.heightmap);
 }
 
-pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gfx: *gf.GfxState) !Self {
+pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !Self {
     const heightmap_data = try alloc.alloc(f32, HeightFieldSize * HeightFieldSize);
     errdefer alloc.free(heightmap_data);
 
@@ -74,20 +74,20 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform, gf
     //     };
     // }
 
-    const heightmap_texture = try gf.Texture2D.init(
+    const heightmap_texture = try gf.Image.init(
         .{
             .height = HeightFieldSize,
             .width = HeightFieldSize,
             .format = .R32_Float,
+
+            .usage_flags = .{ .ShaderResource = true, },
+            .access_flags = .{ .CpuWrite = true, },
         },
-        .{ .ShaderResource = true, },
-        .{ .CpuWrite = true, },
         std.mem.sliceAsBytes(heightmap_data),
-        gfx
     );
     errdefer heightmap_texture.deinit();
 
-    const heightmap_texture_view = try gf.TextureView2D.init_from_texture2d(&heightmap_texture, gfx);
+    const heightmap_texture_view = try gf.ImageView.init(.{ .image = heightmap_texture, });
     errdefer heightmap_texture_view.deinit();
 
     var self = Self {
@@ -303,11 +303,12 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
             },
         }
 
-        if (self.heightmap_texture.map_write_discard(f32, &eng.get().gfx)) |mapped_texture| {
+        const heightmap_image = try self.heightmap_texture.get();
+        if (heightmap_image.map(.{ .write = true, })) |mapped_texture| {
             defer mapped_texture.unmap();
             // TODO: this is incorrect, d3d11 row pitch is 128 but row length is 64. (when 16 HeightFieldSize)
             // probably need to do data() array access inside platform code
-            @memcpy(mapped_texture.data(), self.heightmap);
+            @memcpy(mapped_texture.data(f32), self.heightmap);
         } else |err| {
             std.log.err("Failed to map terrain texture: {}", .{err});
         }

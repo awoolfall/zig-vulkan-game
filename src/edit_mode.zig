@@ -43,7 +43,7 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     return Self {
-        .gizmo = try Gizmo.init(eng.get().general_allocator, &eng.get().gfx),
+        .gizmo = try Gizmo.init(eng.get().general_allocator),
         .entity_editor_ui_data = try EntityEditorUiData.init(eng.get().general_allocator),
         .load_scene_popup_data = try LoadScenePopup.init(),
         .editor_camera = Camera {
@@ -296,12 +296,12 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
     }
 }
 
-pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: *const gfx.RenderTargetView, dsv: *const gfx.DepthStencilView) !void {
+pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: gfx.ImageView.Ref, dsv: gfx.ImageView.Ref) !void {
     if (self.selected_entity) |s| {
         if (eng.get().entities.get(s)) |entity| {
             const viewport = gfx.Viewport {
-                .width = @floatFromInt(eng.get().gfx.swapchain_size.width),
-                .height = @floatFromInt(eng.get().gfx.swapchain_size.height),
+                .width = @floatFromInt(eng.get().gfx.swapchain_size()[0]),
+                .height = @floatFromInt(eng.get().gfx.swapchain_size()[1]),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
                 .top_left_x = 0.0,
@@ -475,8 +475,8 @@ const EntityEditorUiData = struct {
 
         self.particle_editor_data.reinit(entity);
         self.particle_position = .{
-            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size.width)) * 0.5,
-            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size.height)) * 0.5,
+            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size()[0])) * 0.5,
+            @as(f32, @floatFromInt(eng.get().gfx.swapchain_size()[1])) * 0.5,
         };
 
         // set name text
@@ -802,7 +802,7 @@ fn entity_editor_ui(
         const terrain_checkbox = imui.checkbox(&data.enable_terrain_checkbox, "Enable Terrain", key ++ .{@src()});
         if (terrain_checkbox.clicked) {
             if (data.enable_terrain_checkbox) {
-                entity.app.terrain = Terrain.init(eng.get().general_allocator, .{}, entity.transform, &eng.get().gfx) catch |err| {
+                entity.app.terrain = Terrain.init(eng.get().general_allocator, .{}, entity.transform) catch |err| {
                     std.log.err("Failed to create terrain: {}", .{err});
                     return;
                 };

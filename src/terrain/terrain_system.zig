@@ -44,19 +44,18 @@ pub fn deinit(self: *Self) void {
     self.watch.deinit();
 }
 
-pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
-    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2, gfx);
+pub fn init(alloc: std.mem.Allocator) !Self {
+    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2);
     errdefer plane_model.deinit();
 
     const instance_data_buffer = try gf.Buffer.init(
         @sizeOf(InstanceInfoStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        gfx
     );
     errdefer instance_data_buffer.deinit();
 
-    var selection_textures = try st.SelectionTextures([2]f32).init(gfx);
+    var selection_textures = try st.SelectionTextures([2]f32).init();
     errdefer selection_textures.deinit();
 
     const terrain_path = try pt.Path.init(eng.get().general_allocator, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
@@ -74,7 +73,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
         .watch = try eng.assets.FileWatcher.init(alloc, terrain_path_abs, 500),
     };
 
-    const shaders = try self.compile_shaders(alloc, gfx);
+    const shaders = try self.compile_shaders(alloc);
     errdefer self.deinit();
 
     self.vertex_shader = shaders.vertex_shader;
@@ -83,7 +82,7 @@ pub fn init(alloc: std.mem.Allocator, gfx: *gf.GfxState) !Self {
     return self;
 }
 
-fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !struct {
+fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !struct {
     vertex_shader: gf.VertexShader,
     pixel_shader: gf.PixelShader,
 } {
@@ -100,7 +99,6 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !st
             .{ .name = "TEXCOORD",              .format = .F32x2,   .per = .Vertex, .slot = 1, },
         }),
         .{},
-        gfx
     );
     errdefer new_vertex_shader.deinit();
 
@@ -109,7 +107,6 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator, gfx: *gf.GfxState) !st
         path,
         "ps_main",
         .{},
-        gfx
     );
     errdefer new_pixel_shader.deinit();
     
@@ -125,12 +122,11 @@ pub fn render(
     camera_buffer: *const gf.Buffer, 
     transform: Transform, 
     terrain: *const Terrain, 
-    rtv: *const gf.RenderTargetView,
-    dsv: *const gf.DepthStencilView,
-    gfx: *gf.GfxState
+    rtv: gf.ImageView.Ref,
+    dsv: gf.ImageView.Ref,
 ) void {
     if (self.watch.was_modified_since_last_check()) blk: {
-        const shaders = self.compile_shaders(eng.get().general_allocator, gfx) catch break :blk;
+        const shaders = self.compile_shaders(eng.get().general_allocator) catch break :blk;
         self.vertex_shader.deinit();
         self.pixel_shader.deinit();
         self.vertex_shader = shaders.vertex_shader;
@@ -139,7 +135,7 @@ pub fn render(
 
     // update instance data buffer
     {
-        const mapped_buffer = self.instance_data_buffer.map(gfx) catch unreachable;
+        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         mapped_buffer.data(InstanceInfoStruct).* = .{
@@ -158,15 +154,16 @@ pub fn render(
         };
     }
 
-    self.selection_textures.clear(gfx, [2]f32{ -1.0, -1.0 });
-    gfx.cmd_set_render_target(&.{ rtv, &self.selection_textures.rtv }, dsv);
+    const gfx = gf.GfxState.get();
+
+    self.selection_textures.clear([2]f32{ -1.0, -1.0 });
+    gfx.cmd_set_render_target(&.{ rtv, self.selection_textures.rtv }, dsv);
 
     // set shaders
     gfx.cmd_set_vertex_shader(&self.vertex_shader);
     gfx.cmd_set_pixel_shader(&self.pixel_shader);
 
     // set render state
-    gfx.cmd_set_blend_state(null);
     gfx.cmd_set_topology(.TriangleList);
     gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
 
@@ -180,13 +177,13 @@ pub fn render(
         &self.instance_data_buffer,
     });
 
-    const texture_id = eng.get().asset_manager.find_asset_id(as.Texture2DAsset, "default|terrain-texture").?;
-    const texture = eng.get().asset_manager.get_asset(as.Texture2DAsset, texture_id) catch unreachable;
+    const texture_id = eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture").?;
+    const texture = eng.get().asset_manager.get_asset(as.ImageAsset, texture_id) catch unreachable;
 
-    const texture_view = gf.TextureView2D.init_from_texture2d(texture, gfx) catch unreachable;
+    const texture_view = gf.ImageView.init(.{ .image = texture.*, }) catch unreachable;
     defer texture_view.deinit();
 
-    gfx.cmd_set_shader_resources(.Vertex, 0, .{
+    gfx.cmd_set_shader_resources(.Vertex, 0, &.{
         terrain.heightmap_texture_view,
         //texture_view,
     });

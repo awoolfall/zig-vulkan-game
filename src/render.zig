@@ -147,7 +147,6 @@ pub fn init() !Self {
         @sizeOf(CameraStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &eng.get().gfx
     );
     errdefer camera_constant_buffer.deinit();
 
@@ -157,7 +156,6 @@ pub fn init() !Self {
             @sizeOf(InstanceStruct),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
-            &eng.get().gfx
         );
     }
     errdefer {
@@ -171,7 +169,6 @@ pub fn init() !Self {
         @sizeOf(zm.Mat) * Self.bone_matrix_buffer_size,
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &eng.get().gfx
     );
     errdefer bone_matrix_buffer.deinit();
 
@@ -179,7 +176,6 @@ pub fn init() !Self {
         @sizeOf(LightsStruct),
         .{ .ConstantBuffer = true, },
         .{ .CpuWrite = true, },
-        &eng.get().gfx
     );
     errdefer lights_buffer.deinit();
 
@@ -231,7 +227,6 @@ fn init_shaders() !Shaders {
                 .{ "SKELETAL_RENDERING", "1" },
             },
         },
-        &eng.get().gfx
     );
     errdefer shaders.skeletal.vertex_shader.deinit();
 
@@ -244,7 +239,6 @@ fn init_shaders() !Shaders {
                 .{ "SKELETAL_RENDERING", "1" },
             },
         },
-        &eng.get().gfx
     );
     errdefer shaders.skeletal.pixel_shader.deinit();
 
@@ -265,7 +259,6 @@ fn init_shaders() !Shaders {
             .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
         })[0..],
         .{},
-        &eng.get().gfx
     );
     errdefer shaders.static.vertex_shader.deinit();
 
@@ -274,7 +267,6 @@ fn init_shaders() !Shaders {
         shader_path,
         "ps_main",
         .{},
-        &eng.get().gfx
     );
     errdefer shaders.static.pixel_shader.deinit();
 
@@ -308,7 +300,7 @@ pub fn clear(self: *Self) void {
 }
 
 pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
-    const mapped_buffer = self.camera_data_buffer.map(&eng.get().gfx) catch unreachable;
+    const mapped_buffer = self.camera_data_buffer.map(.{ .write = true, }) catch unreachable;
     defer mapped_buffer.unmap();
 
     mapped_buffer.data(CameraStruct).* = .{
@@ -321,9 +313,9 @@ pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
 
 pub fn render(
     self: *Self, 
-    rtv: *const gfx.RenderTargetView, 
-    selection_rtv: *const gfx.RenderTargetView,
-    depth_view: *const gfx.DepthStencilView,
+    rtv: gfx.ImageView.Ref, 
+    selection_rtv: gfx.ImageView.Ref,
+    depth_view: gfx.ImageView.Ref,
     data: struct {
         selected_entity_idx: ?usize,
     },
@@ -342,16 +334,14 @@ pub fn render(
     eng.get().gfx.cmd_set_render_target(&.{rtv, selection_rtv}, depth_view);
 
     const viewport = gfx.Viewport {
-        .width = @floatFromInt(eng.get().gfx.swapchain_size.width),
-        .height = @floatFromInt(eng.get().gfx.swapchain_size.height),
+        .width = @floatFromInt(eng.get().gfx.swapchain_size()[0]),
+        .height = @floatFromInt(eng.get().gfx.swapchain_size()[1]),
         .min_depth = 0.0,
         .max_depth = 1.0,
         .top_left_x = 0.0,
         .top_left_y = 0.0,
     };
     eng.get().gfx.cmd_set_viewport(viewport);
-
-    eng.get().gfx.cmd_set_blend_state(null);
 
     eng.get().gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gfx.Buffer{
         &self.camera_data_buffer,
@@ -380,7 +370,7 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(&eng.get().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(.{ .write = true, }) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
@@ -407,11 +397,11 @@ pub fn render(
             eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
         }
 
-        var diffuse = &eng.get().gfx.default.diffuse;
-        var diffuse_sampler = &eng.get().gfx.default.sampler;
+        var diffuse = eng.get().gfx.default.diffuse_view;
+        var diffuse_sampler = eng.get().gfx.default.sampler;
         if (ro.material.diffuse_map) |*d| {
-            diffuse = &d.map;
-            if (d.sampler) |*s| { diffuse_sampler = s; }
+            diffuse = d.map;
+            if (d.sampler) |s| { diffuse_sampler = s; }
         }
         eng.get().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
         eng.get().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
@@ -441,7 +431,7 @@ pub fn render(
             start_bone_idx = top_bone_idx;
 
             // Update bone matrix buffer
-            const mapped_buffer = self.bone_matrix_buffer.map(&eng.get().gfx) catch unreachable;
+            const mapped_buffer = self.bone_matrix_buffer.map(.{ .write = true, }) catch unreachable;
             defer mapped_buffer.unmap();
 
             const copy_amount = @min(self.render_bones.items.len - start_bone_idx, Self.bone_matrix_buffer_size);
@@ -457,7 +447,7 @@ pub fn render(
 
         // Setup model buffer from transform
         {
-            const mapped_buffer = instance_buffer.map(&eng.get().gfx) catch unreachable;
+            const mapped_buffer = instance_buffer.map(.{ .write = true, }) catch unreachable;
             defer mapped_buffer.unmap();
 
             const entity_id = if (ro.entity_id) |e| e else 0;
@@ -484,11 +474,11 @@ pub fn render(
             eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = false, });
         }
 
-        var diffuse = &eng.get().gfx.default.diffuse;
-        var diffuse_sampler = &eng.get().gfx.default.sampler;
+        var diffuse = eng.get().gfx.default.diffuse_view;
+        var diffuse_sampler = eng.get().gfx.default.sampler;
         if (ro.material.diffuse_map) |*d| {
-            diffuse = &d.map;
-            if (d.sampler) |*s| { diffuse_sampler = s; }
+            diffuse = d.map;
+            if (d.sampler) |s| { diffuse_sampler = s; }
         }
         eng.get().gfx.cmd_set_shader_resources(.Pixel, 0, &.{diffuse});
         eng.get().gfx.cmd_set_samplers(.Pixel, 0, &.{diffuse_sampler});
@@ -516,7 +506,7 @@ fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
     std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
 
     { // Update lights buffer
-        const mapped_buffer = self.lights_buffer.map(&eng.get().gfx) catch unreachable;
+        const mapped_buffer = self.lights_buffer.map(.{ .write = true, }) catch unreachable;
         defer mapped_buffer.unmap();
 
         var i: usize = 0;

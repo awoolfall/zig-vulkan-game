@@ -67,7 +67,7 @@ pub const EntityData = struct {
                 else null,
             .light = if (desc.light) |l| l else null,
             .terrain = if (desc.terrain) |t| 
-                try Terrain.init(engine().general_allocator, t, .{}, &engine().gfx) 
+                try Terrain.init(engine().general_allocator, t, .{}) 
                 else null,
         };
     }
@@ -135,10 +135,10 @@ pub fn deinit(self: *Self) void {
 
 pub fn init(self: *Self) !void {
     std.log.info("App init!", .{});
-    var depth_textures = try DepthTextures.init(&engine().gfx);
+    var depth_textures = try DepthTextures.init();
     errdefer depth_textures.deinit();
 
-    var selection_textures = try st.SelectionTextures(u32).init(&engine().gfx);
+    var selection_textures = try st.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
     var asset_pack = try assets.AssetPack.init(engine().general_allocator, "default");
@@ -158,7 +158,7 @@ pub fn init(self: *Self) !void {
     try asset_pack.define_animation("character walk", "character", 72);
     try asset_pack.define_animation("character attack", "character", 1);
 
-    try asset_pack.add_texture2D("terrain-texture", .{ .Path = "terrain.r32" });
+    try asset_pack.add_image("terrain-texture", .{ .Path = "terrain.r32" });
 
     const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
     try engine().asset_manager.load_asset_pack(asset_pack_id);
@@ -245,7 +245,7 @@ pub fn init(self: *Self) !void {
         .player_attack_particle_system = player_attack_particle_system,
 
         .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainSystem.init(engine().general_allocator, &engine().gfx),
+        .terrain_renderer = try TerrainSystem.init(engine().general_allocator),
         .edit_mode = try EditMode.init(),
     };
 }
@@ -568,20 +568,17 @@ fn update(self: *Self) !void {
     const camera_projection_matrix = render_camera.generate_perspective_matrix(engine().gfx.swapchain_aspect());
 
     // Draw frame
-    var rtv = engine().gfx.begin_frame() catch |err| {
-        std.log.err("unable to begin frame: {}", .{err});
-        return;
-    };
+    const rtv = engine().gfx.get_frame_rtv();
 
-    engine().gfx.cmd_clear_render_target(&rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
-    engine().gfx.cmd_clear_depth_stencil_view(&self.depth_textures.dsv, 0.0, null);
-    self.selection_textures.clear(&engine().gfx, 0);
+    engine().gfx.cmd_clear_render_target(rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
+    engine().gfx.cmd_clear_depth_stencil_view(self.depth_textures.dsv, 0.0, null);
+    self.selection_textures.clear(0);
 
     self.standard_renderer.update_camera_data_buffer(render_camera);
     self.standard_renderer.render(
-        &rtv, 
-        &self.selection_textures.rtv, 
-        &self.depth_textures.dsv, 
+        rtv, 
+        self.selection_textures.rtv, 
+        self.depth_textures.dsv, 
         .{
             .selected_entity_idx = blk: {
                 if (self.current_mode != .EDIT) break :blk null;
@@ -598,9 +595,8 @@ fn update(self: *Self) !void {
                 &self.standard_renderer.camera_data_buffer, 
                 entity.transform, 
                 terrain, 
-                &rtv,
-                &self.depth_textures.dsv,
-                &engine().gfx
+                rtv,
+                self.depth_textures.dsv,
             );
         }
     }
@@ -614,9 +610,8 @@ fn update(self: *Self) !void {
             ps.draw(
                 camera_view_matrix,
                 camera_projection_matrix,
-                &rtv,
-                &self.depth_textures.dsv_read_only,
-                &engine().gfx
+                rtv,
+                self.depth_textures.dsv_read_only,
             );
         }
 
@@ -629,17 +624,16 @@ fn update(self: *Self) !void {
     self.player_attack_particle_system.draw(
         camera_view_matrix,
         camera_projection_matrix,
-        &rtv,
-        &self.depth_textures.dsv_read_only,
-        &engine().gfx
+        rtv,
+        self.depth_textures.dsv_read_only,
     );
 
     // Draw Physics Debug Wireframes
     if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.C)) {
         engine().physics.debug_draw_bodies(
-            &rtv, 
-            engine().gfx.swapchain_size.width,
-            engine().gfx.swapchain_size.height,
+            rtv, 
+            @intCast(engine().gfx.swapchain_size()[0]),
+            @intCast(engine().gfx.swapchain_size()[1]),
             zm.matToArr(camera_projection_matrix),
             zm.matToArr(camera_view_matrix),
         );
@@ -696,7 +690,7 @@ fn update(self: *Self) !void {
         blk: { if (gitchanged) { break :blk "*"; } else { break :blk ""; } },
     }) catch unreachable;
     {
-        _ = engine().imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine().gfx.swapchain_size.height)) - 
+        _ = engine().imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine().gfx.swapchain_size()[1])) - 
             engine().imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
         const l = engine().imui.label(rev_text);
         if (engine().imui.get_widget(l.id)) |tw| {
@@ -707,19 +701,18 @@ fn update(self: *Self) !void {
     }
 
     engine().gfx.tone_mapping_filter.apply_filter(
-        &engine().gfx.hdr_texture_view, 
+        engine().gfx.get_frame_hdr_view(), 
         .{
             .black_and_white = engine().input.get_key(KeyCode.B),
         },
         engine().gfx.get_framebuffer(), 
-        &engine().gfx
     );
 
     if (self.current_mode == .EDIT) {
         self.edit_mode.render(
             &self.standard_renderer.camera_data_buffer, 
             engine().gfx.get_framebuffer(), 
-            &self.depth_textures.dsv
+            self.depth_textures.dsv
         ) catch |err| {
             std.log.err("Edit mode render failed: {}", .{err});
         };
@@ -727,7 +720,7 @@ fn update(self: *Self) !void {
 
     engine().debug.render(&self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer());
 
-    engine().imui.render_imui(engine().gfx.get_framebuffer(), &engine().gfx);
+    engine().imui.render_imui(engine().gfx.get_framebuffer());
 
     engine().gfx.present() catch |err| {
         std.log.err("unable to present frame: {}", .{err});
