@@ -25,7 +25,7 @@ const InstanceInfoStruct = extern struct {
     modify_strength: f32 = 0.0,
 };
 
-instance_data_buffer: gf.Buffer,
+instance_data_buffer: gf.Buffer.Ref,
 
 vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
@@ -94,10 +94,15 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !struct {
         alloc,
         path,
         "vs_main",
-        (&[_]gf.VertexInputLayoutEntry {
-            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
-            .{ .name = "TEXCOORD",              .format = .F32x2,   .per = .Vertex, .slot = 1, },
-        }),
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 20, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+                .{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 12, .format = .F32x2, },
+            },
+        },
         .{},
     );
     errdefer new_vertex_shader.deinit();

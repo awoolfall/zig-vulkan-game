@@ -99,14 +99,14 @@ const Shaders = struct {
 shaders: Shaders,
 shader_watcher: eng.assets.FileWatcher,
 
-camera_data_buffer: gfx.Buffer,
+camera_data_buffer: gfx.Buffer.Ref,
 
-instance_buffers: [3]gfx.Buffer,
+instance_buffers: [3]gfx.Buffer.Ref,
 instance_active_buffer: usize = 0,
 
-lights_buffer: gfx.Buffer,
+lights_buffer: gfx.Buffer.Ref,
     
-bone_matrix_buffer: gfx.Buffer,
+bone_matrix_buffer: gfx.Buffer.Ref,
 
 render_objects: std.ArrayList(RenderObject),
 skeletal_render_objects: std.ArrayList(AnimatedRenderObject),
@@ -150,7 +150,7 @@ pub fn init() !Self {
     );
     errdefer camera_constant_buffer.deinit();
 
-    var instance_buffers: [3]gfx.Buffer = undefined;
+    var instance_buffers: [3]gfx.Buffer.Ref = undefined;
     for (0..3) |i| {
         instance_buffers[i] = try gfx.Buffer.init(
             @sizeOf(InstanceStruct),
@@ -213,15 +213,20 @@ fn init_shaders() !Shaders {
         eng.get().general_allocator, 
         shader_path, 
         "vs_main",
-        ([_]gfx.VertexInputLayoutEntry {
-            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
-            .{ .name = "NORMAL",                .format = .F32x3,   .per = .Vertex, .slot = 1, },
-            .{ .name = "TANGENT",               .format = .F32x3,   .per = .Vertex, .slot = 2, },
-            .{ .name = "BITANGENT",             .format = .F32x3,   .per = .Vertex, .slot = 3, },
-            .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
-            .{ .name = "BONE_IDS",              .format = .I32x4,   .per = .Vertex, .slot = 5, },
-            .{ .name = "BONE_WEIGHTS",          .format = .F32x4,   .per = .Vertex, .slot = 6, },
-        })[0..],
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+                .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+                .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+                .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+                .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
+                .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
+                .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
+            },
+        },
         .{
             .defines = &.{
                 .{ "SKELETAL_RENDERING", "1" },
@@ -251,13 +256,18 @@ fn init_shaders() !Shaders {
         eng.get().general_allocator, 
         shader_path, 
         "vs_main",
-        ([_]gfx.VertexInputLayoutEntry {
-            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
-            .{ .name = "NORMAL",                .format = .F32x3,   .per = .Vertex, .slot = 1, },
-            .{ .name = "TANGENT",               .format = .F32x3,   .per = .Vertex, .slot = 2, },
-            .{ .name = "BITANGENT",             .format = .F32x3,   .per = .Vertex, .slot = 3, },
-            .{ .name = "TEXCOORD",  .index = 0, .format = .F32x2,   .per = .Vertex, .slot = 4, },
-        })[0..],
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 56, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+                .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+                .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+                .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+                .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
+            },
+        },
         .{},
     );
     errdefer shaders.static.vertex_shader.deinit();

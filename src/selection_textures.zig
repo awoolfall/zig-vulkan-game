@@ -93,23 +93,28 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
         }
 
         pub fn get_value_at_position(self: *const Self, x: usize, y: usize, gf: *gfx.GfxState) !UnderlyingType {
-            const image = try self.texture.get();
-            if (x >= image.info.width or y >= image.info.height) {
-                return error.OutOfBounds;
-            }
-
-            gf.flush();
-            gf.cmd_copy_texture_to_texture(self.staging_texture, self.texture);
-
-            const staging_image = try self.staging_texture.get();
-            const mapped_texture = staging_image.map(.{ .read = true, }) catch |err| {
-                std.log.err("cannot map: {}", .{err});
-                return error.CannotMapStagingTexture;
-            };
-            defer mapped_texture.unmap();
-
-            const idx: usize = @intCast(y * image.info.width + x);
-            return mapped_texture.data(UnderlyingType)[idx];
+            _ = self;
+            _ = x;
+            _ = y;
+            _ = gf;
+            return error.ThisNeedsFixing;
+            // const image = try self.texture.get();
+            // if (x >= image.info.width or y >= image.info.height) {
+            //     return error.OutOfBounds;
+            // }
+            //
+            // gf.flush();
+            // gf.cmd_copy_texture_to_texture(self.staging_texture, self.texture);
+            //
+            // const staging_image = try self.staging_texture.get();
+            // const mapped_texture = staging_image.map(.{ .read = true, }) catch |err| {
+            //     std.log.err("cannot map: {}", .{err});
+            //     return error.CannotMapStagingTexture;
+            // };
+            // defer mapped_texture.unmap();
+            //
+            // const idx: usize = @intCast(y * image.info.width + x);
+            // return mapped_texture.data(UnderlyingType)[idx];
         }
     };
 }

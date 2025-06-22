@@ -163,13 +163,14 @@ pub fn init(self: *Self) !void {
     const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
     try engine().asset_manager.load_asset_pack(asset_pack_id);
     
-    const character_model_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
-
-    const character_model = engine().asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
-    std.log.info("character model animations:", .{});
-    for (character_model.animations, 0..) |*animation, i| {
-        std.log.info("{}. anim: {s}", .{i, animation.name});
-    }
+    // Print model animation names
+    //
+    // const character_model_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
+    // const character_model = engine().asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
+    // std.log.info("character model animations:", .{});
+    // for (character_model.animations, 0..) |*animation, i| {
+    //     std.log.info("{}. anim: {s}", .{i, animation.name});
+    // }
 
     // for (0..100) |_| {
     //     chara_transform.position += zm.f32x4(0.0, 0.5, 0.0, 0.0);
@@ -777,7 +778,7 @@ pub fn render_model(
 
                     const indices_info = blk: { if (p.has_indices()) {
                         break :blk StandardRenderer.RenderObject.IndexInfo {
-                            .buffer_info = .{ .buffer = &model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
+                            .buffer_info = .{ .buffer = model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
                             .index_count = p.num_indices,
                         };
                     } else {
@@ -785,16 +786,16 @@ pub fn render_model(
                     } };
 
                     var vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.tangents), .offset = @truncate(model.buffers.offsets.tangents), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bitangents), .offset = @truncate(model.buffers.offsets.bitangents), },
-                        .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
+                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
+                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
+                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.tangents), .offset = @truncate(model.buffers.offsets.tangents), },
+                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bitangents), .offset = @truncate(model.buffers.offsets.bitangents), },
+                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
                     }) catch unreachable;
                     if (bones_data) |_| {
                         vertex_buffers.appendSliceAssumeCapacity(&[_]gfx.VertexBufferInput{
-                            .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
-                            .{ .buffer = &model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
+                            .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
+                            .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
                         });
                     }
 

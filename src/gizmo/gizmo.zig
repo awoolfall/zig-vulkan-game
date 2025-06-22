@@ -18,8 +18,8 @@ const InstanceInfoStruct = extern struct {
 };
 
 const RenderBuffers = struct {
-    vertex_buffer: gf.Buffer,
-    index_buffer: gf.Buffer,
+    vertex_buffer: gf.Buffer.Ref,
+    index_buffer: gf.Buffer.Ref,
     index_count: usize,
 
     pub fn deinit(self: *RenderBuffers) void {
@@ -45,7 +45,7 @@ vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
 id_pixel_shader: gf.PixelShader,
 
-instance_data_buffer: gf.Buffer,
+instance_data_buffer: gf.Buffer.Ref,
 selection_textures: st.SelectionTextures(u32),
 
 selected_control: ?GizmoControl = null,
@@ -217,9 +217,14 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !void {
         alloc,
         shader_path,
         "vs_main",
-        (&[_]gf.VertexInputLayoutEntry {
-            .{ .name = "POS",                   .format = .F32x3,   .per = .Vertex, .slot = 0, },
-        }),
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            },
+        },
         .{},
     ); 
     errdefer new_vertex_shader.deinit();
