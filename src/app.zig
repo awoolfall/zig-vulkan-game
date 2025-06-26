@@ -117,6 +117,11 @@ terrain_renderer: TerrainSystem,
 edit_mode: EditMode,
 current_mode: enum { EDIT, PLAY } = .EDIT,
 
+command_pool: gfx.CommandPool.Ref,
+command_buffers: [4]gfx.CommandBuffer,
+
+uber_cmd_semaphore: gfx.Semaphore,
+
 pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
@@ -125,12 +130,16 @@ pub fn deinit(self: *Self) void {
     engine().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
         catch unreachable;
 
+    self.uber_cmd_semaphore.deinit();
     self.depth_textures.deinit();
     self.selection_textures.deinit();
 
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
     self.edit_mode.deinit();
+
+    for (self.command_buffers[0..]) |c| { c.deinit(); }
+    self.command_pool.deinit();
 }
 
 pub fn init(self: *Self) !void {
@@ -222,6 +231,18 @@ pub fn init(self: *Self) !void {
     );
     errdefer player_attack_particle_system.deinit();
 
+    var command_pool = try gfx.CommandPool.init(.{
+        .allow_reset_command_buffers = true,
+        .queue_family = .Graphics,
+    });
+    errdefer command_pool.deinit();
+
+    const command_buffers: [4]gfx.CommandBuffer = 
+        (command_pool.get() catch unreachable).allocate_command_buffers(.{}, 4) catch unreachable;
+
+    const uber_cmd_semaphore = try gfx.Semaphore.init(.{});
+    errdefer uber_cmd_semaphore.deinit();
+
     self.* = Self {
         .depth_textures = depth_textures,
         .selection_textures = selection_textures,
@@ -248,6 +269,11 @@ pub fn init(self: *Self) !void {
         .standard_renderer = try StandardRenderer.init(),
         .terrain_renderer = try TerrainSystem.init(engine().general_allocator),
         .edit_mode = try EditMode.init(),
+
+        .command_pool = command_pool,
+        .command_buffers = command_buffers,
+
+        .uber_cmd_semaphore = uber_cmd_semaphore,
     };
 }
 
@@ -566,79 +592,10 @@ fn update(self: *Self) !void {
     }
 
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
+    _ = camera_view_matrix;
     const camera_projection_matrix = render_camera.generate_perspective_matrix(engine().gfx.swapchain_aspect());
+    _ = camera_projection_matrix;
 
-    // Draw frame
-    const rtv = engine().gfx.get_frame_rtv();
-
-    engine().gfx.cmd_clear_render_target(rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
-    engine().gfx.cmd_clear_depth_stencil_view(self.depth_textures.dsv, 0.0, null);
-    self.selection_textures.clear(0);
-
-    self.standard_renderer.update_camera_data_buffer(render_camera);
-    self.standard_renderer.render(
-        rtv, 
-        self.selection_textures.rtv, 
-        self.depth_textures.dsv, 
-        .{
-            .selected_entity_idx = blk: {
-                if (self.current_mode != .EDIT) break :blk null;
-                break :blk if (self.edit_mode.selected_entity) |s| s.index else null;
-            },
-        }
-    );
-
-    // render terrains
-    var entity_iter = engine().entities.list.iterator();
-    while (entity_iter.next()) |entity| {
-        if (entity.app.terrain) |*terrain| {
-            self.terrain_renderer.render(
-                &self.standard_renderer.camera_data_buffer, 
-                entity.transform, 
-                terrain, 
-                rtv,
-                self.depth_textures.dsv,
-            );
-        }
-    }
-
-    // update and render particle systems
-    var entities = engine().entities.list.iterator();
-    while (entities.next()) |entity| {
-        if (entity.app.particle_system) |*ps| {
-            ps.settings.spawn_origin = entity.transform.position;
-            ps.update(&engine().time);
-            ps.draw(
-                camera_view_matrix,
-                camera_projection_matrix,
-                rtv,
-                self.depth_textures.dsv_read_only,
-            );
-        }
-
-        if (entity.app.light) |light| {
-            self.standard_renderer.push_light(light) catch unreachable;
-        }
-    }
-
-    self.player_attack_particle_system.update(&engine().time);
-    self.player_attack_particle_system.draw(
-        camera_view_matrix,
-        camera_projection_matrix,
-        rtv,
-        self.depth_textures.dsv_read_only,
-    );
-
-    // Draw Physics Debug Wireframes
-    if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.C)) {
-        engine().physics.debug_draw_bodies(
-            rtv, 
-            @intCast(engine().gfx.swapchain_size()[0]),
-            @intCast(engine().gfx.swapchain_size()[1]),
-            zm.matToArr(camera_projection_matrix),
-            zm.matToArr(camera_view_matrix),
-        );
-    }
 
     var vel_buf: [128]u8 = [_]u8{0} ** 128;
     var vel_text: []u8 = vel_buf[0..0];
@@ -701,32 +658,142 @@ fn update(self: *Self) !void {
         _ = engine().imui.pop_layout();
     }
 
-    engine().gfx.tone_mapping_filter.apply_filter(
-        engine().gfx.get_frame_hdr_view(), 
-        .{
-            .black_and_white = engine().input.get_key(KeyCode.B),
-        },
-        engine().gfx.get_framebuffer(), 
-    );
 
-    if (self.current_mode == .EDIT) {
-        self.edit_mode.render(
-            &self.standard_renderer.camera_data_buffer, 
-            engine().gfx.get_framebuffer(), 
-            self.depth_textures.dsv
-        ) catch |err| {
-            std.log.err("Edit mode render failed: {}", .{err});
-        };
-    }
-
-    engine().debug.render(&self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer());
-
-    engine().imui.render_imui(engine().gfx.get_framebuffer());
-
-    engine().gfx.present() catch |err| {
-        std.log.err("unable to present frame: {}", .{err});
+    // Draw frame
+    const image_available_semaphore = engine().gfx.begin_frame() catch |err| {
+        std.log.warn("Unable to begin frame: {}", .{err});
         return;
     };
+    
+    // engine().gfx.cmd_clear_render_target(rtv, zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)));
+    // engine().gfx.cmd_clear_depth_stencil_view(self.depth_textures.dsv, 0.0, null);
+    // self.selection_textures.clear(0);
+    //
+    // self.standard_renderer.update_camera_data_buffer(render_camera);
+    // self.standard_renderer.render(
+    //     rtv, 
+    //     self.selection_textures.rtv, 
+    //     self.depth_textures.dsv, 
+    //     .{
+    //         .selected_entity_idx = blk: {
+    //             if (self.current_mode != .EDIT) break :blk null;
+    //             break :blk if (self.edit_mode.selected_entity) |s| s.index else null;
+    //         },
+    //     }
+    // );
+    //
+    // // render terrains
+    // var entity_iter = engine().entities.list.iterator();
+    // while (entity_iter.next()) |entity| {
+    //     if (entity.app.terrain) |*terrain| {
+    //         self.terrain_renderer.render(
+    //             &self.standard_renderer.camera_data_buffer, 
+    //             entity.transform, 
+    //             terrain, 
+    //             rtv,
+    //             self.depth_textures.dsv,
+    //         );
+    //     }
+    // }
+    //
+    // // update and render particle systems
+    // var entities = engine().entities.list.iterator();
+    // while (entities.next()) |entity| {
+    //     if (entity.app.particle_system) |*ps| {
+    //         ps.settings.spawn_origin = entity.transform.position;
+    //         ps.update(&engine().time);
+    //         ps.draw(
+    //             camera_view_matrix,
+    //             camera_projection_matrix,
+    //             rtv,
+    //             self.depth_textures.dsv_read_only,
+    //         );
+    //     }
+    //
+    //     if (entity.app.light) |light| {
+    //         self.standard_renderer.push_light(light) catch unreachable;
+    //     }
+    // }
+    //
+    // self.player_attack_particle_system.update(&engine().time);
+    // self.player_attack_particle_system.draw(
+    //     camera_view_matrix,
+    //     camera_projection_matrix,
+    //     rtv,
+    //     self.depth_textures.dsv_read_only,
+    // );
+    //
+    // // Draw Physics Debug Wireframes
+    // if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.C)) {
+    //     engine().physics.debug_draw_bodies(
+    //         rtv, 
+    //         @intCast(engine().gfx.swapchain_size()[0]),
+    //         @intCast(engine().gfx.swapchain_size()[1]),
+    //         zm.matToArr(camera_projection_matrix),
+    //         zm.matToArr(camera_view_matrix),
+    //     );
+    // }
+    //
+    // engine().gfx.tone_mapping_filter.apply_filter(
+    //     engine().gfx.get_frame_hdr_view(), 
+    //     .{
+    //         .black_and_white = engine().input.get_key(KeyCode.B),
+    //     },
+    //     engine().gfx.get_framebuffer(), 
+    // );
+    //
+    // if (self.current_mode == .EDIT) {
+    //     self.edit_mode.render(
+    //         &self.standard_renderer.camera_data_buffer, 
+    //         engine().gfx.get_framebuffer(), 
+    //         self.depth_textures.dsv
+    //     ) catch |err| {
+    //         std.log.err("Edit mode render failed: {}", .{err});
+    //     };
+    // }
+    //
+    // engine().debug.render(&self.standard_renderer.camera_data_buffer, engine().gfx.get_framebuffer());
+    //
+
+    const frame_idx = eng.get().time.frame_number % 4;
+    var cmd = &self.command_buffers[@intCast(frame_idx)];
+
+    cmd.reset() catch |err| {
+        std.log.warn("Unable to reset command buffer: {}", .{err});
+        return;
+    };
+    cmd.cmd_begin(.{ .one_time_submit = true, }) catch |err| {
+        std.log.warn("Unable to begin command buffer: {}", .{err});
+        return;
+    };
+
+    engine().imui.render_imui(cmd) catch |err| {
+        std.log.warn("Unable to render imui: {}", .{err});
+    };
+
+    cmd.cmd_end() catch |err| {
+        std.log.warn("Failed to end command buffer: {}", .{err});
+        return;
+    };
+
+    engine().gfx.submit_command_buffer(.{
+        .command_buffers = &.{ cmd },
+        .wait_semaphores = &.{ .{
+            .semaphore = &image_available_semaphore,
+            .dst_stage = gfx.PipelineStageFlags{ .color_attachment_output = true, },
+        } },
+        .signal_semaphores = &.{ &self.uber_cmd_semaphore },
+    }) catch |err| {
+        std.log.warn("Unable to submit command buffer: {}", .{err});
+        return;
+    };
+
+    engine().gfx.present(&.{ &self.uber_cmd_semaphore }) catch |err| {
+        std.log.err("Unable to present frame: {}", .{err});
+        return;
+    };
+
+    engine().gfx.flush();
 }
 
 pub fn render_model(

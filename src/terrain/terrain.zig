@@ -82,6 +82,7 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
 
             .usage_flags = .{ .ShaderResource = true, },
             .access_flags = .{ .CpuWrite = true, },
+            .dst_layout = .ShaderReadOnlyOptimal,
         },
         std.mem.sliceAsBytes(heightmap_data),
     );

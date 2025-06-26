@@ -41,7 +41,8 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
                     .format = Self.TextureFormat,
 
                     .usage_flags = .{ .RenderTarget = true, .TransferSrc = true, },
-                    .access_flags = .{ .GpuWrite = true, }
+                    .access_flags = .{ .GpuWrite = true, },
+                    .dst_layout = .ColorAttachmentOptimal,
                 },
                 null,
             );
@@ -57,6 +58,7 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
 
                     .usage_flags = .{ .TransferDst = true, },
                     .access_flags = .{ .CpuRead = true, .GpuWrite = true, },
+                    .dst_layout = .TransferDstOptimal,
                 },
                 null,
             );

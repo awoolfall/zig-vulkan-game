@@ -32,6 +32,7 @@ fn recreate(self: *Self, first_time: bool) !void {
 
             .usage_flags = .{ .DepthStencil = true, },
             .access_flags = .{ .GpuWrite = true, },
+            .dst_layout = .DepthStencilAttachmentOptimal,
         },
         null,
     );
