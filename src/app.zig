@@ -767,6 +767,10 @@ fn update(self: *Self) !void {
         return;
     };
 
+    self.standard_renderer.render_cmd(cmd) catch |err| {
+        std.log.warn("Unable to render standard renderer: {}", .{err});
+    };
+
     engine().imui.render_imui(cmd) catch |err| {
         std.log.warn("Unable to render imui: {}", .{err});
     };
@@ -845,7 +849,7 @@ pub fn render_model(
 
                     const indices_info = blk: { if (p.has_indices()) {
                         break :blk StandardRenderer.RenderObject.IndexInfo {
-                            .buffer_info = .{ .buffer = model.buffers.indices, .stride = @truncate(@sizeOf(u32)), .offset = @truncate(p.indices_offset), },
+                            .buffer_info = .{ .buffer = model.buffers.indices, .offset = @truncate(p.indices_offset), },
                             .index_count = p.num_indices,
                         };
                     } else {
@@ -853,16 +857,16 @@ pub fn render_model(
                     } };
 
                     var vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
-                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.positions), .offset = @truncate(model.buffers.offsets.positions), },
-                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.normals), .offset = @truncate(model.buffers.offsets.normals), },
-                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.tangents), .offset = @truncate(model.buffers.offsets.tangents), },
-                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bitangents), .offset = @truncate(model.buffers.offsets.bitangents), },
-                        .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.texcoords), .offset = @truncate(model.buffers.offsets.texcoords), },
+                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.positions), },
+                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.normals), },
+                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.tangents), },
+                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bitangents), },
+                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.texcoords), },
                     }) catch unreachable;
                     if (bones_data) |_| {
                         vertex_buffers.appendSliceAssumeCapacity(&[_]gfx.VertexBufferInput{
-                            .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_ids), .offset = @truncate(model.buffers.offsets.bone_ids), },
-                            .{ .buffer = model.buffers.vertices, .stride = @truncate(model.buffers.strides.bone_weights), .offset = @truncate(model.buffers.offsets.bone_weights), },
+                            .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bone_ids), },
+                            .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bone_weights), },
                         });
                     }
 
