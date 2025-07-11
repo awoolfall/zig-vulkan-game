@@ -849,26 +849,16 @@ pub fn render_model(
 
                     const indices_info = blk: { if (p.has_indices()) {
                         break :blk StandardRenderer.RenderObject.IndexInfo {
-                            .buffer_info = .{ .buffer = model.buffers.indices, .offset = @truncate(p.indices_offset), },
+                            .buffer_info = .{ .buffer = model.buffers.indices, .offset = @intCast(p.indices_offset * @sizeOf(u32)), },
                             .index_count = p.num_indices,
                         };
                     } else {
                         break :blk null;
                     } };
 
-                    var vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
+                    const vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
                         .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.positions), },
-                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.normals), },
-                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.tangents), },
-                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bitangents), },
-                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.texcoords), },
                     }) catch unreachable;
-                    if (bones_data) |_| {
-                        vertex_buffers.appendSliceAssumeCapacity(&[_]gfx.VertexBufferInput{
-                            .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bone_ids), },
-                            .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.bone_weights), },
-                        });
-                    }
 
                     const render_object = StandardRenderer.RenderObject {
                         .entity_id = entity_id,

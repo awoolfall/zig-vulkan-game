@@ -422,7 +422,7 @@ pub fn init() !Self {
         .vertex_shader = &shaders.static.vertex_shader,
         .pixel_shader = &shaders.static.pixel_shader,
         .attachments = attachments,
-        .cull_mode = .CullNone, // TODO
+        .cull_mode = .CullBack,
         .descriptor_set_layouts = &.{
             camera_data_descriptor_layout,
             instance_data_layout,
@@ -871,6 +871,7 @@ pub fn render_cmd(
 
             cmd.cmd_draw_indexed(.{
                 .index_count = @intCast(ib.index_count),
+                .vertex_offset = @intCast(ro.pos_offset),
             });
         } else {
             cmd.cmd_draw(.{
