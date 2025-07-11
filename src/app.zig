@@ -767,7 +767,7 @@ fn update(self: *Self) !void {
         return;
     };
 
-    self.standard_renderer.render_cmd(cmd) catch |err| {
+    self.standard_renderer.render_cmd(render_camera, cmd) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
 

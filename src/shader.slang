@@ -12,8 +12,8 @@
 
 struct CameraData
 {
-    row_major float4x4 projection;
-    row_major float4x4 view;
+    float4x4 projection;
+    float4x4 view;
     float4 position;
     float time;
 };
@@ -23,7 +23,7 @@ ConstantBuffer<CameraData> camera_data : register(b0);
 
 struct InstanceData
 {
-    row_major float4x4 model_matrix;
+    float4x4 model_matrix;
     uint entity_id;
     uint flags;
 };
@@ -58,7 +58,7 @@ ConstantBuffer<LightsData[MAX_LIGHTS_DATA_PER_BUFFER]> lights_data : register(b2
 #ifdef SKELETAL_RENDERING
 struct BoneData
 {
-    row_major float4x4 bone_matricies[1024];
+    float4x4 bone_matricies[1024];
 };
 
 [[vk::binding(0, 4)]]
