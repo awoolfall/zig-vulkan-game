@@ -140,7 +140,9 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
 struct ps_out
 {
     float4 colour : SV_TARGET0;
+#ifdef RENDER_ENTITY_ID_BUFFER
     uint entity_id : SV_TARGET1;
+#endif
 };
 
 [shader("pixel")]
@@ -164,8 +166,6 @@ ps_out ps_main(vs_out input)
     float4 diffuse_colour = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
 
     output.colour = float4(diffuse_colour.rgb * diffuse, 1.0);
-
-    output.entity_id = data.entity_id;
 
     if ((data.flags & IS_SELECTED_BIT) != 0) {
         output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(camera_data.time * 5.0 + (-input.world_pos.y) * 2.0)));
@@ -227,6 +227,10 @@ ps_out ps_main(vs_out input)
     //output.colour = float4(fresnel, fresnel, fresnel, 1.0);
     //output.colour = float4(input.view_dir, 1.0);
     //output.colour = dot(normalize(input.view_dir), float3(0.0, 0.0, 1.0));
+
+#ifdef RENDER_ENTITY_ID_BUFFER
+    output.entity_id = data.entity_id;
+#endif
 
     return output;
 }

@@ -15,19 +15,19 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
         };
 
         texture: gfx.Image.Ref,
-        rtv: gfx.ImageView.Ref,
+        view: gfx.ImageView.Ref,
         staging_texture: gfx.Image.Ref,
 
         pub fn deinit(self: *Self) void {
+            self.view.deinit();
             self.texture.deinit();
-            self.rtv.deinit();
             self.staging_texture.deinit();
         }
 
         pub fn init() !Self {
             var self = Self {
                 .texture = undefined,
-                .rtv = undefined,
+                .view = undefined,
                 .staging_texture = undefined,
             };
             try self.recreate(true);
@@ -69,7 +69,7 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             }
             self.* = Self {
                 .texture = texture,
-                .rtv = rtv,
+                .view = rtv,
                 .staging_texture = staging_texture,
             };
         }

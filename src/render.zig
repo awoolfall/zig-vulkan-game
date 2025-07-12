@@ -158,8 +158,12 @@ skeletal_render_objects: std.ArrayList(AnimatedRenderObject),
 render_bones: std.ArrayList(zm.Mat),
 lights: std.ArrayList(Light),
 
+selection_textures: SelectionTextures.SelectionTextures(u32),
+
 
 pub fn deinit(self: *Self) void {
+    self.selection_textures.deinit();
+
     self.shaders.deinit();
     self.shader_watcher.deinit();
 
@@ -201,6 +205,9 @@ pub fn init() !Self {
     const alloc = eng.get().general_allocator;
     
     const fif = gfx.GfxState.get().frames_in_flight();
+
+    var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
+    errdefer selection_textures.deinit();
 
     const shaders = try init_shaders();
 
@@ -363,6 +370,22 @@ pub fn init() !Self {
             .blend_type = .Simple,
         },
         gfx.AttachmentInfo {
+            .name = "entity_clear",
+            .format = gfx.ImageFormat.R32_Uint,
+            .load_op = .Clear,
+            .clear_value = zm.f32x4s(0.0),
+            .initial_layout = .Undefined,
+            .final_layout = .ColorAttachmentOptimal,
+            .blend_type = .None,
+        },
+        gfx.AttachmentInfo {
+            .name = "entity",
+            .format = gfx.ImageFormat.R32_Uint,
+            .initial_layout = .ColorAttachmentOptimal,
+            .final_layout = .ColorAttachmentOptimal,
+            .blend_type = .None,
+        },
+        gfx.AttachmentInfo {
             .name = "depth",
             .format = gfx.GfxState.depth_format,
             .load_op = .Clear,
@@ -377,12 +400,18 @@ pub fn init() !Self {
         .subpasses = &[_]gfx.SubpassInfo {
             // opaque
             .{
-                .attachments = &.{ "colour_opaque" },
+                .attachments = &.{ 
+                    "colour_opaque",
+                    "entity_clear",
+                },
                 .depth_attachment = "depth",
             },
             // transparent
             .{
-                .attachments = &.{ "colour_blend" },
+                .attachments = &.{
+                    "colour_blend",
+                    "entity",
+                },
                 .depth_attachment = "depth",
             },
         },
@@ -412,6 +441,8 @@ pub fn init() !Self {
         .attachments = &.{
             .SwapchainLDR,
             .SwapchainLDR,
+            .{ .View = selection_textures.view },
+            .{ .View = selection_textures.view },
             .SwapchainDepth,
         },
     });
@@ -529,6 +560,8 @@ pub fn init() !Self {
         .skeletal_render_objects = std.ArrayList(AnimatedRenderObject).init(alloc),
         .render_bones = std.ArrayList(zm.Mat).init(alloc),
         .lights = std.ArrayList(Light).init(alloc),
+
+        .selection_textures = selection_textures,
     };
 }
 
@@ -567,6 +600,7 @@ fn init_shaders() !Shaders {
         .{
             .defines = &.{
                 .{ "SKELETAL_RENDERING", "1" },
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
             },
         },
     );
@@ -579,6 +613,7 @@ fn init_shaders() !Shaders {
         .{
             .defines = &.{
                 .{ "SKELETAL_RENDERING", "1" },
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
             },
         },
     );
@@ -607,7 +642,11 @@ fn init_shaders() !Shaders {
                 // .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
             },
         },
-        .{},
+        .{
+            .defines = &.{
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+            },
+        },
     );
     errdefer shaders.static.vertex_shader.deinit();
 
@@ -615,7 +654,11 @@ fn init_shaders() !Shaders {
         eng.get().general_allocator, 
         shader_path,
         "ps_main",
-        .{},
+        .{
+            .defines = &.{
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+            },
+        },
     );
     errdefer shaders.static.pixel_shader.deinit();
 
