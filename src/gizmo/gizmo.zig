@@ -528,7 +528,7 @@ pub fn update(self: *Self, transform: *Transform) bool {
     const coord_space = get_coord_space();
     if (eng.get().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
-        if (self.selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]), &eng.get().gfx)) |s| {
+        if (self.selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]))) |s| {
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
             switch (self.selected_control.?) {
                 .TranslateX, .TranslateY, .TranslateZ => {

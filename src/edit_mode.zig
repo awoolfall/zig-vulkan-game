@@ -66,7 +66,7 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
     self.loaded_scene_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
 }
 
-pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
+pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
     self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
 
     if (!eng.get().imui.has_focus()) {
@@ -109,7 +109,7 @@ pub fn update(self: *Self, selection_textures: *const st.SelectionTextures(u32),
         // Select entity
         if (interaction_available and eng.get().input.get_key_down(KeyCode.MouseLeft)) {
             interaction_available = false;
-            const selection_entity_id = selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]), &eng.get().gfx) catch |err| {
+            const selection_entity_id = selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1])) catch |err| {
                 std.log.err("cannot get value at position: {}", .{err});
                 return;
             };

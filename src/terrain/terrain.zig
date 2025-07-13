@@ -251,7 +251,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
         const heightfield_size_f32 = @as(f32, @floatFromInt(HeightFieldSize));
 
         const terrain_uv = terrain_system.selection_textures
-            .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1]), &eng.get().gfx) catch {
+            .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1])) catch {
                 return false;
             };
         if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0) {

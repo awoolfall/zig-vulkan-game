@@ -713,7 +713,10 @@ pub fn get_current_camera_descriptor_set(self: *const Self) gfx.DescriptorSet.Re
 
 pub fn render_cmd(
     self: *Self,
-    camera: *const cm.Camera,
+    data: struct {
+        camera: *const cm.Camera,
+        selected_entity_idx: ?usize,
+    },
     cmd: *gfx.CommandBuffer,
 ) !void {
     //const cfi = gfx.GfxState.get().current_frame_index();
@@ -734,7 +737,7 @@ pub fn render_cmd(
 
     cmd.cmd_bind_graphics_pipeline(self.static_pipeline.solid);
 
-    self.update_camera_data_buffer(camera);
+    self.update_camera_data_buffer(data.camera);
     cmd.cmd_bind_descriptor_sets(.{
         .graphics_pipeline = self.static_pipeline.solid,
         .first_binding = 0,
@@ -856,7 +859,7 @@ pub fn render_cmd(
             .model_matrix = ro.transform,
             .entity_id = entity_id,
             .flags = .{
-                .is_selected = false, // TODO // if (data.selected_entity_idx) |s| (entity_id == s) else false,
+                .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
                 .unlit = ro.material.unlit,
             },
             .bone_start_idx = 0,

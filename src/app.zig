@@ -26,8 +26,6 @@ const sr = eng.serialize;
 
 const Terrain = @import("terrain/terrain.zig");
 const TerrainSystem = @import("terrain/terrain_system.zig");
-const st = @import("selection_textures.zig");
-const DepthTextures = @import("depth_textures.zig");
 const StandardRenderer = @import("render.zig");
 const EditMode = @import("edit_mode.zig");
 
@@ -99,9 +97,6 @@ pub const EntityData = struct {
     };
 };
 
-depth_textures: DepthTextures,
-selection_textures: st.SelectionTextures(u32),
-
 camera: cm.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
@@ -131,8 +126,6 @@ pub fn deinit(self: *Self) void {
         catch unreachable;
 
     self.uber_cmd_semaphore.deinit();
-    self.depth_textures.deinit();
-    self.selection_textures.deinit();
 
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
@@ -144,12 +137,6 @@ pub fn deinit(self: *Self) void {
 
 pub fn init(self: *Self) !void {
     std.log.info("App init!", .{});
-    var depth_textures = try DepthTextures.init();
-    errdefer depth_textures.deinit();
-
-    var selection_textures = try st.SelectionTextures(u32).init();
-    errdefer selection_textures.deinit();
-
     var asset_pack = try assets.AssetPack.init(engine().general_allocator, "default");
     errdefer asset_pack.deinit();
 
@@ -244,9 +231,6 @@ pub fn init(self: *Self) !void {
     errdefer uber_cmd_semaphore.deinit();
 
     self.* = Self {
-        .depth_textures = depth_textures,
-        .selection_textures = selection_textures,
-
         .camera = cm.Camera {
             .field_of_view_y = cm.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
             .near_field = 0.3,
@@ -300,7 +284,7 @@ fn update(self: *Self) !void {
     var render_camera: *cm.Camera = undefined;
     switch (self.current_mode) {
         .EDIT => {
-            self.edit_mode.update(&self.selection_textures, &self.terrain_renderer) catch |err| {
+            self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer) catch |err| {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
             render_camera = &self.edit_mode.editor_camera;
@@ -767,7 +751,13 @@ fn update(self: *Self) !void {
         return;
     };
 
-    self.standard_renderer.render_cmd(render_camera, cmd) catch |err| {
+    self.standard_renderer.render_cmd(
+        .{
+            .camera = render_camera,
+            .selected_entity_idx = if (self.edit_mode.selected_entity) |i| i.index else null,
+        },
+        cmd
+    ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
 
@@ -894,12 +884,6 @@ pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void
         .EVENTS_CLEARED => { self.update() catch |err| {
             std.log.err("update failed: {}", .{err});
         }; },
-        .RESIZED => |new_size| {
-            if (new_size.width > 0 and new_size.height > 0) {
-                self.selection_textures.on_resize(&engine().gfx);
-                self.depth_textures.on_resize(&engine().gfx);
-            }
-        },
         else => {},
     }
 }
