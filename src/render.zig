@@ -125,6 +125,7 @@ const StandardRenderPipeline = struct {
 
 const MAX_OBJECTS_PER_INSTANCE_BUFFER = 128;
 const MAX_OBJECTS_PER_LIGHTS_BUFFER = 128;
+const MAX_BONES_PER_BUFFER = 1024;
 
 shaders: Shaders,
 shader_watcher: eng.assets.FileWatcher,
@@ -146,6 +147,10 @@ lights_data_descriptor_pool: gfx.DescriptorPool.Ref,
 textures_data_layout: gfx.DescriptorLayout.Ref,
 textures_data_descriptor_pool: gfx.DescriptorPool.Ref,
 default_textures_set: gfx.DescriptorSet.Ref,
+texture_data_sets: std.ArrayList(?gfx.DescriptorSet.Ref),
+
+bones_data_layout: gfx.DescriptorLayout.Ref,
+bones_data_descriptor_pool: gfx.DescriptorPool.Ref,
 
 static_pipeline: StandardRenderPipeline,
 skeletal_pipeline: StandardRenderPipeline,
@@ -185,9 +190,19 @@ pub fn deinit(self: *Self) void {
     self.lights_data_descriptor_pool.deinit();
     self.lights_data_layout.deinit();
 
+    for (self.texture_data_sets.items) |m_s| {
+        if (m_s) |s| {
+            s.deinit();
+        }
+    }
+    self.texture_data_sets.deinit();
+
     self.default_textures_set.deinit();
     self.textures_data_descriptor_pool.deinit();
     self.textures_data_layout.deinit();
+
+    self.bones_data_descriptor_pool.deinit();
+    self.bones_data_layout.deinit();
 
     self.static_pipeline.deinit();
     self.skeletal_pipeline.deinit();
@@ -352,6 +367,23 @@ pub fn init() !Self {
         },
     });
 
+    const bones_data_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .binding = 0,
+                .shader_stages = .{ .Vertex = true, },
+                .binding_type = .UniformBuffer,
+            },
+        },
+    });
+    errdefer bones_data_layout.deinit();
+
+    const bones_data_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .max_sets = 512,
+        .strategy = .{ .Layout = bones_data_layout, },
+    });
+    errdefer bones_data_descriptor_pool.deinit();
+
     const attachments = &[_]gfx.AttachmentInfo {
         gfx.AttachmentInfo {
             .name = "colour_opaque",
@@ -489,7 +521,7 @@ pub fn init() !Self {
         instance_data_layout,
         lights_data_layout,
         textures_data_layout,
-        // TODO bone data layout
+        bones_data_layout,
     };
 
     var skeletal_solid_pipeline_info = solid_pipeline_info;
@@ -538,6 +570,10 @@ pub fn init() !Self {
         .textures_data_layout = textures_data_layout,
         .textures_data_descriptor_pool = textures_descriptor_pool,
         .default_textures_set = default_textures_set,
+        .texture_data_sets = std.ArrayList(?gfx.DescriptorSet.Ref).init(alloc),
+
+        .bones_data_layout = bones_data_layout,
+        .bones_data_descriptor_pool = bones_data_descriptor_pool,
 
         .camera_data_buffers = camera_data_buffers,
         .instance_buffers = std.ArrayList(BufferData).init(alloc),
@@ -711,6 +747,108 @@ pub fn get_current_camera_descriptor_set(self: *const Self) gfx.DescriptorSet.Re
     return self.camera_data_buffers.items[cfi].descriptor_set;
 }
 
+fn append_new_instance_buffer(
+    self: *Self,
+) !void {
+    const buffer = try gfx.Buffer.init(
+        @sizeOf(InstanceStruct) * Self.MAX_OBJECTS_PER_INSTANCE_BUFFER,
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer buffer.deinit();
+
+    const descriptor_set = try (self.instance_data_descriptor_pool.get() catch unreachable).allocate_set(.{
+        .layout = self.instance_data_layout,
+    });
+    errdefer descriptor_set.deinit();
+
+    try (descriptor_set.get() catch unreachable).update(.{
+        .writes = &.{
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .UniformBuffer = .{
+                    .buffer = buffer,
+                } },
+            },
+            },
+        });
+
+    const buffer_data = BufferData {
+        .buffer = buffer,
+        .descriptor_set = descriptor_set,
+    };
+
+    try self.instance_buffers.append(buffer_data);
+}
+
+fn append_new_lights_buffer(
+    self: *Self,
+) !void {
+    const buffer = try gfx.Buffer.init(
+        @sizeOf(LightsStruct) * Self.MAX_OBJECTS_PER_LIGHTS_BUFFER,
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer buffer.deinit();
+
+    const descriptor_set = try (self.lights_data_descriptor_pool.get() catch unreachable).allocate_set(.{
+        .layout = self.lights_data_layout,
+    });
+    errdefer descriptor_set.deinit();
+
+    try (descriptor_set.get() catch unreachable).update(.{
+        .writes = &.{
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .UniformBuffer = .{
+                    .buffer = buffer,
+                } },
+            },
+            },
+        });
+
+    const buffer_data = BufferData {
+        .buffer = buffer,
+        .descriptor_set = descriptor_set,
+    };
+
+    try self.lights_buffers.append(buffer_data);
+}
+
+fn append_new_bones_buffer(
+    self: *Self,
+) !void {
+    const buffer = try gfx.Buffer.init(
+        @sizeOf(zm.Mat) * Self.MAX_BONES_PER_BUFFER,
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer buffer.deinit();
+
+    const descriptor_set = try (self.bones_data_descriptor_pool.get() catch unreachable).allocate_set(.{
+        .layout = self.bones_data_layout,
+    });
+    errdefer descriptor_set.deinit();
+
+    try (descriptor_set.get() catch unreachable).update(.{
+        .writes = &.{
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .UniformBuffer = .{
+                    .buffer = buffer,
+                } },
+            },
+            },
+        });
+
+    const buffer_data = BufferData {
+        .buffer = buffer,
+        .descriptor_set = descriptor_set,
+    };
+
+    try self.bone_buffers.append(buffer_data);
+}
+
 pub fn render_cmd(
     self: *Self,
     data: struct {
@@ -754,46 +892,25 @@ pub fn render_cmd(
     var mapped_lights_data: gfx.Buffer.MappedBuffer = undefined;
     defer if (current_lights_buffer_index >= 0) { mapped_lights_data.unmap(); };
 
-    for (self.render_objects.items, 0..) |ro, idx| {
+    var current_bones_buffer_index: isize = -1;
+    var mapped_bones_data: gfx.Buffer.MappedBuffer = undefined;
+    defer if (current_bones_buffer_index >= 0) { mapped_bones_data.unmap(); };
+
+    var idx: usize = 0;
+
+    for (self.render_objects.items) |ro| {
         if (idx >= Self.MAX_OBJECTS_PER_INSTANCE_BUFFER * (current_instance_buffer_index + 1)) {
             current_instance_buffer_index += 1;
 
             if (self.instance_buffers.items.len == current_instance_buffer_index) {
-                const buffer = try gfx.Buffer.init(
-                    @sizeOf(InstanceStruct) * Self.MAX_OBJECTS_PER_INSTANCE_BUFFER,
-                    .{ .ConstantBuffer = true, },
-                    .{ .CpuWrite = true, },
-                );
-                errdefer buffer.deinit();
-
-                const descriptor_set = try (self.instance_data_descriptor_pool.get() catch unreachable).allocate_set(.{
-                    .layout = self.instance_data_layout,
-                });
-                errdefer descriptor_set.deinit();
-
-                try (descriptor_set.get() catch unreachable).update(.{
-                    .writes = &.{
-                        gfx.DescriptorSetUpdateWriteInfo {
-                            .binding = 0,
-                            .data = .{ .UniformBuffer = .{
-                                .buffer = buffer,
-                            } },
-                        },
-                    },
-                });
-
-                const buffer_data = BufferData {
-                    .buffer = buffer,
-                    .descriptor_set = descriptor_set,
-                };
-
-                try self.instance_buffers.append(buffer_data);
+                try self.append_new_instance_buffer();
             }
 
             if (current_instance_buffer_index != 0) {
                 mapped_instance_data.unmap();
             }
-            mapped_instance_data = try (self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable).map(.{ .write = true, });
+            const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = true, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.static_pipeline.solid,
@@ -808,41 +925,14 @@ pub fn render_cmd(
             current_lights_buffer_index += 1;
 
             if (self.lights_buffers.items.len == current_lights_buffer_index) {
-                const buffer = try gfx.Buffer.init(
-                    @sizeOf(LightsStruct) * Self.MAX_OBJECTS_PER_LIGHTS_BUFFER,
-                    .{ .ConstantBuffer = true, },
-                    .{ .CpuWrite = true, },
-                );
-                errdefer buffer.deinit();
-
-                const descriptor_set = try (self.lights_data_descriptor_pool.get() catch unreachable).allocate_set(.{
-                    .layout = self.lights_data_layout,
-                });
-                errdefer descriptor_set.deinit();
-
-                try (descriptor_set.get() catch unreachable).update(.{
-                    .writes = &.{
-                        gfx.DescriptorSetUpdateWriteInfo {
-                            .binding = 0,
-                            .data = .{ .UniformBuffer = .{
-                                .buffer = buffer,
-                            } },
-                        },
-                    },
-                });
-
-                const buffer_data = BufferData {
-                    .buffer = buffer,
-                    .descriptor_set = descriptor_set,
-                };
-
-                try self.lights_buffers.append(buffer_data);
+                try self.append_new_lights_buffer();
             }
 
             if (current_lights_buffer_index != 0) {
                 mapped_lights_data.unmap();
             }
-            mapped_lights_data = try (self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable).map(.{ .write = true, });
+            const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = true, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.static_pipeline.solid,
@@ -881,14 +971,51 @@ pub fn render_cmd(
             }
         }
 
-        // TODO textures
-        cmd.cmd_bind_descriptor_sets(.{
-            .graphics_pipeline = self.static_pipeline.solid,
-            .first_binding = 3,
-            .descriptor_sets = &.{
-                self.default_textures_set
+        // textures
+        if (idx == self.texture_data_sets.items.len) {
+            try self.texture_data_sets.append(null);
+        }
+
+        if (ro.material.diffuse_map) |diffuse_map| {
+            const texture_data_set = &self.texture_data_sets.items[idx];
+
+            if (texture_data_set.* == null) {
+                const textures_data_pool = self.textures_data_descriptor_pool.get() catch unreachable;
+
+                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout, });
             }
-        });
+
+            const set = texture_data_set.*.?.get() catch unreachable;
+
+            try set.update(.{
+                .writes = &.{
+                    gfx.DescriptorSetUpdateWriteInfo {
+                        .binding = 0,
+                        .data = .{ .ImageView = diffuse_map.map, },
+                    },
+                    gfx.DescriptorSetUpdateWriteInfo {
+                        .binding = 1,
+                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler, },
+                    },
+                },
+            });
+
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.static_pipeline.solid,
+                .first_binding = 3,
+                .descriptor_sets = &.{
+                    texture_data_set.*.?
+                }
+            });
+        } else {
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.static_pipeline.solid,
+                .first_binding = 3,
+                .descriptor_sets = &.{
+                    self.default_textures_set
+                }
+            });
+        }
 
         cmd.cmd_bind_vertex_buffers(.{
             .first_binding = 0,
@@ -924,6 +1051,214 @@ pub fn render_cmd(
                 .vertex_count = @intCast(ro.vertex_count),
             });
         }
+
+        idx += 1;
+    }
+
+    // render animated objects
+
+    cmd.cmd_bind_graphics_pipeline(self.skeletal_pipeline.solid);
+
+    self.update_camera_data_buffer(data.camera);
+    cmd.cmd_bind_descriptor_sets(.{
+        .graphics_pipeline = self.skeletal_pipeline.solid,
+        .first_binding = 0,
+        .descriptor_sets = &.{
+            self.get_current_camera_descriptor_set(),
+        }
+    });
+    
+    var start_bone_idx: isize = -Self.MAX_BONES_PER_BUFFER;
+
+    for (self.skeletal_render_objects.items) |sro| {
+        const ro = sro.standard;
+
+        if (idx >= Self.MAX_OBJECTS_PER_INSTANCE_BUFFER * (current_instance_buffer_index + 1)) {
+            current_instance_buffer_index += 1;
+
+            if (self.instance_buffers.items.len == current_instance_buffer_index) {
+                try self.append_new_instance_buffer();
+            }
+
+            if (current_instance_buffer_index != 0) {
+                mapped_instance_data.unmap();
+            }
+            const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = true, });
+
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .first_binding = 1,
+                .descriptor_sets = &.{
+                    self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
+                },
+            });
+        }
+
+        // Set instance data
+        const entity_id = if (ro.entity_id) |e| e else 0;
+        mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct {
+            .model_matrix = ro.transform,
+            .entity_id = entity_id,
+            .flags = .{
+                .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
+                .unlit = ro.material.unlit,
+            },
+            .bone_start_idx = 0,
+        };
+
+        if (idx >= Self.MAX_OBJECTS_PER_LIGHTS_BUFFER * (current_lights_buffer_index + 1)) {
+            current_lights_buffer_index += 1;
+
+            if (self.lights_buffers.items.len == current_lights_buffer_index) {
+                try self.append_new_lights_buffer();
+            }
+
+            if (current_lights_buffer_index != 0) {
+                mapped_lights_data.unmap();
+            }
+            const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = true, });
+
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .first_binding = 2,
+                .descriptor_sets = &.{
+                    self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
+                },
+            });
+        }
+
+        // Set lights data
+        {
+            const entity_position = ro.transform[3];
+            std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
+
+            const mapped_lights = &mapped_lights_data.data_array(LightsStruct, Self.MAX_OBJECTS_PER_LIGHTS_BUFFER)[idx % Self.MAX_OBJECTS_PER_LIGHTS_BUFFER];
+
+            var i: usize = 0;
+            while (i < self.lights.items.len and i < MAX_LIGHTS) : (i += 1) {
+                mapped_lights.lights[i] = self.lights.items[i];
+            }
+            while (i < MAX_LIGHTS) : (i += 1) {
+                mapped_lights.lights[i] = .{};
+            }
+        }
+
+        // textures
+        if (idx == self.texture_data_sets.items.len) {
+            try self.texture_data_sets.append(null);
+        }
+
+        if (ro.material.diffuse_map) |diffuse_map| {
+            const texture_data_set = &self.texture_data_sets.items[idx];
+
+            if (texture_data_set.* == null) {
+                const textures_data_pool = self.textures_data_descriptor_pool.get() catch unreachable;
+
+                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout, });
+            }
+
+            const set = texture_data_set.*.?.get() catch unreachable;
+
+            try set.update(.{
+                .writes = &.{
+                    gfx.DescriptorSetUpdateWriteInfo {
+                        .binding = 0,
+                        .data = .{ .ImageView = diffuse_map.map, },
+                    },
+                    gfx.DescriptorSetUpdateWriteInfo {
+                        .binding = 1,
+                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler, },
+                    },
+                },
+            });
+
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .first_binding = 3,
+                .descriptor_sets = &.{
+                    texture_data_set.*.?
+                }
+            });
+        } else {
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .first_binding = 3,
+                .descriptor_sets = &.{
+                    self.default_textures_set
+                }
+            });
+        }
+        
+        // bones
+        // if bones are not within the uploaded bone set, then move the window
+        if (sro.bone_info.bone_offset + sro.bone_info.bone_count >= start_bone_idx + Self.MAX_BONES_PER_BUFFER) {
+            current_bones_buffer_index += 1;
+
+            if (current_bones_buffer_index == self.bone_buffers.items.len) {
+                try self.append_new_bones_buffer();
+            }
+
+            start_bone_idx = @intCast(sro.bone_info.bone_offset);
+
+            if (current_bones_buffer_index != 0) {
+                mapped_bones_data.unmap();
+            }
+            const new_bones_buffer = self.bone_buffers.items[@intCast(current_bones_buffer_index)].buffer.get() catch unreachable;
+            mapped_bones_data = try new_bones_buffer.map(.{ .write = true, });
+
+            const copy_amount: usize = @min(self.render_bones.items.len - @as(usize, @intCast(start_bone_idx)), Self.MAX_BONES_PER_BUFFER);
+            @memcpy(
+                mapped_bones_data.data_array(zm.Mat, Self.MAX_BONES_PER_BUFFER)[0..copy_amount], 
+                self.render_bones.items[@intCast(start_bone_idx)..(@as(usize, @intCast(start_bone_idx)) + copy_amount)]
+            );
+
+            cmd.cmd_bind_descriptor_sets(.{
+                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .first_binding = 4,
+                .descriptor_sets = &.{
+                    self.bone_buffers.items[@intCast(current_bones_buffer_index)].descriptor_set,
+                }
+            });
+        }
+
+        cmd.cmd_bind_vertex_buffers(.{
+            .first_binding = 0,
+            .buffers = ro.vertex_buffers.slice(),
+        });
+
+        const push_constants = PushConstants {
+            .instance_index = @intCast(idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER),
+            .lights_index = 0,
+            .bone_start_index = @intCast(@max(0, start_bone_idx)),
+        };
+
+        cmd.cmd_push_constants(.{
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constants),
+            .graphics_pipeline = self.skeletal_pipeline.solid,
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        });
+
+        if (ro.index_buffer) |ib| {
+            cmd.cmd_bind_index_buffer(.{
+                .buffer = ib.buffer_info.buffer,
+                .index_format = .U32,
+                .offset = ib.buffer_info.offset,
+            });
+
+            cmd.cmd_draw_indexed(.{
+                .index_count = @intCast(ib.index_count),
+                .vertex_offset = @intCast(ro.pos_offset),
+            });
+        } else {
+            cmd.cmd_draw(.{
+                .vertex_count = @intCast(ro.vertex_count),
+            });
+        }
+
+        idx += 1;
     }
 
     cmd.cmd_next_subpass(.{});

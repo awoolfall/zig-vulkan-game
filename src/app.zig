@@ -356,7 +356,7 @@ fn update(self: *Self) !void {
                 }
 
                 const camera_right = self.camera.transform.right_direction();
-                const camera_forward_no_pitch = zm.cross3(camera_right, zm.f32x4(0.0, 1.0, 0.0, 0.0));
+                const camera_forward_no_pitch = zm.cross3(zm.f32x4(0.0, 1.0, 0.0, 0.0), camera_right);
 
                 movement_direction = 
                     camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
