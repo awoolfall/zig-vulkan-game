@@ -367,7 +367,7 @@ fn update(self: *Self) !void {
 
                 engine().debug.draw_line(.{
                     .p0 = character_entity.transform.position,
-                    .p1 = character_entity.transform.position + movement_direction,
+                    .p1 = character_entity.transform.position + zm.normalize3(movement_direction),
                     .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
                 });
 
@@ -414,7 +414,7 @@ fn update(self: *Self) !void {
                 if (!std.math.isNan(dir[0])) {
                     const rot = zm.lookAtRh(zm.f32x4s(0.0), dir * zm.f32x4(1.0, 1.0, -1.0, 0.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
                     character.setRotation(
-                        zm.slerp(character_entity.transform.rotation, zm.matToQuat(rot), engine().time.delta_time_f32() * 15.0)
+                        zm.slerp(character_entity.transform.rotation, zm.matToQuat(rot), 0.1)
                     );
                 }
 
@@ -499,6 +499,12 @@ fn update(self: *Self) !void {
             render_camera = &self.camera;
         },
     }
+
+    eng.get().debug.draw_point(.{
+        .point = zm.f32x4(0.0, 0.0, 0.0, 1.0),
+        .colour = zm.f32x4(0.0, 1.0, 0.3, 1.0),
+        .size = (std.math.sin(@as(f32, @floatCast(eng.get().time.time_since_start_of_app()))) + 1.0) * 0.5,
+    });
 
     // update character animation variables.
     // TODO this should be generalized to all entities with animation controllers
@@ -759,6 +765,10 @@ fn update(self: *Self) !void {
         cmd
     ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
+    };
+
+    engine().debug.render_cmd(cmd, render_camera) catch |err| {
+        std.log.warn("Unable to render debug: {}", .{err});
     };
 
     engine().imui.render_imui(cmd) catch |err| {
