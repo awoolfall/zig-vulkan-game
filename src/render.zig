@@ -387,7 +387,7 @@ pub fn init() !Self {
     const attachments = &[_]gfx.AttachmentInfo {
         gfx.AttachmentInfo {
             .name = "colour_opaque",
-            .format = gfx.GfxState.ldr_format,
+            .format = gfx.GfxState.hdr_format,
             .load_op = .Clear,
             .clear_value = zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)),
             .initial_layout = .Undefined,
@@ -396,7 +396,7 @@ pub fn init() !Self {
         },
         gfx.AttachmentInfo {
             .name = "colour_blend",
-            .format = gfx.GfxState.ldr_format,
+            .format = gfx.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .Simple,
@@ -471,8 +471,8 @@ pub fn init() !Self {
     const framebuffer = try gfx.FrameBuffer.init(.{
         .render_pass = render_pass,
         .attachments = &.{
-            .SwapchainLDR,
-            .SwapchainLDR,
+            .SwapchainHDR,
+            .SwapchainHDR,
             .{ .View = selection_textures.view },
             .{ .View = selection_textures.view },
             .SwapchainDepth,

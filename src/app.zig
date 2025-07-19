@@ -757,6 +757,7 @@ fn update(self: *Self) !void {
         return;
     };
 
+    // Render to HDR buffer
     self.standard_renderer.render_cmd(
         .{
             .camera = render_camera,
@@ -767,6 +768,27 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
 
+    // Transition HDR image from colour output attachment to shader resource
+    cmd.cmd_pipeline_barrier(gfx.CommandBuffer.PipelineBarrierInfo {
+        .src_stage = .{ .color_attachment_output = true, },
+        .dst_stage = .{ .fragment_shader = true, },
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = gfx.GfxState.get().platform.swapchain.hdr_image,
+                .old_layout = gfx.ImageLayout.ColorAttachmentOptimal,
+                .new_layout = gfx.ImageLayout.ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .color_attachment_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+        },
+    });
+
+    // Tonemap HDR image onto LDR buffer
+    engine().gfx.tone_mapping_filter.apply_filter(cmd) catch |err| {
+        std.log.warn("Unable to apply tone mapping filter: {}", .{err});
+    };
+
+    // Render to LDR buffer
     engine().debug.render_cmd(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render debug: {}", .{err});
     };
@@ -775,6 +797,7 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render imui: {}", .{err});
     };
 
+    // Finish command buffer
     cmd.cmd_end() catch |err| {
         std.log.warn("Failed to end command buffer: {}", .{err});
         return;
@@ -792,11 +815,13 @@ fn update(self: *Self) !void {
         return;
     };
 
+    // Present
     engine().gfx.present(&.{ &self.uber_cmd_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
 
+    // Scuffed synchronisation, TODO do this properly
     engine().gfx.flush();
 }
 
