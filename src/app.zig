@@ -768,6 +768,23 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
 
+    // update and render particle systems
+    var entities = engine().entities.list.iterator();
+    while (entities.next()) |entity| {
+        if (entity.app.particle_system) |*ps| {
+            ps.settings.spawn_origin = entity.transform.position;
+            ps.update(&engine().time);
+            ps.draw(cmd, render_camera) catch |err| {
+                std.log.warn("Unable to render particle system for entity '{}': {}", .{entity.name orelse "", err});
+            };
+        }
+    }
+
+    self.player_attack_particle_system.update(&engine().time);
+    self.player_attack_particle_system.draw(cmd, render_camera) catch |err| {
+        std.log.warn("Unable to render particle system for attack system: {}", .{err});
+    };
+
     // Transition HDR image from colour output attachment to shader resource
     cmd.cmd_pipeline_barrier(gfx.CommandBuffer.PipelineBarrierInfo {
         .src_stage = .{ .color_attachment_output = true, },
