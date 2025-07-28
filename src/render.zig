@@ -130,7 +130,7 @@ const MAX_BONES_PER_BUFFER = 1024;
 shaders: Shaders,
 shader_watcher: eng.assets.FileWatcher,
 
-camera_data_buffers: std.ArrayList(BufferData),
+camera_data_buffer: BufferData,
 instance_buffers: std.ArrayList(BufferData),
 lights_buffers: std.ArrayList(BufferData),
 bone_buffers: std.ArrayList(BufferData),
@@ -172,8 +172,7 @@ pub fn deinit(self: *Self) void {
     self.shaders.deinit();
     self.shader_watcher.deinit();
 
-    for (self.camera_data_buffers.items) |b| { b.deinit(); }
-    self.camera_data_buffers.deinit();
+    self.camera_data_buffer.deinit();
     for (self.instance_buffers.items) |b| { b.deinit(); }
     self.instance_buffers.deinit();
     for (self.lights_buffers.items) |b| { b.deinit(); }
@@ -219,8 +218,6 @@ pub fn deinit(self: *Self) void {
 pub fn init() !Self {
     const alloc = eng.get().general_allocator;
     
-    const fif = gfx.GfxState.get().frames_in_flight();
-
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
@@ -248,32 +245,25 @@ pub fn init() !Self {
     errdefer camera_data_descriptor_layout.deinit();
 
     const camera_data_descriptor_pool = try gfx.DescriptorPool.init(.{
-        .max_sets = fif * 1,
+        .max_sets = 1,
         .strategy = .{ .Layout = camera_data_descriptor_layout, },
     });
     errdefer camera_data_descriptor_pool.deinit();
 
-    const camera_data_descriptor_sets = try (camera_data_descriptor_pool.get() catch unreachable).allocate_sets(
-        alloc,
+    const camera_data_descriptor_set = try (camera_data_descriptor_pool.get() catch unreachable).allocate_set(
         .{ .layout = camera_data_descriptor_layout, },
-        fif
     );
-    defer alloc.free(camera_data_descriptor_sets);
-    errdefer for (camera_data_descriptor_sets) |s| { s.deinit(); };
+    errdefer camera_data_descriptor_set.deinit();
 
-    var camera_data_buffers = try std.ArrayList(BufferData).initCapacity(alloc, fif);
-    errdefer camera_data_buffers.deinit();
-    errdefer for (camera_data_buffers.items) |b| { b.deinit(); };
-
-    for (0..fif) |idx| {
+    const camera_data_buffer = blk: {
         const buffer = try gfx.Buffer.init(
-            @sizeOf(CameraStruct) * fif,
+            @sizeOf(CameraStruct),
             .{ .ConstantBuffer = true, },
             .{ .CpuWrite = true, },
         );
         errdefer buffer.deinit();
 
-        try (camera_data_descriptor_sets[idx].get() catch unreachable).update(.{
+        try (camera_data_descriptor_set.get() catch unreachable).update(.{
             .writes = &.{
                 gfx.DescriptorSetUpdateWriteInfo {
                     .binding = 0,
@@ -284,11 +274,11 @@ pub fn init() !Self {
             },
         });
 
-        try camera_data_buffers.append(BufferData {
+        break :blk BufferData {
             .buffer = buffer,
-            .descriptor_set = camera_data_descriptor_sets[idx],
-        });
-    }
+            .descriptor_set = camera_data_descriptor_set,
+        };
+    };
 
     const instance_data_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
@@ -575,7 +565,7 @@ pub fn init() !Self {
         .bones_data_layout = bones_data_layout,
         .bones_data_descriptor_pool = bones_data_descriptor_pool,
 
-        .camera_data_buffers = camera_data_buffers,
+        .camera_data_buffer = camera_data_buffer,
         .instance_buffers = std.ArrayList(BufferData).init(alloc),
         .lights_buffers = std.ArrayList(BufferData).init(alloc),
         .bone_buffers = std.ArrayList(BufferData).init(alloc),
@@ -728,10 +718,11 @@ pub fn clear(self: *Self) void {
 }
 
 pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
-    const cfi = gfx.GfxState.get().current_frame_index();
-    const camera_data_buffer = self.camera_data_buffers.items[cfi].buffer.get() catch unreachable;
-
-    const mapped_buffer = camera_data_buffer.map(.{ .write = true, }) catch unreachable;
+    const buffer = self.camera_data_buffer.buffer.get() catch |err| {
+        std.log.warn("Unable to get camera data buffer: {}", .{err});
+        return;
+    };
+    const mapped_buffer = buffer.map(.{ .write = .EveryFrame, }) catch unreachable;
     defer mapped_buffer.unmap();
 
     mapped_buffer.data(CameraStruct).* = .{
@@ -740,11 +731,6 @@ pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
         .position = camera.transform.position,
         .time = @floatCast(eng.get().time.time_since_start_of_app()),
     };
-}
-
-pub fn get_current_camera_descriptor_set(self: *const Self) gfx.DescriptorSet.Ref {
-    const cfi = gfx.GfxState.get().current_frame_index();
-    return self.camera_data_buffers.items[cfi].descriptor_set;
 }
 
 fn append_new_instance_buffer(
@@ -857,8 +843,6 @@ pub fn render_cmd(
     },
     cmd: *gfx.CommandBuffer,
 ) !void {
-    //const cfi = gfx.GfxState.get().current_frame_index();
-
     cmd.cmd_begin_render_pass(.{
         .framebuffer = self.framebuffer,
         .render_pass = self.render_pass,
@@ -880,7 +864,7 @@ pub fn render_cmd(
         .graphics_pipeline = self.static_pipeline.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
-            self.get_current_camera_descriptor_set(),
+            self.camera_data_buffer.descriptor_set,
         }
     });
 
@@ -910,7 +894,7 @@ pub fn render_cmd(
                 mapped_instance_data.unmap();
             }
             const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
-            mapped_instance_data = try new_instance_buffer.map(.{ .write = true, });
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.static_pipeline.solid,
@@ -932,7 +916,7 @@ pub fn render_cmd(
                 mapped_lights_data.unmap();
             }
             const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
-            mapped_lights_data = try new_lights_buffer.map(.{ .write = true, });
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.static_pipeline.solid,
@@ -1064,7 +1048,7 @@ pub fn render_cmd(
         .graphics_pipeline = self.skeletal_pipeline.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
-            self.get_current_camera_descriptor_set(),
+            self.camera_data_buffer.descriptor_set,
         }
     });
     
@@ -1084,7 +1068,7 @@ pub fn render_cmd(
                 mapped_instance_data.unmap();
             }
             const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
-            mapped_instance_data = try new_instance_buffer.map(.{ .write = true, });
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.skeletal_pipeline.solid,
@@ -1118,7 +1102,7 @@ pub fn render_cmd(
                 mapped_lights_data.unmap();
             }
             const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
-            mapped_lights_data = try new_lights_buffer.map(.{ .write = true, });
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .graphics_pipeline = self.skeletal_pipeline.solid,
@@ -1206,7 +1190,7 @@ pub fn render_cmd(
                 mapped_bones_data.unmap();
             }
             const new_bones_buffer = self.bone_buffers.items[@intCast(current_bones_buffer_index)].buffer.get() catch unreachable;
-            mapped_bones_data = try new_bones_buffer.map(.{ .write = true, });
+            mapped_bones_data = try new_bones_buffer.map(.{ .write = .EveryFrame, });
 
             const copy_amount: usize = @min(self.render_bones.items.len - @as(usize, @intCast(start_bone_idx)), Self.MAX_BONES_PER_BUFFER);
             @memcpy(

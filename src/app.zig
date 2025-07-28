@@ -785,13 +785,17 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render particle system for attack system: {}", .{err});
     };
 
+    engine().gfx.bloom_filter.render_bloom(cmd) catch |err| {
+        std.log.warn("Unable to apply bloom filter: {}", .{err});
+    };
+
     // Transition HDR image from colour output attachment to shader resource
     cmd.cmd_pipeline_barrier(gfx.CommandBuffer.PipelineBarrierInfo {
         .src_stage = .{ .color_attachment_output = true, },
         .dst_stage = .{ .fragment_shader = true, },
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = gfx.GfxState.get().platform.swapchain.hdr_image,
+                .image = gfx.GfxState.get().default.hdr_image,
                 .old_layout = gfx.ImageLayout.ColorAttachmentOptimal,
                 .new_layout = gfx.ImageLayout.ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .color_attachment_write = true, },
