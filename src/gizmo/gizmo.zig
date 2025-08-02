@@ -11,8 +11,8 @@ const cm = eng.camera;
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 
-const InstanceInfoStruct = extern struct {
-    model_matrix: zm.Mat,
+const PushConstants = extern struct {
+    mvp: zm.Mat,
     colour: zm.F32x4,
     id: u32,
 };
@@ -25,6 +25,16 @@ const RenderBuffers = struct {
     pub fn deinit(self: *RenderBuffers) void {
         self.vertex_buffer.deinit();
         self.index_buffer.deinit();
+    }
+};
+
+const Pipelines = struct {
+    standard: gf.GraphicsPipeline.Ref,
+    dont_write_depth: gf.GraphicsPipeline.Ref,
+
+    pub fn deinit(self: *Pipelines) void {
+        self.standard.deinit();
+        self.dont_write_depth.deinit();
     }
 };
 
@@ -45,7 +55,13 @@ vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
 id_pixel_shader: gf.PixelShader,
 
-instance_data_buffer: gf.Buffer.Ref,
+render_pass: gf.RenderPass.Ref,
+
+pipelines: Pipelines,
+id_pipelines: Pipelines,
+
+framebuffer: gf.FrameBuffer.Ref,
+
 selection_textures: st.SelectionTextures(u32),
 
 selected_control: ?GizmoControl = null,
@@ -63,11 +79,17 @@ pub fn deinit(self: *Self) void {
     self.id_cylinder.deinit();
     self.id_sphere.deinit();
 
+    self.framebuffer.deinit();
+
+    self.pipelines.deinit();
+    self.id_pipelines.deinit();
+
+    self.render_pass.deinit();
+
     self.vertex_shader.deinit();
     self.pixel_shader.deinit();
     self.id_pixel_shader.deinit();
 
-    self.instance_data_buffer.deinit();
     self.selection_textures.deinit();
 }
 
@@ -93,17 +115,158 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var id_sphere = try init_sphere(visual_line_width);
     errdefer id_sphere.deinit();
 
-    const instance_data_buffer = try gf.Buffer.init(
-        @sizeOf(InstanceInfoStruct),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-    );
-    errdefer instance_data_buffer.deinit();
-
     var selection_textures = try st.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
+    
+    // Shaders
+    const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
+    defer shader_path.deinit();
 
-    var self = Self {
+    const vertex_shader = try gf.VertexShader.init_file(
+        alloc,
+        shader_path,
+        "vs_main",
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            },
+        },
+        .{},
+    ); 
+    errdefer vertex_shader.deinit();
+
+    const pixel_shader = try gf.PixelShader.init_file(
+        alloc,
+        shader_path,
+        "ps_colour_main",
+        .{},
+    );
+    errdefer pixel_shader.deinit();
+
+    const id_pixel_shader = try gf.PixelShader.init_file(
+        alloc,
+        shader_path,
+        "ps_id_main",
+        .{},
+    );
+    errdefer id_pixel_shader.deinit();
+
+    // Gfx objects
+    const attachments = &[_]gf.AttachmentInfo {
+        gf.AttachmentInfo {
+            .name = "colour",
+            .format = gf.GfxState.ldr_format,
+            .blend_type = .Simple,
+            .initial_layout = .ColorAttachmentOptimal,
+            .final_layout = .ColorAttachmentOptimal,
+        },
+        gf.AttachmentInfo {
+            .name = "selection",
+            .format = gf.ImageFormat.R32_Uint,
+            .blend_type = .None,
+            .clear_value = zm.f32x4s(0.0),
+            .load_op = .Clear,
+            .initial_layout = .Undefined,
+            .final_layout = .ColorAttachmentOptimal,
+        },
+        gf.AttachmentInfo {
+            .name = "depth",
+            .format = gf.GfxState.depth_format,
+            .blend_type = .None,
+            .initial_layout = .Undefined,
+            .final_layout = .DepthStencilAttachmentOptimal,
+            .load_op = .Clear,
+            .stencil_load_op = .Clear,
+            .clear_value = zm.f32x4s(0.0),
+        },
+    };
+
+    const render_pass = try gf.RenderPass.init(.{
+        .attachments = attachments,
+        .subpasses = &[_]gf.SubpassInfo {
+            gf.SubpassInfo {
+                .attachments = &.{ "colour" },
+                .depth_attachment = "depth",
+            },
+            gf.SubpassInfo {
+                .attachments = &.{ "selection" },
+                .depth_attachment = "depth",
+            },
+        },
+        .dependencies = &[_]gf.SubpassDependencyInfo {
+            gf.SubpassDependencyInfo {
+                .src_subpass = null,
+                .dst_subpass = 0,
+                .src_stage_mask = .{ .color_attachment_output = true, },
+                .src_access_mask = .{},
+                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .dst_access_mask = .{ .color_attachment_write = true, },
+            },
+            gf.SubpassDependencyInfo {
+                .src_subpass = 0,
+                .dst_subpass = 1,
+                .src_stage_mask = .{ .color_attachment_output = true, },
+                .src_access_mask = .{ .color_attachment_write = true, },
+                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .dst_access_mask = .{ .color_attachment_write = true, },
+            },
+        }
+    });
+    errdefer render_pass.deinit();
+
+    var pipeline_info = gf.GraphicsPipelineInfo {
+        .attachments = attachments,
+        .render_pass = render_pass,
+        .subpass_index = 0,
+        .vertex_shader = &vertex_shader,
+        .pixel_shader = &pixel_shader,
+        // TODO change vertex and pixel shaders to go through asset system. That way we can add
+        // pipelines to automatically re-generate when shaders change. Will need to add a system
+        // to pull assets from the source code directories. Probably will need to create asset packs
+        // by defining assets in a file.
+        // For the time being we should make gizmo.slang @embedFile.
+        .depth_test = .{ .write = true, },
+        .push_constants = &[_]gf.PushConstantLayoutInfo {
+            gf.PushConstantLayoutInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .size = @sizeOf(PushConstants),
+            },
+        },
+    };
+
+    var id_pipeline_info = pipeline_info;
+    id_pipeline_info.subpass_index = 1;
+    id_pipeline_info.pixel_shader = &id_pixel_shader;
+
+    const pipeline = try gf.GraphicsPipeline.init(pipeline_info);
+    errdefer pipeline.deinit();
+
+    pipeline_info.depth_test = .{ .write = false };
+    const pipeline_dont_write_depth = try gf.GraphicsPipeline.init(pipeline_info);
+    errdefer pipeline_dont_write_depth.deinit();
+
+    const id_pipeline = try gf.GraphicsPipeline.init(id_pipeline_info);
+    errdefer id_pipeline.deinit();
+
+    id_pipeline_info.depth_test = .{ .write = false, };
+    const id_pipeline_dont_write_depth = try gf.GraphicsPipeline.init(id_pipeline_info);
+    errdefer id_pipeline_dont_write_depth.deinit();
+
+    const framebuffer = try gf.FrameBuffer.init(.{
+        .render_pass = render_pass,
+        .attachments = &[_]gf.FrameBufferAttachmentInfo {
+            .SwapchainLDR,
+            .{ .View = selection_textures.view },
+            .SwapchainDepth,
+        },
+    });
+    errdefer framebuffer.deinit();
+
+    return Self {
         .visual_torus = visual_torus,
         .visual_cylinder = visual_cylinder,
         .visual_sphere = visual_sphere,
@@ -112,24 +275,25 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .id_cylinder = id_cylinder,
         .id_sphere = id_sphere,
 
-        .instance_data_buffer = instance_data_buffer,
         .selection_textures = selection_textures,
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
-        .id_pixel_shader = undefined,
-    };
 
-    self.compile_shaders(alloc) catch |err| {
-        std.log.err("unable to compile shaders: {}", .{err});
-        return err;
-    };
-    errdefer {
-        self.vertex_shader.deinit();
-        self.pixel_shader.deinit();
-        self.id_pixel_shader.deinit();
-    }
+        .vertex_shader = vertex_shader,
+        .pixel_shader = pixel_shader,
+        .id_pixel_shader = id_pixel_shader,
 
-    return self;
+        .render_pass = render_pass,
+
+        .pipelines = Pipelines {
+            .standard = pipeline,
+            .dont_write_depth = pipeline_dont_write_depth,
+        },
+        .id_pipelines = Pipelines {
+            .standard = id_pipeline,
+            .dont_write_depth = id_pipeline_dont_write_depth,
+        },
+
+        .framebuffer = framebuffer,
+    };
 }
 
 fn init_torus(line_width: f32) !RenderBuffers {
@@ -210,7 +374,7 @@ fn init_sphere(line_width: f32) !RenderBuffers {
 }
 
 fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !void {
-    const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.hlsl" });
+    const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
     defer shader_path.deinit();
 
     const new_vertex_shader = try gf.VertexShader.init_file(
@@ -304,8 +468,8 @@ const Ray = struct {
 fn ray_out_point_on_screen_px(point_px: [2]i32, inv_perspective: zm.Mat, inv_view: zm.Mat) Ray {
     var ndc_cursor = zm.f32x4(@floatFromInt(point_px[0]), @floatFromInt(point_px[1]), 1.0, 1.0);
     ndc_cursor /= zm.f32x4(@floatFromInt(eng.get().gfx.swapchain_size()[0]), @floatFromInt(eng.get().gfx.swapchain_size()[1]), 1.0, 1.0);
-    ndc_cursor *= zm.f32x4(2.0, -2.0, 1.0, 1.0);
-    ndc_cursor -= zm.f32x4(1.0, -1.0, 0.0, 0.0);
+    ndc_cursor *= zm.f32x4(2.0, 2.0, 1.0, 1.0);
+    ndc_cursor -= zm.f32x4(1.0, 1.0, 0.0, 0.0);
 
     const near_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 1.0, 1.0);
     const far_ndc = zm.f32x4(ndc_cursor[0], ndc_cursor[1], 0.0, 1.0);
@@ -586,63 +750,58 @@ pub fn update(self: *Self, transform: *Transform) bool {
     return !(self.selected_control == null or self.selected_control == .None);
 }
 
-pub fn render(
-    self: *Self, 
-    transform: *const Transform, 
-    camera_buffer: *const gf.Buffer, 
-    rtv: gf.ImageView.Ref, 
-    dsv: gf.ImageView.Ref, 
-    camera: *const cm.Camera
-) void {
-    const gfx = &eng.get().gfx;
-    self.rendered_perspective_matrix = camera.generate_perspective_matrix(gfx.swapchain_aspect());
-    self.rendered_view_matrix = camera.transform.generate_view_matrix();
-
-    // recreate selection textures if size has changed
-    const selection_image = self.selection_textures.texture.get() catch unreachable;
-    if (selection_image.info.width != gfx.swapchain_size()[0] or selection_image.info.height != gfx.swapchain_size()[1]) {
-        self.selection_textures.on_resize(gfx);
-    }
-
-    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
-    gfx.cmd_set_render_target(&.{rtv}, dsv);
-
-    // set shaders
-    gfx.cmd_set_vertex_shader(&self.vertex_shader);
-
-    // set render state
-    gfx.cmd_set_topology(.TriangleList);
-    gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
-
-    // set shader resources
-    gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gf.Buffer{
-        camera_buffer,
-        &self.instance_data_buffer,
+pub fn render_cmd(
+    self: *Self,
+    cmd: *gf.CommandBuffer,
+    transform: *const Transform,
+    camera: *const cm.Camera,
+) !void {
+    cmd.cmd_begin_render_pass(.{
+        .render_pass = self.render_pass,
+        .framebuffer = self.framebuffer,
+        .render_area = .full_screen_pixels(),
     });
-    gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gf.Buffer{
-        camera_buffer,
-        &self.instance_data_buffer,
-    });
+    defer cmd.cmd_end_render_pass();
 
-    // render visual objects
-    gfx.cmd_set_pixel_shader(&self.pixel_shader);
-    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
-    self.render_objects(transform, camera, dsv, .Visual);
+    cmd.cmd_set_viewports(.{ .viewports = &.{ .full_screen_viewport(), } });
+    cmd.cmd_set_scissors(.{ .scissors = &.{ .full_screen_pixels(), } });
 
-    // render id objects
-    self.selection_textures.clear(0);
-    gfx.cmd_set_render_target(&.{self.selection_textures.rtv}, dsv);
-    gfx.cmd_set_pixel_shader(&self.id_pixel_shader);
-    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
-    self.render_objects(transform, camera, dsv, .Id);
+    self.render_objects_cmd(cmd, transform, camera, .Visual);
+
+    cmd.cmd_next_subpass(.{});
+
+    self.render_objects_cmd(cmd, transform, camera, .Id);
 }
 
-fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Camera, dsv: gf.ImageView.Ref, ty: enum { Visual, Id }) void {
-    const gfx = &eng.get().gfx;
+pub fn render_objects_cmd(
+    self: *Self,
+    cmd: *gf.CommandBuffer,
+    transform: *const Transform,
+    camera: *const cm.Camera,
+    ty: enum { Visual, Id }
+) void {
+    const pipelines = switch (ty) {
+        .Visual => &self.pipelines,
+        .Id => &self.id_pipelines,
+    };
+
+    self.rendered_view_matrix = camera.transform.generate_view_matrix();
+    self.rendered_perspective_matrix = camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect());
+
+    const vp = zm.mul(
+        self.rendered_view_matrix,
+        self.rendered_perspective_matrix
+    );
+
+    var push_constant_data = PushConstants {
+        .id = 0,
+        .colour = zm.f32x4s(0.0),
+        .mvp = vp,
+    };
 
     // set torus vertex and index buffers
-    var torus_vertex_bufer: gf.Buffer = undefined;
-    var torus_index_buffer: gf.Buffer = undefined;
+    var torus_vertex_bufer: gf.Buffer.Ref = undefined;
+    var torus_index_buffer: gf.Buffer.Ref = undefined;
     var torus_index_count: usize = undefined;
     switch (ty) {
         .Visual => {
@@ -657,79 +816,98 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
         },
     }
 
-    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &torus_vertex_bufer, .stride = @sizeOf([3]f32), .offset = 0, },
-    });
-    gfx.cmd_set_index_buffer(&torus_index_buffer, .U32, 0);
+    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
+        gf.VertexBufferInput {
+            .buffer = torus_vertex_bufer,
+        }
+    }, });
+    cmd.cmd_bind_index_buffer(.{ .buffer = torus_index_buffer, .index_format = .U32, });
 
     const base_rot = if (get_coord_space() == .local) zm.matFromQuat(transform.rotation) else zm.identity();
     const distance = 10.0;
     const distance_f32x4 = zm.f32x4(distance, distance, distance, 0.0);
     const base_tra = zm.translationV(zm.normalize3(transform.position - camera.transform.position) * distance_f32x4 + camera.transform.position);
 
+    var model_matrix = zm.mul(
+        zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(camera.transform.position - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
+        base_tra,
+    );
+
     // render white torus
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    cmd.cmd_bind_graphics_pipeline(pipelines.dont_write_depth);
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = 
-                zm.mul(
-                    zm.inverse(zm.lookToRh(zm.f32x4s(0.0), zm.normalize3(camera.transform.position - transform.position), zm.f32x4(0.0, 1.0, 0.0, 0.0))),
-                    base_tra,
-                ),
-            .colour = WHITE,
-            .id = @intFromEnum(GizmoControl.None),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = WHITE,
+        .id = @intFromEnum(GizmoControl.None),
+    };
 
-    // clear depth buffer so that all following controls are drawn on top of the white torus
-    gfx.cmd_clear_depth_stencil_view(dsv, 0.0, null);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.dont_write_depth,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
 
     // render red torus
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    cmd.cmd_bind_graphics_pipeline(pipelines.standard);
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.RotateX, &base_rot, &base_tra),
-            .colour = RED,
-            .id = @intFromEnum(GizmoControl.RotateX),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
+    model_matrix = sub_rotation(GizmoControl.RotateX, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = RED,
+        .id = @intFromEnum(GizmoControl.RotateX),
+    };
+
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
 
     // render green torus
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = sub_rotation(GizmoControl.RotateY, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = GREEN,
+        .id = @intFromEnum(GizmoControl.RotateY),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.RotateY, &base_rot, &base_tra),
-            .colour = GREEN,
-            .id = @intFromEnum(GizmoControl.RotateY),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
 
     // render blue torus
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = sub_rotation(GizmoControl.RotateZ, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = BLUE,
+        .id = @intFromEnum(GizmoControl.RotateZ),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.RotateZ, &base_rot, &base_tra),
-            .colour = BLUE,
-            .id = @intFromEnum(GizmoControl.RotateZ),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(torus_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
 
 
     // set culinder vertex and index buffers
-    var cylinder_vertex_buffer: gf.Buffer = undefined;
-    var cylinder_index_buffer: gf.Buffer = undefined;
+    var cylinder_vertex_buffer: gf.Buffer.Ref = undefined;
+    var cylinder_index_buffer: gf.Buffer.Ref = undefined;
     var cylinder_index_count: usize = undefined;
     switch (ty) {
         .Visual => {
@@ -744,54 +922,68 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
         },
     }
 
-    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &cylinder_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
-    });
-    gfx.cmd_set_index_buffer(&cylinder_index_buffer, .U32, 0);
+    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
+        gf.VertexBufferInput {
+            .buffer = cylinder_vertex_buffer,
+        }
+    }, });
+    cmd.cmd_bind_index_buffer(.{ .buffer = cylinder_index_buffer, .index_format = .U32, });
 
     // render red cylinder
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = RED,
+        .id = @intFromEnum(GizmoControl.TranslateX),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra),
-            .colour = RED,
-            .id = @intFromEnum(GizmoControl.TranslateX),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
 
     // render green cylinder
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = GREEN,
+        .id = @intFromEnum(GizmoControl.TranslateY),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra),
-            .colour = GREEN,
-            .id = @intFromEnum(GizmoControl.TranslateY),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
 
     // render blue cylinder
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra);
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = BLUE,
+        .id = @intFromEnum(GizmoControl.TranslateZ),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra),
-            .colour = BLUE,
-            .id = @intFromEnum(GizmoControl.TranslateZ),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(cylinder_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
 
 
     // set sphere vertex and index buffers
-    var sphere_vertex_buffer: gf.Buffer = undefined;
-    var sphere_index_buffer: gf.Buffer = undefined;
+    var sphere_vertex_buffer: gf.Buffer.Ref = undefined;
+    var sphere_index_buffer: gf.Buffer.Ref = undefined;
     var sphere_index_count: usize = undefined;
     switch (ty) {
         .Visual => {
@@ -806,23 +998,28 @@ fn render_objects(self: *Self, transform: *const Transform, camera: *const cm.Ca
         },
     }
 
-    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &sphere_vertex_buffer, .stride = @sizeOf([3]f32), .offset = 0, },
-    });
-    gfx.cmd_set_index_buffer(&sphere_index_buffer, .U32, 0);
+    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
+        gf.VertexBufferInput {
+            .buffer = sphere_vertex_buffer,
+        }
+    }, });
+    cmd.cmd_bind_index_buffer(.{ .buffer = sphere_index_buffer, .index_format = .U32, });
 
     // render white sphere
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    model_matrix = base_tra;
+    push_constant_data = PushConstants {
+        .mvp = zm.mul(model_matrix, vp),
+        .colour = WHITE,
+        .id = @intFromEnum(GizmoControl.None),
+    };
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .model_matrix = 
-                base_tra
-            ,
-            .colour = WHITE,
-            .id = @intFromEnum(GizmoControl.None),
-        };
-    }
-    gfx.cmd_draw_indexed(@intCast(sphere_index_count), 0, 0);
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = pipelines.standard,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    cmd.cmd_draw_indexed(.{ .index_count = @intCast(sphere_index_count), });
 }
+

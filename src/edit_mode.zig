@@ -296,19 +296,12 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
     }
 }
 
-pub fn render(self: *Self, camera_data_buffer: *const gfx.Buffer, rtv: gfx.ImageView.Ref, dsv: gfx.ImageView.Ref) !void {
+pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) !void {
     if (self.selected_entity) |s| {
         if (eng.get().entities.get(s)) |entity| {
-            const viewport = gfx.Viewport {
-                .width = @floatFromInt(eng.get().gfx.swapchain_size()[0]),
-                .height = @floatFromInt(eng.get().gfx.swapchain_size()[1]),
-                .min_depth = 0.0,
-                .max_depth = 1.0,
-                .top_left_x = 0.0,
-                .top_left_y = 0.0,
+            self.gizmo.render_cmd(cmd, &entity.transform, &self.editor_camera) catch |err| {
+                std.log.warn("Unable to render edit mode gizmo: {}", .{err});
             };
-            eng.get().gfx.cmd_set_viewport(viewport);
-            self.gizmo.render(&entity.transform, camera_data_buffer, rtv, dsv, &self.editor_camera);
         } 
     }
 }

@@ -810,6 +810,12 @@ fn update(self: *Self) !void {
     };
 
     // Render to LDR buffer
+    if (self.current_mode == .EDIT) {
+        self.edit_mode.render_cmd(cmd) catch |err| {
+            std.log.warn("Unable to render edit mode: {}", .{err});
+        };
+    }
+
     engine().debug.render_cmd(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render debug: {}", .{err});
     };
