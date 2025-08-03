@@ -388,14 +388,19 @@ const EntityEditorUiData = struct {
         var asset_packs_iter = eng.get().asset_manager.asset_packs.iterator();
         while (asset_packs_iter.next()) |it| {
             const pack = it.value_ptr;
-            var models_iter = pack.models.keyIterator();
-            while (models_iter.next()) |k| {
-                const asset_id = assets.ModelAssetId{ .pack_id = pack.unique_name_hash, .asset_id = k.* };
+            var iter = pack.assets.iterator();
+            while (iter.next()) |p| {
+                switch (p.value_ptr.asset) {
+                    .Model => {
+                        const asset_id = assets.ModelAssetId{ .pack_id = pack.unique_name_hash, .asset_id = p.key_ptr.* };
 
-                const asset_identifier_string = try asset_id.serialize(alloc);
-                defer alloc.free(asset_identifier_string);
+                        const asset_identifier_string = try asset_id.serialize(alloc);
+                        defer alloc.free(asset_identifier_string);
 
-                try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
+                        try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
+                    },
+                    else => {},
+                }
             }
         }
 

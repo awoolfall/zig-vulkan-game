@@ -1,0 +1,57 @@
+.{
+    // Character model
+    .{
+        .name = "character",
+        .path = .{ .Model = .{ .Path = "KayKit_Adventure/Characters/gltf/Knight.glb" } },
+    },
+    // Character animations
+    .{
+        .name = "character.idle",
+        .path = .{ .Animation = .{ .model_name = "character", .animation_id = 36, } },
+    },
+    .{
+        .name = "character.run",
+        .path = .{ .Animation = .{ .model_name = "character", .animation_id = 48, } },
+    },
+    .{
+        .name = "character.walk",
+        .path = .{ .Animation = .{ .model_name = "character", .animation_id = 72, } },
+    },
+    .{
+        .name = "character.attack",
+        .path = .{ .Animation = .{ .model_name = "character", .animation_id = 1, } },
+    },
+
+    // Other models
+    .{
+        .name = "model",
+        .path = .{ .Model = .{ .Path = "sea_house.glb" } },
+    },
+    .{
+        .name = "terrain",
+        .path = .{ .Model = .{ .Plane = .{ .slices = 1, .stacks = 1, } } },
+    },
+    .{
+        .name = "cone",
+        .path = .{ .Model = .{ .Cone = .{ .slices = 8, } } },
+    },
+    .{
+        .name = "sphere",
+        .path = .{ .Model = .{ .Sphere = .{} } },
+    },
+    .{
+        .name = "cube",
+        .path = .{ .Model = .{ .Cube = .{} } },
+    },
+    .{
+        .name = "block",
+        .path = .{ .Model = .{ .Path = "block.glb" } },
+    },
+
+    // Terrain image???
+    .{
+        .name = "terrain-texture",
+        .path = .{ .Image = .{ .Path = "terrain.r32" } },
+    },
+}
+

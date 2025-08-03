@@ -110,7 +110,7 @@ standard_renderer: StandardRenderer,
 terrain_renderer: TerrainSystem,
 
 edit_mode: EditMode,
-current_mode: enum { EDIT, PLAY } = .EDIT,
+current_mode: enum { Edit, Play } = .Edit,
 
 command_pool: gfx.CommandPool.Ref,
 command_buffers: [4]gfx.CommandBuffer,
@@ -137,24 +137,9 @@ pub fn deinit(self: *Self) void {
 
 pub fn init(self: *Self) !void {
     std.log.info("App init!", .{});
-    var asset_pack = try assets.AssetPack.init(engine().general_allocator, "default");
+
+    var asset_pack = try assets.AssetPack.init_from_file(engine().general_allocator, "default", "default_asset_pack.zon");
     errdefer asset_pack.deinit();
-
-    //try asset_pack.add_model("character", assets.AssetPack.ModelAsset{ .Path = "character rigify.glb" });
-    try asset_pack.add_model("character", .{ .Path = "KayKit_Adventure/Characters/gltf/Knight.glb" });
-    try asset_pack.add_model("model", .{ .Path = "sea_house.glb" });
-    try asset_pack.add_model("terrain", .{ .Plane = .{ .slices = 1, .stacks = 1, } });
-    try asset_pack.add_model("cone", .{ .Cone = .{ .slices = 8, } });
-    try asset_pack.add_model("sphere", .{ .Sphere = .{} });
-    try asset_pack.add_model("cube", .{ .Cube = .{} });
-    try asset_pack.add_model("block", .{ .Path = "block.glb" });
-
-    try asset_pack.define_animation("character idle", "character", 36);
-    try asset_pack.define_animation("character run", "character", 48);
-    try asset_pack.define_animation("character walk", "character", 72);
-    try asset_pack.define_animation("character attack", "character", 1);
-
-    try asset_pack.add_image("terrain-texture", .{ .Path = "terrain.r32" });
 
     const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
     try engine().asset_manager.load_asset_pack(asset_pack_id);
@@ -268,12 +253,12 @@ fn update(self: *Self) !void {
     // switch modes
     if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.F1)) {
         switch (self.current_mode) {
-            .EDIT => {
-                self.current_mode = .PLAY;
+            .Edit => {
+                self.current_mode = .Play;
                 engine().time.time_scale = 1.0;
             },
-            .PLAY => {
-                self.current_mode = .EDIT;
+            .Play => {
+                self.current_mode = .Edit;
                 self.edit_mode.editor_camera.transform = self.camera.transform;
                 engine().time.time_scale = 0.01;
             },
@@ -283,13 +268,13 @@ fn update(self: *Self) !void {
     // update
     var render_camera: *cm.Camera = undefined;
     switch (self.current_mode) {
-        .EDIT => {
+        .Edit => {
             self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer) catch |err| {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
             render_camera = &self.edit_mode.editor_camera;
         },
-        .PLAY => {
+        .Play => {
             blk: {
                 if (self.character_idx.is_invalid()) {
                     // spawn character
@@ -561,8 +546,8 @@ fn update(self: *Self) !void {
                     entity.transform
                 ) catch unreachable;
             } else {
-                if (self.current_mode == .EDIT) {
-                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|sphere").?;
+                if (self.current_mode == .Edit) {
+                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|sphere") catch unreachable;
                     const m = engine().asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
                     self.render_model(
                         @truncate(entity_id),
@@ -666,7 +651,7 @@ fn update(self: *Self) !void {
     //     self.depth_textures.dsv, 
     //     .{
     //         .selected_entity_idx = blk: {
-    //             if (self.current_mode != .EDIT) break :blk null;
+    //             if (self.current_mode != .Edit) break :blk null;
     //             break :blk if (self.edit_mode.selected_entity) |s| s.index else null;
     //         },
     //     }
@@ -732,7 +717,7 @@ fn update(self: *Self) !void {
     //     engine().gfx.get_framebuffer(), 
     // );
     //
-    // if (self.current_mode == .EDIT) {
+    // if (self.current_mode == .Edit) {
     //     self.edit_mode.render(
     //         &self.standard_renderer.camera_data_buffer, 
     //         engine().gfx.get_framebuffer(), 
@@ -810,7 +795,7 @@ fn update(self: *Self) !void {
     };
 
     // Render to LDR buffer
-    if (self.current_mode == .EDIT) {
+    if (self.current_mode == .Edit) {
         self.edit_mode.render_cmd(cmd) catch |err| {
             std.log.warn("Unable to render edit mode: {}", .{err});
         };
@@ -1000,10 +985,14 @@ const CollideShapeCollector = extern struct {
 };
 
 fn character_anim_description() anim.AnimController.Descriptor {
-    const character_animation_idle_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character idle").?;
-    const character_animation_walk_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character walk").?;
-    const character_animation_run_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character run").?;
-    const character_animation_attack_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character attack").?;
+    const character_animation_idle_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
+        catch unreachable;
+    const character_animation_walk_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.walk")
+        catch unreachable;
+    const character_animation_run_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.run")
+        catch unreachable;
+    const character_animation_attack_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
+        catch unreachable;
 
     var anim_nodes = [_]anim.Node{
         .{

@@ -227,7 +227,6 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         // pipelines to automatically re-generate when shaders change. Will need to add a system
         // to pull assets from the source code directories. Probably will need to create asset packs
         // by defining assets in a file.
-        // For the time being we should make gizmo.slang @embedFile.
         .depth_test = .{ .write = true, },
         .push_constants = &[_]gf.PushConstantLayoutInfo {
             gf.PushConstantLayoutInfo {
