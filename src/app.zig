@@ -36,6 +36,14 @@ const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
 
 pub const EntityData = struct {
+    pub const Descriptor = struct {
+        health_points: ?i32 = null,
+        anim_controller_desc: ?anim.AnimController.Descriptor = null,
+        particle_system_settings: ?particle.ParticleSystemSettings = null,
+        light: ?StandardRenderer.Light = null,
+        terrain: ?Terrain.Descriptor = null,
+    };
+
     health_points: ?i32,
     anim_controller: ?anim.AnimController,
     particle_system: ?particle.ParticleSystem,
@@ -87,14 +95,6 @@ pub const EntityData = struct {
             .terrain = terrain_desc,
         };
     }
-
-    pub const Descriptor = struct {
-        health_points: ?i32 = null,
-        anim_controller_desc: ?anim.AnimController.Descriptor = null,
-        particle_system_settings: ?particle.ParticleSystemSettings = null,
-        light: ?StandardRenderer.Light = null,
-        terrain: ?Terrain.Descriptor = null,
-    };
 };
 
 camera: cm.Camera,
@@ -567,10 +567,7 @@ fn update(self: *Self) !void {
     }
 
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
-    _ = camera_view_matrix;
     const camera_projection_matrix = render_camera.generate_perspective_matrix(engine().gfx.swapchain_aspect());
-    _ = camera_projection_matrix;
-
 
     var vel_buf: [128]u8 = [_]u8{0} ** 128;
     var vel_text: []u8 = vel_buf[0..0];
@@ -770,7 +767,7 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render particle system for attack system: {}", .{err});
     };
 
-    engine().gfx.bloom_filter.render_bloom(cmd) catch |err| {
+    engine().gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
         std.log.warn("Unable to apply bloom filter: {}", .{err});
     };
 
@@ -799,6 +796,14 @@ fn update(self: *Self) !void {
         self.edit_mode.render_cmd(cmd) catch |err| {
             std.log.warn("Unable to render edit mode: {}", .{err});
         };
+    }
+
+    if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.C)) {
+        engine().physics.debug_draw_bodies(
+            cmd,
+            camera_projection_matrix,
+            camera_view_matrix,
+        );
     }
 
     engine().debug.render_cmd(cmd, render_camera) catch |err| {
