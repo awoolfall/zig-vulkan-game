@@ -6,6 +6,7 @@ const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
 const as = eng.assets;
+const Camera = eng.camera.Camera;
 const Terrain = @import("terrain.zig");
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
@@ -13,50 +14,198 @@ const pt = eng.path;
 
 const HeightFieldModelSize = 32;
 
-const InstanceInfoStruct = extern struct {
+const PushConstantData = extern struct {
+    view_proj_matrix: zm.Mat,
     origin: zm.F32x4,
     height_scale: f32,
     grid_length: f32,
     grid_scale: f32,
-    _pad0: f32 = 0.0,
+
+    modify_radius: f32 = 0.0,
     modify_cells: zm.F32x4,
     modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
-    modify_radius: f32 = 0.0,
     modify_strength: f32 = 0.0,
 };
 
-instance_data_buffer: gf.Buffer.Ref,
+const ImagesDescriptorSetData = struct {
+    set: gf.DescriptorSet.Ref,
+    image_view: ?gf.ImageView.Ref = null,
+};
 
 vertex_shader: gf.VertexShader,
 pixel_shader: gf.PixelShader,
-watch: eng.assets.FileWatcher,
 
 selection_textures: st.SelectionTextures([2]f32),
 
+render_pass: gf.RenderPass.Ref,
+pipeline: gf.GraphicsPipeline.Ref,
+framebuffer: gf.FrameBuffer.Ref,
+
+images_descriptor_layout: gf.DescriptorLayout.Ref,
+images_descriptor_pool: gf.DescriptorPool.Ref,
+images_descriptor_sets: std.ArrayList(ImagesDescriptorSetData),
+
 model: eng.mesh.Model,
 
+current_frame: usize = 0,
+current_terrain_index: usize = 0,
+
 pub fn deinit(self: *Self) void {
-    self.instance_data_buffer.deinit();
+    self.model.deinit();
+
+    self.framebuffer.deinit();
+    self.pipeline.deinit();
+    self.render_pass.deinit();
+    self.selection_textures.deinit();
     self.vertex_shader.deinit();
     self.pixel_shader.deinit();
-    self.selection_textures.deinit();
-    self.model.deinit();
-    self.watch.deinit();
+
+    for (self.images_descriptor_sets.items) |s| {
+        s.set.deinit();
+    }
+    self.images_descriptor_sets.deinit();
+    self.images_descriptor_pool.deinit();
+    self.images_descriptor_layout.deinit();
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
     var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2);
     errdefer plane_model.deinit();
 
-    const instance_data_buffer = try gf.Buffer.init(
-        @sizeOf(InstanceInfoStruct),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-    );
-    errdefer instance_data_buffer.deinit();
-
     var selection_textures = try st.SelectionTextures([2]f32).init();
     errdefer selection_textures.deinit();
+
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.slang" });
+    defer path.deinit();
+
+    const vertex_shader = try gf.VertexShader.init_file(
+        alloc,
+        path,
+        "vs_main",
+        .{
+            .bindings = &.{
+                .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+            },
+            .attributes = &.{
+                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+                // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+                // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+                // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+                .{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
+            },
+        },
+        .{},
+    );
+    errdefer vertex_shader.deinit();
+
+    const pixel_shader = try gf.PixelShader.init_file(
+        alloc,
+        path,
+        "ps_main",
+        .{},
+    );
+    errdefer pixel_shader.deinit();
+
+    const images_descriptor_layout = try gf.DescriptorLayout.init(.{
+        .bindings = &.{
+            gf.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gf.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 1,
+                .binding_type = .Sampler,
+            },
+        },
+    });
+    errdefer images_descriptor_layout.deinit();
+
+    const images_descriptor_pool = try gf.DescriptorPool.init(.{
+        .max_sets = 128,
+        .strategy = .{ .Layout = images_descriptor_layout, },
+    });
+    errdefer images_descriptor_pool.deinit();
+
+    const images_descriptor_sets = try std.ArrayList(ImagesDescriptorSetData).initCapacity(alloc, 128);
+    errdefer images_descriptor_sets.deinit();
+
+    const attachments = &[_]gf.AttachmentInfo {
+        gf.AttachmentInfo {
+            .name = "colour",
+            .format = gf.GfxState.hdr_format,
+            .initial_layout = .ColorAttachmentOptimal,
+            .final_layout = .ColorAttachmentOptimal,
+            .blend_type = .None,
+        },
+        gf.AttachmentInfo {
+            .name = "depth",
+            .format = gf.GfxState.depth_format,
+            .initial_layout = .DepthStencilAttachmentOptimal,
+            .final_layout = .DepthStencilAttachmentOptimal,
+            .blend_type = .None,
+        },
+        gf.AttachmentInfo {
+            .name = "selection",
+            .format = st.SelectionTextures([2]f32).TextureFormat,
+            .initial_layout = .Undefined,
+            .final_layout = .ColorAttachmentOptimal,
+            .blend_type = .None,
+            .load_op = .Clear,
+        },
+    };
+
+    const render_pass = try gf.RenderPass.init(.{
+        .attachments = attachments,
+        .subpasses = &.{
+            gf.SubpassInfo {
+                .attachments = &.{ "colour", "selection" },
+                .depth_attachment = "depth",
+            },
+        },
+        .dependencies = &.{
+            gf.SubpassDependencyInfo {
+                .src_subpass = null,
+                .dst_subpass = 0,
+                .src_access_mask = .{},
+                .src_stage_mask = .{ .color_attachment_output = true, },
+                .dst_access_mask = .{ .color_attachment_write = true, },
+                .dst_stage_mask = .{ .color_attachment_output = true, },
+            },
+        },
+    });
+    errdefer render_pass.deinit();
+
+    const pipeline = try gf.GraphicsPipeline.init(.{
+        .render_pass = render_pass,
+        .subpass_index = 0,
+        .attachments = attachments,
+        .vertex_shader = &vertex_shader,
+        .pixel_shader = &pixel_shader,
+        .depth_test = .{ .write = true, },
+        .push_constants = &.{
+            gf.PushConstantLayoutInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .size = @sizeOf(PushConstantData),
+            },
+        },
+        .descriptor_set_layouts = &.{
+            images_descriptor_layout,
+        },
+    });
+    errdefer pipeline.deinit();
+
+    const framebuffer = try gf.FrameBuffer.init(.{
+        .render_pass = render_pass,
+        .attachments = &.{
+            .SwapchainHDR,
+            .SwapchainDepth,
+            .{ .View = selection_textures.view, },
+        },
+    });
+    errdefer framebuffer.deinit();
 
     const terrain_path = try pt.Path.init(eng.get().general_allocator, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
     defer terrain_path.deinit();
@@ -64,145 +213,140 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     const terrain_path_abs = try terrain_path.resolve_path(alloc);
     defer alloc.free(terrain_path_abs);
 
-    var self = Self {
+    return Self {
         .model = plane_model,
-        .instance_data_buffer = instance_data_buffer,
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
+        .vertex_shader = vertex_shader,
+        .pixel_shader = pixel_shader,
         .selection_textures = selection_textures,
-        .watch = try eng.assets.FileWatcher.init(alloc, terrain_path_abs, 500),
-    };
+        .render_pass = render_pass,
+        .pipeline = pipeline,
+        .framebuffer = framebuffer,
 
-    const shaders = try self.compile_shaders(alloc);
-    errdefer self.deinit();
-
-    self.vertex_shader = shaders.vertex_shader;
-    self.pixel_shader = shaders.pixel_shader;
-
-    return self;
-}
-
-fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !struct {
-    vertex_shader: gf.VertexShader,
-    pixel_shader: gf.PixelShader,
-} {
-    _ = self;
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
-    defer path.deinit();
-
-    const new_vertex_shader = try gf.VertexShader.init_file(
-        alloc,
-        path,
-        "vs_main",
-        .{
-            .bindings = &.{
-                .{ .binding = 0, .stride = 20, .input_rate = .Vertex, },
-            },
-            .attributes = &.{
-                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-                .{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 12, .format = .F32x2, },
-            },
-        },
-        .{},
-    );
-    errdefer new_vertex_shader.deinit();
-
-    const new_pixel_shader = try gf.PixelShader.init_file(
-        alloc,
-        path,
-        "ps_main",
-        .{},
-    );
-    errdefer new_pixel_shader.deinit();
-    
-    return .{
-        .vertex_shader = new_vertex_shader,
-        .pixel_shader = new_pixel_shader,
+        .images_descriptor_layout = images_descriptor_layout,
+        .images_descriptor_pool = images_descriptor_pool,
+        .images_descriptor_sets = images_descriptor_sets,
     };
 }
 
 /// Render the terrain using the camera buffer
 pub fn render(
     self: *Self, 
-    camera_buffer: *const gf.Buffer, 
-    transform: Transform, 
+    cmd: *gf.CommandBuffer,
+    camera: *const Camera,
     terrain: *const Terrain, 
-    rtv: gf.ImageView.Ref,
-    dsv: gf.ImageView.Ref,
+    transform: Transform, 
 ) void {
-    if (self.watch.was_modified_since_last_check()) blk: {
-        const shaders = self.compile_shaders(eng.get().general_allocator) catch break :blk;
-        self.vertex_shader.deinit();
-        self.pixel_shader.deinit();
-        self.vertex_shader = shaders.vertex_shader;
-        self.pixel_shader = shaders.pixel_shader;
+    if (self.current_frame != gf.GfxState.get().current_frame_index()) {
+        self.current_frame = gf.GfxState.get().current_frame_index();
+        self.current_terrain_index = 0;
     }
+    defer self.current_terrain_index += 1;
 
-    // update instance data buffer
-    {
-        const mapped_buffer = self.instance_data_buffer.map(.{ .write = true, }) catch unreachable;
-        defer mapped_buffer.unmap();
+    cmd.cmd_begin_render_pass(.{
+        .render_pass = self.render_pass,
+        .framebuffer = self.framebuffer,
+        .render_area = .full_screen_pixels(),
+    });
+    defer cmd.cmd_end_render_pass();
 
-        mapped_buffer.data(InstanceInfoStruct).* = .{
-            .origin = transform.position,
-            .height_scale = terrain.height_scale,
-            .grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
-            .grid_scale = terrain.terrain_grid_scale,
-            .modify_cells = zm.f32x4(
-                terrain.dbg_modify_cells[0][0], 
-                terrain.dbg_modify_cells[0][1], 
-                terrain.dbg_modify_cells[1][0], 
-                terrain.dbg_modify_cells[1][1]),
-            .modify_center = terrain.dbg_modify_center,
-            .modify_radius = terrain.modify_radius,
-            .modify_strength = 1.0,
+    cmd.cmd_bind_graphics_pipeline(self.pipeline);
+
+    cmd.cmd_set_viewports(.{ .viewports = &.{ .full_screen_viewport() } });
+    cmd.cmd_set_scissors(.{ .scissors = &.{ .full_screen_pixels() } });
+
+    const push_constant_data = PushConstantData {
+        .view_proj_matrix = zm.mul(
+            camera.transform.generate_view_matrix(),
+            camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
+        ),
+        .origin = transform.position,
+        .height_scale = terrain.height_scale,
+        .grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
+        .grid_scale = terrain.terrain_grid_scale,
+        .modify_cells = zm.f32x4(
+            terrain.dbg_modify_cells[0][0], 
+            terrain.dbg_modify_cells[0][1], 
+            terrain.dbg_modify_cells[1][0], 
+            terrain.dbg_modify_cells[1][1]),
+        .modify_center = terrain.dbg_modify_center,
+        .modify_radius = terrain.modify_radius,
+        .modify_strength = 1.0,
+    };
+
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = self.pipeline,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
+
+    // Create new descriptor set if necessary
+    if (self.images_descriptor_sets.items.len <= self.current_terrain_index) {
+        const pool = self.images_descriptor_pool.get() catch |err| {
+            std.log.warn("Unable to get terrain system images descriptor pool: {}", .{err});
+            return;
+        };
+        const new_set = pool.allocate_set(.{ .layout = self.images_descriptor_layout, }) catch |err| {
+            std.log.warn("Unable to create new terrain system images descriptor set: {}", .{err});
+            return;
+        };
+        self.images_descriptor_sets.append(.{ .set = new_set, }) catch |err| {
+            std.log.warn("Unable to append new terrain system images descriptor set to list: {}", .{err});
+            new_set.deinit();
+            return;
         };
     }
 
-    const gfx = gf.GfxState.get();
+    // Update descriptor set data if necessary
+    const last_set_image_view = self.images_descriptor_sets.items[self.current_terrain_index].image_view;
+    if (last_set_image_view == null or !last_set_image_view.?.id.eql(terrain.heightmap_texture_view.id)) {
+        const images_set = self.images_descriptor_sets.items[self.current_terrain_index].set.get() catch |err| {
+            std.log.warn("Unable to get terrain images descriptor set: {}", .{err});
+            return;
+        };
 
-    self.selection_textures.clear([2]f32{ -1.0, -1.0 });
-    gfx.cmd_set_render_target(&.{ rtv, self.selection_textures.rtv }, dsv);
+        images_set.update(.{
+            .writes = &.{
+                gf.DescriptorSetUpdateWriteInfo {
+                    .binding = 0,
+                    .data = .{ .ImageView = terrain.heightmap_texture_view, },
+                },
+                gf.DescriptorSetUpdateWriteInfo {
+                    .binding = 1,
+                    .data = .{ .Sampler = gf.GfxState.get().default.sampler, },
+                },
+            },
+        }) catch |err| {
+            std.log.warn("Unable to update terrain system image set {}: {}", .{self.current_terrain_index, err});
+        };
 
-    // set shaders
-    gfx.cmd_set_vertex_shader(&self.vertex_shader);
-    gfx.cmd_set_pixel_shader(&self.pixel_shader);
+        self.images_descriptor_sets.items[self.current_terrain_index].image_view = terrain.heightmap_texture_view;
+        std.log.info("Updated terrain texture",.{});
+    }
 
-    // set render state
-    gfx.cmd_set_topology(.TriangleList);
-    gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
-
-    // set shader resources
-    gfx.cmd_set_constant_buffers(.Vertex, 0, &[_]*const gf.Buffer{
-        camera_buffer,
-        &self.instance_data_buffer,
+    cmd.cmd_bind_descriptor_sets(.{
+        .graphics_pipeline = self.pipeline,
+        .descriptor_sets = &.{
+            self.images_descriptor_sets.items[self.current_terrain_index].set,
+        },
     });
-    gfx.cmd_set_constant_buffers(.Pixel, 0, &[_]*const gf.Buffer{
-        camera_buffer,
-        &self.instance_data_buffer,
+
+    cmd.cmd_bind_vertex_buffers(.{
+        .buffers = &.{
+            gf.VertexBufferInput {
+                .buffer = self.model.buffers.vertices,
+            },
+        }
     });
 
-    const texture_id = eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture").?;
-    const texture = eng.get().asset_manager.get_asset(as.ImageAsset, texture_id) catch unreachable;
-
-    const texture_view = gf.ImageView.init(.{ .image = texture.*, }) catch unreachable;
-    defer texture_view.deinit();
-
-    gfx.cmd_set_shader_resources(.Vertex, 0, &.{
-        terrain.heightmap_texture_view,
-        //texture_view,
+    cmd.cmd_bind_index_buffer(.{
+        .index_format = .U32,
+        .buffer = self.model.buffers.indices,
+        .offset = @intCast(self.model.mesh_list[0].indices_offset * @sizeOf(u32)),
     });
 
-    // set vertex and index buffers
-    var m = self.model;
-    gfx.cmd_set_vertex_buffers(0, &[_]gf.VertexBufferInput{
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.positions), .offset = @truncate(m.buffers.offsets.positions), },
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.texcoords), .offset = @truncate(m.buffers.offsets.texcoords), },
-        .{ .buffer = &m.buffers.vertices, .stride = @truncate(m.buffers.strides.normals), .offset = @truncate(m.buffers.offsets.normals), },
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(self.model.mesh_list[0].num_indices),
+        //.vertex_offset = @intCast(self.model.mesh_list[0].pos_offset),
     });
-    gfx.cmd_set_index_buffer(&m.buffers.indices, .U32, 0);
-
-    // draw
-    const p = m.mesh_list[0];
-    gfx.cmd_draw_indexed(@intCast(p.num_indices), @intCast(p.indices_offset), @intCast(p.pos_offset));
 }

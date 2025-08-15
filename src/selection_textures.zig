@@ -6,7 +6,7 @@ const zm = engine.zmath;
 pub fn SelectionTextures(comptime UnderlyingType: type) type {
     return struct {
         const Self = @This();
-        const TextureFormat = switch (UnderlyingType) {
+        pub const TextureFormat = switch (UnderlyingType) {
             u32 => gfx.ImageFormat.R32_Uint,
             f32 => gfx.ImageFormat.R32_Float,
             [2]f32 => gfx.ImageFormat.Rg32_Float,
@@ -129,8 +129,12 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
                 cmd.cmd_copy_image_to_buffer(.{
                     .image = self.image,
                     .buffer = self.staging_buffer,
-                    .image_offset = .{ @intCast(x), @intCast(y), 0 },
-                    .image_extent = .{ 1, 1, 1 },
+                    .copy_regions = &.{ 
+                        gfx.CommandBuffer.CopyRegionInfo {
+                            .image_offset = .{ @intCast(x), @intCast(y), 0 },
+                            .image_extent = .{ 1, 1, 1 },
+                        },
+                    },
                 });
 
                 cmd.cmd_pipeline_barrier(.{

@@ -304,15 +304,15 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
             },
         }
 
-        const heightmap_image = try self.heightmap_texture.get();
-        if (heightmap_image.map(.{ .write = true, })) |mapped_texture| {
-            defer mapped_texture.unmap();
-            // TODO: this is incorrect, d3d11 row pitch is 128 but row length is 64. (when 16 HeightFieldSize)
-            // probably need to do data() array access inside platform code
-            @memcpy(mapped_texture.data(f32), self.heightmap);
-        } else |err| {
-            std.log.err("Failed to map terrain texture: {}", .{err});
-        }
+        // const heightmap_image = try self.heightmap_texture.get();
+        // if (heightmap_image.map(.{ .write = true, })) |mapped_texture| {
+        //     defer mapped_texture.unmap();
+        //     // TODO: this is incorrect, d3d11 row pitch is 128 but row length is 64. (when 16 HeightFieldSize)
+        //     // probably need to do data() array access inside platform code
+        //     @memcpy(mapped_texture.data(f32), self.heightmap);
+        // } else |err| {
+        //     std.log.err("Failed to map terrain texture: {}", .{err});
+        // }
     }
 
     return modify_terrain != 0.0;

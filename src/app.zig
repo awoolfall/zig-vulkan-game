@@ -547,7 +547,7 @@ fn update(self: *Self) !void {
                 ) catch unreachable;
             } else {
                 if (self.current_mode == .Edit) {
-                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|sphere") catch unreachable;
+                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "core|sphere") catch unreachable;
                     const m = engine().asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
                     self.render_model(
                         @truncate(entity_id),
@@ -740,6 +740,7 @@ fn update(self: *Self) !void {
     };
 
     // Render to HDR buffer
+    // Standard HDR render
     self.standard_renderer.render_cmd(
         .{
             .camera = render_camera,
@@ -749,6 +750,19 @@ fn update(self: *Self) !void {
     ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
+
+    // render terrains
+    var entity_iter = engine().entities.list.iterator();
+    while (entity_iter.next()) |entity| {
+        if (entity.app.terrain) |*terrain| {
+            self.terrain_renderer.render(
+                cmd,
+                render_camera,
+                terrain,
+                entity.transform,
+            );
+        }
+    }
 
     // update and render particle systems
     var entities = engine().entities.list.iterator();

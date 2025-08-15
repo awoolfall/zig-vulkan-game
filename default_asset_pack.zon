@@ -36,10 +36,6 @@
         .path = .{ .Model = .{ .Cone = .{ .slices = 8, } } },
     },
     .{
-        .name = "sphere",
-        .path = .{ .Model = .{ .Sphere = .{} } },
-    },
-    .{
         .name = "cube",
         .path = .{ .Model = .{ .Cube = .{} } },
     },
@@ -52,6 +48,10 @@
     .{
         .name = "terrain-texture",
         .path = .{ .Image = .{ .Path = "terrain.r32" } },
+    },
+    .{
+        .name = "hello-world-texture-array",
+        .path = .{ .Image = .{ .Path = "hello_world_texture_array" } },
     },
 }
 
