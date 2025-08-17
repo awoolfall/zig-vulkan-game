@@ -25,7 +25,6 @@ ConstantBuffer<PushConstants> push_constant;
 struct vs_in
 {
     float3 pos : POS;
-    float2 tex_coord : TEXCOORD0;
 };
 
 [[vk::binding(0, 0)]]
@@ -44,28 +43,24 @@ struct vs_out
 [shader("vertex")]
 vs_out vs_main(vs_in input)
 {
-    input.tex_coord.y = 1.0 - input.tex_coord.y;
     vs_out output = (vs_out) 0;
     
     float size = push_constant.terrain_grid_length * push_constant.terrain_density_m;
-    float3 pos = push_constant.origin.xyz + (input.pos + float3(0.5, 0.0, 0.5)) * float3(size, 0.0, size);
+    float3 pos = push_constant.origin.xyz + input.pos * float3(size, 0.0, size);
     float3 grid_offset = float3(push_constant.terrain_grid_position.xxy) * float3(size, 0.0, size);
     pos += grid_offset;
 
-    float heightmap_uv_distance_per_terrain_grid = (size / push_constant.map_length_m);
-    float2 heightmap_uv_distance_per_terrain_grid_f2 = float2(heightmap_uv_distance_per_terrain_grid, heightmap_uv_distance_per_terrain_grid);
-    float2 heightmap_uv = (push_constant.terrain_grid_position.xy * heightmap_uv_distance_per_terrain_grid_f2) + (input.tex_coord * heightmap_uv_distance_per_terrain_grid_f2);
-    
+    float2 heightmap_uv = (pos.xz - push_constant.origin.xz) / push_constant.map_length_m;    
+    output.tex_coord = heightmap_uv;
+
     float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(heightmap_uv, 0.0), 0).r;
+
     output.position = float4(pos, 1.0);
     output.position += float4(0.0, height * push_constant.map_height_scale, 0.0, 0.0);
     output.position = mul(output.position, push_constant.view_projection_matrix);
 
     float c = (height + 1.0) / 5.0;
-
     output.colour = float4(c,c,c, 1.0);
-
-    output.tex_coord = heightmap_uv;
 
     return output;
 }

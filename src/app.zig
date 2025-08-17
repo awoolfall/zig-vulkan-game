@@ -25,7 +25,7 @@ const assets = eng.assets;
 const sr = eng.serialize;
 
 const Terrain = @import("terrain/terrain.zig");
-const TerrainSystem = @import("terrain/terrain_system.zig");
+const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
 const EditMode = @import("edit_mode.zig");
 
@@ -107,7 +107,7 @@ app_life_asset_pack_id: assets.AssetPackId,
 player_attack_particle_system: particle.ParticleSystem,
 
 standard_renderer: StandardRenderer,
-terrain_renderer: TerrainSystem,
+terrain_renderer: TerrainRenderer,
 
 edit_mode: EditMode,
 current_mode: enum { Edit, Play } = .Edit,
@@ -236,7 +236,7 @@ pub fn init(self: *Self) !void {
         .player_attack_particle_system = player_attack_particle_system,
 
         .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainSystem.init(engine().general_allocator),
+        .terrain_renderer = try TerrainRenderer.init(engine().general_allocator),
         .edit_mode = try EditMode.init(),
 
         .command_pool = command_pool,

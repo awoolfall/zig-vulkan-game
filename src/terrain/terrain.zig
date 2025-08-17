@@ -1,8 +1,8 @@
 const Self = @This();
-const TerrainSystem = @import("terrain_system.zig");
 
 const std = @import("std");
 const eng = @import("engine");
+const TerrainRenderer = @import("terrain_renderer.zig");
 const KeyCode = eng.input.KeyCode;
 const zm = eng.zmath;
 const gf = eng.gfx;
@@ -56,45 +56,20 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !Self {
-    const heightmap_data = try alloc.alloc(f32, HeightFieldSize * HeightFieldSize);
-    errdefer alloc.free(heightmap_data);
-
-    for (0..HeightFieldSize) |y| {
-        for (0..HeightFieldSize) |x| {
-            heightmap_data[y * HeightFieldSize + x] = @mod(@as(f32, @floatFromInt(x)), 2.0) + @mod(@as(f32, @floatFromInt(y)), 2.0);
-            heightmap_data[y * HeightFieldSize + x] /= 2.0;
-            // const u: f32 = @as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
-            // const v: f32 = @as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(HeightFieldSize - 1));
-            // heightmap_data[y * HeightFieldSize + x] = std.math.sin(u * std.math.pi * 2.0) * std.math.sin(v * std.math.pi * 2.0);
-        }
-    }
-
-    // blk: {
-    //     std.fs.cwd().writeFile(.{
-    //         .sub_path = "heightmap.f32",
-    //         .data = std.mem.sliceAsBytes(heightmap_data),
-    //     }) catch |err| {
-    //         std.log.err("unable to write heightmap.r32: {}", .{err});
-    //         break :blk;
-    //     };
-    // }
-
-    const heightmap_texture = try gf.Image.init(
-        .{
-            .height = HeightFieldSize,
-            .width = HeightFieldSize,
-            .format = .R32_Float,
-
-            .usage_flags = .{ .ShaderResource = true, },
-            .access_flags = .{ .CpuWrite = true, },
-            .dst_layout = .ShaderReadOnlyOptimal,
-        },
-        std.mem.sliceAsBytes(heightmap_data),
-    );
-    errdefer heightmap_texture.deinit();
-
     const hmt_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
+
+    const hmt_image_asset = try eng.get().asset_manager.get_asset_entry(as.ImageAsset, hmt_id);
+
+    var hmt_image = try hmt_image_asset.load_image_cpu(eng.get().general_allocator, 0);
+    defer hmt_image.deinit();
+
+    const heightmap_data = try alloc.alloc(f32, hmt_image.width * hmt_image.height);
+    errdefer alloc.free(heightmap_data);
+
+    // assert f32 image... TODO support other filetypes
+    std.debug.assert(hmt_image.is_hdr and hmt_image.num_components == 1 and hmt_image.bytes_per_component == @sizeOf(f32));
+    @memcpy(std.mem.sliceAsBytes(heightmap_data), hmt_image.data);
 
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
@@ -108,7 +83,7 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
         .map_height_scale = desc.map_height_scale,
         .vertex_density_m = desc.vertex_density_m,
 
-        .heightmap_texture = heightmap_texture,
+        .heightmap_texture = hmt.*,
         .heightmap_texture_view = heightmap_texture_view,
 
         .heightmap = heightmap_data,
@@ -148,12 +123,14 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
     const body_interface = eng.get().physics.zphy.getBodyInterfaceMut();
 
     // create the new physics body
-    const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, HeightFieldSize);
+    const heightmap_side_length: u32 = @intCast(std.math.sqrt(self.heightmap.len));
+    const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, heightmap_side_length);
     defer shape_settings.release();
 
+    const heightmap_side_length_f32: f32 = @floatFromInt(heightmap_side_length);
     const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
         shape_settings.asShapeSettings(), 
-        [3]f32{ self.map_length_m, self.map_height_scale, self.map_length_m });
+        [3]f32{ self.map_length_m / heightmap_side_length_f32, self.map_height_scale, self.map_length_m / heightmap_side_length_f32 });
     defer scaled_shape_settings.release();
 
     const shape = try scaled_shape_settings.createShape();
@@ -255,7 +232,7 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
     }
 }
 
-pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
+pub fn edit_terrain(self: *Self, terrain_renderer: *TerrainRenderer) !bool {
     var modify_terrain: f32 = 0.0;
     if (eng.get().input.get_key(KeyCode.MouseLeft)) {
         if (eng.get().input.get_key(KeyCode.Shift)) {
@@ -277,7 +254,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
 
         const heightfield_size_f32 = @as(f32, @floatFromInt(HeightFieldSize));
 
-        const terrain_uv = terrain_system.selection_textures
+        const terrain_uv = terrain_renderer.selection_textures
             .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1])) catch {
                 return false;
             };

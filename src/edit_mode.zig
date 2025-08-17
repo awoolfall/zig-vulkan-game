@@ -9,7 +9,7 @@ const st = @import("selection_textures.zig");
 const pe = @import("particle_editor.zig");
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
-const TerrainSystem = @import("terrain/terrain_system.zig");
+const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 
 const zm = eng.zmath;
 const sr = eng.serialize;
@@ -66,7 +66,7 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
     self.loaded_scene_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
 }
 
-pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_system: *TerrainSystem) !void {
+pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer) !void {
     self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
 
     if (!eng.get().imui.has_focus()) {
@@ -95,7 +95,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
             if (self.selected_entity) |selected_entity| blk: {
                 const ent = eng.get().entities.get(selected_entity) orelse break :blk;
                 if (ent.app.terrain) |*terrain| {
-                    const modified = terrain.edit_terrain(terrain_system) catch |err| {
+                    const modified = terrain.edit_terrain(terrain_renderer) catch |err| {
                         std.log.err("Failed to edit terrain: {}", .{err});
                         break :blk;
                     };

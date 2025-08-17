@@ -101,7 +101,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
                 // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
                 // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
                 // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-                .{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
+                //.{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
             },
         },
         .{},
