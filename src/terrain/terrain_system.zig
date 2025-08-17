@@ -12,18 +12,24 @@ const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 const pt = eng.path;
 
-const HeightFieldModelSize = 32;
+const HeightFieldModelSize = 64;
 
 const PushConstantData = extern struct {
-    view_proj_matrix: zm.Mat,
-    origin: zm.F32x4,
-    height_scale: f32,
-    grid_length: f32,
-    grid_scale: f32,
+    view_projection_matrix: zm.Mat,
 
-    modify_radius: f32 = 0.0,
+    origin: zm.F32x4,
+
+    terrain_grid_position: [2]i32, // index position of this terrain grid
+    terrain_grid_length: f32, // vertices along each edge of grid square
+    terrain_density_m: f32, // meters between each vertex
+
+    map_height_scale: f32,
+    map_length_m: f32,
+    __pad: [2]f32 = [2]f32{0.0, 0.0},
+
     modify_cells: zm.F32x4,
-    modify_center: [2]f32 = [_]f32{ 0.0, 0.0 },
+    modify_center: [2]f32 = [_]f32{0.0, 0.0},
+    modify_radius: f32 = 0.0,
     modify_strength: f32 = 0.0,
 };
 
@@ -40,6 +46,8 @@ selection_textures: st.SelectionTextures([2]f32),
 render_pass: gf.RenderPass.Ref,
 pipeline: gf.GraphicsPipeline.Ref,
 framebuffer: gf.FrameBuffer.Ref,
+
+sampler: gf.Sampler.Ref,
 
 images_descriptor_layout: gf.DescriptorLayout.Ref,
 images_descriptor_pool: gf.DescriptorPool.Ref,
@@ -66,6 +74,8 @@ pub fn deinit(self: *Self) void {
     self.images_descriptor_sets.deinit();
     self.images_descriptor_pool.deinit();
     self.images_descriptor_layout.deinit();
+
+    self.sampler.deinit();
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -207,6 +217,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     });
     errdefer framebuffer.deinit();
 
+    const sampler = try gf.Sampler.init(.{
+        .border_mode = .BorderColour,
+        .border_colour = zm.f32x4s(0.0),
+        .filter_min_mag = .Linear,
+        .filter_mip = .Point,
+    });
+    errdefer sampler.deinit();
+
     const terrain_path = try pt.Path.init(eng.get().general_allocator, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
     defer terrain_path.deinit();
 
@@ -221,6 +239,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .render_pass = render_pass,
         .pipeline = pipeline,
         .framebuffer = framebuffer,
+        .sampler = sampler,
 
         .images_descriptor_layout = images_descriptor_layout,
         .images_descriptor_pool = images_descriptor_pool,
@@ -253,32 +272,6 @@ pub fn render(
 
     cmd.cmd_set_viewports(.{ .viewports = &.{ .full_screen_viewport() } });
     cmd.cmd_set_scissors(.{ .scissors = &.{ .full_screen_pixels() } });
-
-    const push_constant_data = PushConstantData {
-        .view_proj_matrix = zm.mul(
-            camera.transform.generate_view_matrix(),
-            camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
-        ),
-        .origin = transform.position,
-        .height_scale = terrain.height_scale,
-        .grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
-        .grid_scale = terrain.terrain_grid_scale,
-        .modify_cells = zm.f32x4(
-            terrain.dbg_modify_cells[0][0], 
-            terrain.dbg_modify_cells[0][1], 
-            terrain.dbg_modify_cells[1][0], 
-            terrain.dbg_modify_cells[1][1]),
-        .modify_center = terrain.dbg_modify_center,
-        .modify_radius = terrain.modify_radius,
-        .modify_strength = 1.0,
-    };
-
-    cmd.cmd_push_constants(.{
-        .graphics_pipeline = self.pipeline,
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
-        .offset = 0,
-        .data = std.mem.asBytes(&push_constant_data),
-    });
 
     // Create new descriptor set if necessary
     if (self.images_descriptor_sets.items.len <= self.current_terrain_index) {
@@ -313,7 +306,7 @@ pub fn render(
                 },
                 gf.DescriptorSetUpdateWriteInfo {
                     .binding = 1,
-                    .data = .{ .Sampler = gf.GfxState.get().default.sampler, },
+                    .data = .{ .Sampler = self.sampler, },
                 },
             },
         }) catch |err| {
@@ -345,8 +338,56 @@ pub fn render(
         .offset = @intCast(self.model.mesh_list[0].indices_offset * @sizeOf(u32)),
     });
 
-    cmd.cmd_draw_indexed(.{
-        .index_count = @intCast(self.model.mesh_list[0].num_indices),
-        //.vertex_offset = @intCast(self.model.mesh_list[0].pos_offset),
-    });
+    const grid_size = @as(f32, @floatFromInt(HeightFieldModelSize)) * terrain.vertex_density_m;
+    const grid_origin_at_camera_pos = ((camera.transform.position - transform.position) /
+        zm.f32x4s(grid_size)) *
+        zm.f32x4(1.0, 0.0, 1.0, 0.0);
+    //const grids_to_fill_space: usize = @intFromFloat(camera.far_field * 2.0 / grid_size);
+    const grids_to_fill_space: usize = 64;
+
+    // TODO render tiles based on camera position and viewing direction
+    // TODO draw instanced
+    // TODO tesellation
+    for (0..grids_to_fill_space) |rx| {
+        const x: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[0])) + @as(i32, @intCast(rx)) - @as(i32, @intCast(grids_to_fill_space / 2));
+        for (0..grids_to_fill_space) |ry| {
+            const y: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[2])) + @as(i32, @intCast(ry)) - @as(i32, @intCast(grids_to_fill_space / 2));
+
+            const push_constant_data = PushConstantData {
+                .view_projection_matrix = zm.mul(
+                    camera.transform.generate_view_matrix(),
+                    camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
+                ),
+
+                .origin = transform.position,
+
+                .map_height_scale = terrain.map_height_scale,
+                .map_length_m = terrain.map_length_m,
+
+                .terrain_grid_position = [2]i32{@intCast(x), @intCast(y)},
+                .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
+                .terrain_density_m = terrain.vertex_density_m,
+
+                .modify_cells = zm.f32x4(
+                    terrain.dbg_modify_cells[0][0], 
+                    terrain.dbg_modify_cells[0][1], 
+                    terrain.dbg_modify_cells[1][0], 
+                    terrain.dbg_modify_cells[1][1]),
+                .modify_center = terrain.dbg_modify_center,
+                .modify_radius = terrain.modify_radius,
+                .modify_strength = 1.0,
+            };
+
+            cmd.cmd_push_constants(.{
+                .graphics_pipeline = self.pipeline,
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .data = std.mem.asBytes(&push_constant_data),
+            });
+
+            cmd.cmd_draw_indexed(.{
+                .index_count = @intCast(self.model.mesh_list[0].num_indices),
+            });
+        }
+    }
 }

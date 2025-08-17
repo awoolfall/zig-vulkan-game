@@ -47,7 +47,7 @@
     // Terrain image???
     .{
         .name = "terrain-texture",
-        .path = .{ .Image = .{ .Path = "terrain.r32" } },
+        .path = .{ .Image = .{ .Path = "terrain_a.r32" } },
     },
     .{
         .name = "hello-world-texture-array",

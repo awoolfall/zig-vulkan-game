@@ -14,19 +14,24 @@ const Transform = eng.Transform;
 const HeightFieldSize = 32;
 
 pub const Descriptor = struct {
-    heightmap_asset_id: ?as.Texture2DAssetId = null,
+    heightmap_asset_id: ?as.ImageAssetId = null,
     enable_physics: bool = true,
-    terrain_grid_scale: f32 = 1.0,
-    terrain_height_scale: f32 = 1.0,
+
+    map_length_m: f32 = 1.0,
+    map_height_scale: f32 = 1.0,
+
+    vertex_density_m: f32 = 0.1,
 };
 
 alloc: std.mem.Allocator,
 
-heightmap_asset_id: ?as.Texture2DAssetId,
+heightmap_asset_id: ?as.ImageAssetId,
 heightmap: []f32,
 
-terrain_grid_scale: f32 = 1.0,
-height_scale: f32 = 1.0,
+map_length_m: f32 = 1.0,
+map_height_scale: f32 = 1.0,
+
+vertex_density_m: f32 = 0.1, // meters between vertices
 
 heightmap_texture: gf.Image.Ref,
 heightmap_texture_view: gf.ImageView.Ref,
@@ -88,16 +93,24 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
     );
     errdefer heightmap_texture.deinit();
 
-    const heightmap_texture_view = try gf.ImageView.init(.{ .image = heightmap_texture, });
+    const hmt_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture");
+    const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
+
+    const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
 
     var self = Self {
         .alloc = alloc,
+
         .heightmap_asset_id = desc.heightmap_asset_id,
-        .terrain_grid_scale = desc.terrain_grid_scale,
-        .height_scale = desc.terrain_height_scale,
+
+        .map_length_m = desc.map_length_m,
+        .map_height_scale = desc.map_height_scale,
+        .vertex_density_m = desc.vertex_density_m,
+
         .heightmap_texture = heightmap_texture,
         .heightmap_texture_view = heightmap_texture_view,
+
         .heightmap = heightmap_data,
         .physics_body_id = null,
     };
@@ -113,8 +126,11 @@ pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
     return Descriptor {
         .heightmap_asset_id = self.heightmap_asset_id,
         .enable_physics = (self.physics_body_id != null),
-        .terrain_grid_scale = self.terrain_grid_scale,
-        .terrain_height_scale = self.height_scale,
+
+        .map_length_m = self.map_length_m,
+        .map_height_scale = self.map_height_scale,
+
+        .vertex_density_m = self.vertex_density_m,
     };
 }
 
@@ -137,7 +153,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
         shape_settings.asShapeSettings(), 
-        [3]f32{ self.terrain_grid_scale, self.height_scale, self.terrain_grid_scale });
+        [3]f32{ self.map_length_m, self.map_height_scale, self.map_length_m });
     defer scaled_shape_settings.release();
 
     const shape = try scaled_shape_settings.createShape();
@@ -176,7 +192,7 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         defer imui.pop_layout();
 
         _ = imui.label("texture: ");
-        _ = imui.number_slider(&self.terrain_grid_scale, .{}, key ++ .{@src()});
+        _ = imui.number_slider(&self.map_length_m, .{}, key ++ .{@src()});
     }
 
     var physics_checkbox = (self.physics_body_id != null);
@@ -201,8 +217,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("grid scale: ");
-        _ = imui.number_slider(&self.terrain_grid_scale, .{}, key ++ .{@src()});
+        _ = imui.label("map length (m): ");
+        _ = imui.number_slider(&self.map_length_m, .{}, key ++ .{@src()});
     }
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -213,7 +229,18 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         defer imui.pop_layout();
 
         _ = imui.label("height scale: ");
-        _ = imui.number_slider(&self.height_scale, .{}, key ++ .{@src()});
+        _ = imui.number_slider(&self.map_height_scale, .{}, key ++ .{@src()});
+    }
+    {
+        const ll = imui.push_layout(.X, key ++ .{@src()});
+        if (imui.get_widget(ll)) |ll_widget| {
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.children_gap = 4;
+        }
+        defer imui.pop_layout();
+
+        _ = imui.label("vertex density (m): ");
+        _ = imui.number_slider(&self.vertex_density_m, .{}, key ++ .{@src()});
     }
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -261,7 +288,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
     
         const heightmap_modify_center = terrain_uv_v * zm.f32x4s(heightfield_size_f32);
 
-        const max_modify_distance_cells: f32 = (self.modify_radius / self.terrain_grid_scale) * 1.5;
+        const max_modify_distance_cells: f32 = (self.modify_radius / self.map_length_m) * 1.5;
         const min_x: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[0] - max_modify_distance_cells), 0.0));
         const max_x: i32 = @intFromFloat(@min(@ceil(heightmap_modify_center[0] + max_modify_distance_cells), heightfield_size_f32));
         const min_y: i32 = @intFromFloat(@max(@floor(heightmap_modify_center[1] - max_modify_distance_cells), 0.0));
@@ -280,7 +307,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
                         const idx: usize = x + y * HeightFieldSize;
                         const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
                         const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
-                        const modify_radius_cells = self.modify_radius / self.terrain_grid_scale;
+                        const modify_radius_cells = self.modify_radius / self.map_length_m;
                         const modify_strength = @max(0.0, (modify_radius_cells - distance_to_cell) / @max(modify_radius_cells, 0.01));
                         self.heightmap[idx] += modify_terrain * eng.get().time.delta_time_f32() * modify_strength;
                     }
@@ -296,7 +323,7 @@ pub fn edit_terrain(self: *Self, terrain_system: *TerrainSystem) !bool {
                         const idx: usize = x + y * HeightFieldSize;
                         const cell = zm.f32x4(@floatFromInt(x), @floatFromInt(y), 0.0, 0.0);
                         const distance_to_cell = zm.length2(cell - heightmap_modify_center)[0];
-                        if (distance_to_cell <= (self.modify_radius / self.terrain_grid_scale)) {
+                        if (distance_to_cell <= (self.modify_radius / self.map_length_m)) {
                             self.heightmap[idx] = center_cell_value;
                         }
                     }

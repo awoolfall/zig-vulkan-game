@@ -74,7 +74,10 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             );
             errdefer image.deinit();
 
-            const view = try gfx.ImageView.init(.{ .image = image, });
+            const view = try gfx.ImageView.init(.{
+                .image = image,
+                .view_type = .ImageView2D,
+            });
             errdefer view.deinit();
 
             if (!first_time) {
