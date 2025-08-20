@@ -41,13 +41,14 @@ struct vs_out
 };
 
 [shader("vertex")]
-vs_out vs_main(vs_in input)
+vs_out vs_main(vs_in input, int instance_id : SV_InstanceID)
 {
     vs_out output = (vs_out) 0;
+    float2 grid_position = float2(instance_id / 64, instance_id % 64) - float2(64 / 2, 64 / 2);
     
     float size = push_constant.terrain_grid_length * push_constant.terrain_density_m;
     float3 pos = push_constant.origin.xyz + input.pos * float3(size, 0.0, size);
-    float3 grid_offset = float3(push_constant.terrain_grid_position.xxy) * float3(size, 0.0, size);
+    float3 grid_offset = (push_constant.terrain_grid_position.xxy + grid_position.xxy) * float3(size, 0.0, size);
     pos += grid_offset;
 
     float2 heightmap_uv = (pos.xz - push_constant.origin.xz) / push_constant.map_length_m;    
@@ -60,7 +61,7 @@ vs_out vs_main(vs_in input)
     output.position = mul(output.position, push_constant.view_projection_matrix);
 
     float c = (height + 1.0) / 5.0;
-    output.colour = float4(c,c,c, 1.0);
+    output.colour = float4(c, c, c, height);
 
     return output;
 }
@@ -75,7 +76,7 @@ struct ps_out
 ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out) 0;
-    output.colour = clamp(abs(input.colour - 0.2), 0.0, 1.0);
+    output.colour = clamp(abs(float4(input.colour.rgb, 1.0) - 0.2), 0.0, 1.0);
     // TODO fix
     // if (
     //     input.tex_coord.x > push_constant.modify_cells.x && input.tex_coord.x < push_constant.modify_cells.y && 

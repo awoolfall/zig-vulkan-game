@@ -67,9 +67,9 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
 }
 
 pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer) !void {
-    self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
-
     if (!eng.get().imui.has_focus()) {
+        self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
+
         // new entity button
         if (eng.get().input.get_key_down(KeyCode.E)) {
             self.create_new_entity();

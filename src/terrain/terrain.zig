@@ -138,7 +138,8 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     const new_body = try body_interface.createAndAddBody(.{
         .shape = shape,
-        .position = transform.position,
+        .position = transform.position + 
+            zm.f32x4(self.map_length_m/heightmap_side_length_f32, 0.0, self.map_length_m/heightmap_side_length_f32, 0.0) / zm.f32x4s(2.0),
         .motion_type = .static,
     }, .activate);
     errdefer body_interface.removeAndDestroyBody(new_body);
@@ -258,7 +259,7 @@ pub fn edit_terrain(self: *Self, terrain_renderer: *TerrainRenderer) !bool {
             .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1])) catch {
                 return false;
             };
-        if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0) {
+        if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0 or terrain_uv[0] > 1.0 or terrain_uv[1] > 1.0) {
             return false;
         }
         const terrain_uv_v = zm.loadArr2(terrain_uv);

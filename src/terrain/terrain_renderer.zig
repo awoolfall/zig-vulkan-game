@@ -12,7 +12,7 @@ const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 const pt = eng.path;
 
-const HeightFieldModelSize = 64;
+const HeightFieldModelSize = 32;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
@@ -163,6 +163,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
             .load_op = .Clear,
+            .clear_value = zm.f32x4s(-1.0),
         },
     };
 
@@ -343,51 +344,89 @@ pub fn render(
         zm.f32x4s(grid_size)) *
         zm.f32x4(1.0, 0.0, 1.0, 0.0);
     //const grids_to_fill_space: usize = @intFromFloat(camera.far_field * 2.0 / grid_size);
-    const grids_to_fill_space: usize = 64;
+    //const grids_to_fill_space: usize = 64;
 
     // TODO render tiles based on camera position and viewing direction
     // TODO draw instanced
     // TODO tesellation
-    for (0..grids_to_fill_space) |rx| {
-        const x: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[0])) + @as(i32, @intCast(rx)) - @as(i32, @intCast(grids_to_fill_space / 2));
-        for (0..grids_to_fill_space) |ry| {
-            const y: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[2])) + @as(i32, @intCast(ry)) - @as(i32, @intCast(grids_to_fill_space / 2));
 
-            const push_constant_data = PushConstantData {
-                .view_projection_matrix = zm.mul(
-                    camera.transform.generate_view_matrix(),
-                    camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
-                ),
+    const push_constant_data = PushConstantData {
+        .view_projection_matrix = zm.mul(
+            camera.transform.generate_view_matrix(),
+            camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
+        ),
 
-                .origin = transform.position,
+        .origin = transform.position,
 
-                .map_height_scale = terrain.map_height_scale,
-                .map_length_m = terrain.map_length_m,
+        .map_height_scale = terrain.map_height_scale,
+        .map_length_m = terrain.map_length_m,
 
-                .terrain_grid_position = [2]i32{@intCast(x), @intCast(y)},
-                .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
-                .terrain_density_m = terrain.vertex_density_m,
+        .terrain_grid_position = [2]i32{@intFromFloat(grid_origin_at_camera_pos[0]), @intFromFloat(grid_origin_at_camera_pos[2])},
+        .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
+        .terrain_density_m = terrain.vertex_density_m,
 
-                .modify_cells = zm.f32x4(
-                    terrain.dbg_modify_cells[0][0], 
-                    terrain.dbg_modify_cells[0][1], 
-                    terrain.dbg_modify_cells[1][0], 
-                    terrain.dbg_modify_cells[1][1]),
-                .modify_center = terrain.dbg_modify_center,
-                .modify_radius = terrain.modify_radius,
-                .modify_strength = 1.0,
-            };
+        .modify_cells = zm.f32x4(
+            terrain.dbg_modify_cells[0][0], 
+            terrain.dbg_modify_cells[0][1], 
+            terrain.dbg_modify_cells[1][0], 
+            terrain.dbg_modify_cells[1][1]),
+        .modify_center = terrain.dbg_modify_center,
+        .modify_radius = terrain.modify_radius,
+        .modify_strength = 1.0,
+    };
 
-            cmd.cmd_push_constants(.{
-                .graphics_pipeline = self.pipeline,
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
-                .offset = 0,
-                .data = std.mem.asBytes(&push_constant_data),
-            });
+    cmd.cmd_push_constants(.{
+        .graphics_pipeline = self.pipeline,
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
 
-            cmd.cmd_draw_indexed(.{
-                .index_count = @intCast(self.model.mesh_list[0].num_indices),
-            });
-        }
-    }
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(self.model.mesh_list[0].num_indices),
+        .instance_count = 64 * 64,
+    });
+
+    // for (0..grids_to_fill_space) |rx| {
+    //     const x: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[0])) + @as(i32, @intCast(rx)) - @as(i32, @intCast(grids_to_fill_space / 2));
+    //     for (0..grids_to_fill_space) |ry| {
+    //         const y: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[2])) + @as(i32, @intCast(ry)) - @as(i32, @intCast(grids_to_fill_space / 2));
+    //
+    //         const push_constant_data = PushConstantData {
+    //             .view_projection_matrix = zm.mul(
+    //                 camera.transform.generate_view_matrix(),
+    //                 camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
+    //             ),
+    //
+    //             .origin = transform.position,
+    //
+    //             .map_height_scale = terrain.map_height_scale,
+    //             .map_length_m = terrain.map_length_m,
+    //
+    //             .terrain_grid_position = [2]i32{@intCast(x), @intCast(y)},
+    //             .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
+    //             .terrain_density_m = terrain.vertex_density_m,
+    //
+    //             .modify_cells = zm.f32x4(
+    //                 terrain.dbg_modify_cells[0][0], 
+    //                 terrain.dbg_modify_cells[0][1], 
+    //                 terrain.dbg_modify_cells[1][0], 
+    //                 terrain.dbg_modify_cells[1][1]),
+    //             .modify_center = terrain.dbg_modify_center,
+    //             .modify_radius = terrain.modify_radius,
+    //             .modify_strength = 1.0,
+    //         };
+    //
+    //         cmd.cmd_push_constants(.{
+    //             .graphics_pipeline = self.pipeline,
+    //             .shader_stages = .{ .Vertex = true, .Pixel = true, },
+    //             .offset = 0,
+    //             .data = std.mem.asBytes(&push_constant_data),
+    //         });
+    //
+    //         cmd.cmd_draw_indexed(.{
+    //             .index_count = @intCast(self.model.mesh_list[0].num_indices),
+    //         });
+    //     }
+    // }
 }

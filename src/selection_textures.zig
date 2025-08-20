@@ -32,7 +32,7 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
 
         pub fn init() !Self {
             const staging_buffer = try gfx.Buffer.init(
-                @sizeOf(u32) * 1,
+                @sizeOf(UnderlyingType) * 1,
                 .{ .TransferDst = true, },
                 .{ .CpuRead = true, .GpuWrite = true, }
             );
@@ -97,18 +97,12 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             }
         }
 
-        pub fn clear(self: *Self, value: UnderlyingType) void {
-            const v = switch (UnderlyingType) {
-                u32 => zm.f32x4s(@floatFromInt(value)),
-                f32 => zm.f32x4s(value),
-                [2]f32 => zm.f32x4(value[0], value[1], value[0], value[1]),
-                [4]f32 => zm.f32x4(value[0], value[1], value[2], value[3]),
-                else => @compileError("unsupported selection texture type"),
-            };
-            gfx.GfxState.get().cmd_clear_render_target(self.rtv, v);
-        }
-
         pub fn get_value_at_position(self: *Self, x: usize, y: usize) !UnderlyingType {
+            const image_info = (try self.image.get()).info;
+            if (x >= image_info.width or y >= image_info.height) {
+                return error.PositionOutOfBounds;
+            }
+
             const cmd = &self.command_buffer;
             try cmd.reset();
 

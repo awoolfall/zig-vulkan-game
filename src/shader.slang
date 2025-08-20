@@ -1,3 +1,5 @@
+#include "gfx/common.slang"
+
 #ifndef MAX_OBJECTS_PER_INSTANCE_BUFFER
 #define MAX_OBJECTS_PER_INSTANCE_BUFFER 512
 #endif
@@ -33,23 +35,9 @@ struct InstanceData
 [[vk::binding(0, 1)]]
 ConstantBuffer<InstanceData[MAX_OBJECTS_PER_INSTANCE_BUFFER]> instance_data : register(b1);
 
-struct Light
-{
-    float4 position;
-    float4 direction;
-    float4 colour;
-    float intensity;
-    float umbra;
-    float penumbra;
-    uint type;
-};
-#define LIGHT_TYPE_DIRECTIONAL 0
-#define LIGHT_TYPE_POINT 1
-#define LIGHT_TYPE_SPOT 2
-
 struct LightsData
 {
-    Light lights[MAX_LIGHTS];
+    LightData lights[MAX_LIGHTS];
 };
 
 [[vk::binding(0, 2)]]
@@ -137,25 +125,6 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     return output;
 }
 
-float calculate_diffuse(float3 light_vector, float3 view_vector, float3 normal_vector, float roughness) {
-    light_vector = normalize(light_vector);
-    view_vector = normalize(view_vector);
-    normal_vector = normalize(normal_vector);
-
-    float cos_theta_l = saturate(dot(normal_vector, light_vector));
-    float cos_theta_v = saturate(dot(normal_vector, view_vector));
-
-    float3 half_vector = normalize(light_vector + view_vector);
-    float cos_theta_d = saturate(dot(light_vector, half_vector));
-
-    float FD90 = 0.5 + (2.0 * roughness * cos_theta_d * cos_theta_d);
-    return 
-        cos_theta_l *
-        (1.0 / 3.14159) * 
-        (1.0 + (FD90 - 1.0) * pow((1.0 - cos_theta_l), 5)) * 
-        (1.0 + (FD90 - 1.0) * pow((1.0 - cos_theta_v), 5));
-}
-
 struct ps_out
 {
     float4 colour : SV_TARGET0;
@@ -214,50 +183,17 @@ ps_out ps_main(vs_out input)
     //}
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
-        Light light = ldata.lights[i];
+        LightData light = ldata.lights[i];
 
-        if (light.intensity < 0.05) { continue; }
-
-        float3 light_dir;
-        float3 light_colour;
-
-        // TODO: distance max, smoothstep to zero, cull lights
-        if (light.type == LIGHT_TYPE_DIRECTIONAL) {
-            light_colour = light.colour.rgb * light.intensity;
-            light_dir = light.direction.xyz;
-        }
-        else if (light.type == LIGHT_TYPE_POINT) {
-            light_dir = normalize(light.position.xyz - input.world_pos.xyz);
-
-            float dist = length(light.position.xyz - input.world_pos.xyz);
-            dist = max(dist, 0.01);
-            float attenuation = (light.intensity * light.intensity) / (dist * dist);
-            light_colour = light.colour.rgb * attenuation;
-        }
-        else if (light.type == LIGHT_TYPE_SPOT) {
-            light_dir = normalize(light.position.xyz - input.world_pos.xyz);
-
-            float dist = length(light.position.xyz - input.world_pos.xyz);
-            float attenuation = (light.intensity * light.intensity) / (dist * dist);
-
-            float ts = dot(light_dir, normalize(light.direction.xyz));
-            float tu = cos(light.umbra);
-            float t = saturate((ts - tu) / (cos(light.umbra - light.penumbra) - tu));
-            float fdir = t * t;
-
-            light_colour = light.colour.rgb * fdir * attenuation;
-        } else {
-            continue;
-        }
-
-        float light_diffuse = calculate_diffuse(
-            light_dir,
+        float3 light_diffuse = calculate_light_diffuse(
+            light,
             view_dir,
+            input.world_pos.xyz,
             input.normal,
             roughness
         );
 
-        output.colour.rgb += light_colour * diffuse_colour.rgb * light_diffuse;
+        output.colour.rgb += light_diffuse * diffuse_colour.rgb;
     }
     //output.colour = float4(diffuse, diffuse, diffuse, 1.0);
     output.colour.a = 1.0;
