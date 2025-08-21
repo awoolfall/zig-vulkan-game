@@ -135,7 +135,7 @@ pub fn deinit(self: *Self) void {
     self.command_pool.deinit();
 }
 
-pub fn init(self: *Self) !void {
+pub fn init() !Self {
     std.log.info("App init!", .{});
 
     var asset_pack = try assets.AssetPack.init_from_file(engine().general_allocator, "default", "default_asset_pack.zon");
@@ -215,7 +215,7 @@ pub fn init(self: *Self) !void {
     const uber_cmd_semaphore = try gfx.Semaphore.init(.{});
     errdefer uber_cmd_semaphore.deinit();
 
-    self.* = Self {
+    return Self {
         .camera = cm.Camera {
             .field_of_view_y = cm.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
             .near_field = 0.3,
