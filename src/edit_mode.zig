@@ -138,8 +138,26 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
     self.entity_editor_ui(&self.entity_editor_ui_data, .{@src()});
 
-    // top bar UI
-    const top_bar_background = imui.push_layout(.X, .{@src()});
+    try self.top_bar_ui(.{@src()});
+
+    if (self.load_scene_popup_is_open) {
+        const background_layout = imui.push_floating_layout(.X, 300.0, 300.0, .{@src()});
+        defer imui.pop_layout();
+        if (imui.get_widget(background_layout)) |bg| {
+            set_background_widget_layout(bg);
+        }
+
+        self.load_scene_popup(&self.load_scene_popup_data, .{@src()})
+            catch unreachable;
+    }
+}
+
+fn top_bar_ui(self: *Self, key: anytype) !void {
+    const imui = &eng.get().imui;
+
+    const top_bar_background = imui.push_layout(.X, key ++ .{@src()});
+    defer imui.pop_layout();
+
     if (imui.get_widget(top_bar_background)) |top_widget| {
         top_widget.layout_axis = null;
         top_widget.semantic_size[0].kind = .ParentPercentage;
@@ -170,13 +188,15 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
         label_widget.pivot = .{ 0.5, 0.5 };
     }
 
-    const items_layout = imui.push_layout(.X, .{@src()});
+    const items_layout = imui.push_layout(.X, key ++ .{@src()});
+    defer imui.pop_layout();
+
     if (imui.get_widget(items_layout)) |ilw| {
         ilw.children_gap = 4;
     }
 
     {
-        const file_button = imui.button("File", .{@src()});
+        const file_button = imui.button("File", key ++ .{@src()});
         if (imui.get_widget(file_button.id.box)) |file_widget| {
             file_widget.background_colour = zm.f32x4s(0.0);
             file_widget.border_width_px = .{};
@@ -200,13 +220,13 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
             if (self.file_dropdown_open) {
                 const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
                 const file_lfw_rect = file_lfw.computed.rect();
-                const file_dropdown = imui.push_priority_floating_layout(.Y, file_lfw_rect.left, file_lfw_rect.bottom, .{@src()});
+                const file_dropdown = imui.push_priority_floating_layout(.Y, file_lfw_rect.left, file_lfw_rect.bottom, key ++ .{@src()});
                 if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
                     file_dropdown_widget.flags.render = true;
                 }
                 defer imui.pop_layout();
 
-                const save_button = imui.badge("Save Scene", .{@src()});
+                const save_button = imui.badge("Save Scene", key ++ .{@src()});
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
                         save_entities_to_scene(scene_name) catch |err| {
@@ -215,7 +235,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
                         std.log.debug("saved scene {s}!", .{scene_name});
                     }
                 }
-                const load_button = imui.badge("Load Scene", .{@src()});
+                const load_button = imui.badge("Load Scene", key ++ .{@src()});
                 if (load_button.clicked) {
                     self.load_scene_popup_is_open = true;
                     // for (eng.get().entities.list.data.items, 0..) |*it, idx| {
@@ -233,7 +253,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
     }
 
     {
-        const edit_button = imui.button("Edit", .{@src()});
+        const edit_button = imui.button("Edit", key ++ .{@src()});
         if (imui.get_widget(edit_button.id.box)) |edit_widget| {
             edit_widget.background_colour = zm.f32x4s(0.0);
             edit_widget.border_width_px = .{};
@@ -257,42 +277,28 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
             if (self.edit_dropdown_open) {
                 const edit_lfw = imui.get_widget_from_last_frame(edit_button.id.box) orelse break :edit_blk;
                 const edit_lfw_rect = edit_lfw.computed.rect();
-                const edit_dropdown = imui.push_priority_floating_layout(.Y, edit_lfw_rect.left, edit_lfw_rect.bottom, .{@src()});
+                const edit_dropdown = imui.push_priority_floating_layout(.Y, edit_lfw_rect.left, edit_lfw_rect.bottom, key ++ .{@src()});
                 if (imui.get_widget(edit_dropdown)) |edit_dropdown_widget| {
                     edit_dropdown_widget.flags.render = true;
                 }
                 defer imui.pop_layout();
 
-                const new_button = imui.badge("New Entity", .{@src()});
+                const new_button = imui.badge("New Entity", key ++ .{@src()});
                 if (new_button.clicked) {
                     self.create_new_entity();
                 }
 
-                const delete_button = imui.badge("Delete Entity", .{@src()});
+                const delete_button = imui.badge("Delete Entity", key ++ .{@src()});
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
 
-                const duplicate_button = imui.badge("Duplicate Entity", .{@src()});
+                const duplicate_button = imui.badge("Duplicate Entity", key ++ .{@src()});
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity();
                 }
             }
         }
-    }
-
-    imui.pop_layout();
-    imui.pop_layout();
-
-    if (self.load_scene_popup_is_open) {
-        const background_layout = imui.push_floating_layout(.X, 300.0, 300.0, .{@src()});
-        defer imui.pop_layout();
-        if (imui.get_widget(background_layout)) |bg| {
-            set_background_widget_layout(bg);
-        }
-
-        self.load_scene_popup(&self.load_scene_popup_data, .{@src()})
-            catch unreachable;
     }
 }
 

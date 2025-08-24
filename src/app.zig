@@ -115,7 +115,7 @@ current_mode: enum { Edit, Play } = .Edit,
 command_pool: gfx.CommandPool.Ref,
 command_buffers: [4]gfx.CommandBuffer,
 
-uber_cmd_semaphore: gfx.Semaphore,
+uber_cmd_semaphores: []gfx.Semaphore,
 
 pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
@@ -125,7 +125,10 @@ pub fn deinit(self: *Self) void {
     engine().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
         catch unreachable;
 
-    self.uber_cmd_semaphore.deinit();
+    for (self.uber_cmd_semaphores) |s| {
+        s.deinit();
+    }
+    eng.get().general_allocator.free(self.uber_cmd_semaphores);
 
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
@@ -212,8 +215,13 @@ pub fn init() !Self {
     const command_buffers: [4]gfx.CommandBuffer = 
         (command_pool.get() catch unreachable).allocate_command_buffers(.{}, 4) catch unreachable;
 
-    const uber_cmd_semaphore = try gfx.Semaphore.init(.{});
-    errdefer uber_cmd_semaphore.deinit();
+    var uber_cmd_semaphores = try std.ArrayList(gfx.Semaphore).initCapacity(eng.get().general_allocator, gfx.GfxState.get().frames_in_flight());
+    defer uber_cmd_semaphores.deinit();
+    errdefer for (uber_cmd_semaphores.items) |s| { s.deinit(); };
+
+    for (0..gfx.GfxState.get().frames_in_flight()) |_| {
+        try uber_cmd_semaphores.append(try gfx.Semaphore.init(.{}));
+    }
 
     return Self {
         .camera = cm.Camera {
@@ -242,7 +250,7 @@ pub fn init() !Self {
         .command_pool = command_pool,
         .command_buffers = command_buffers,
 
-        .uber_cmd_semaphore = uber_cmd_semaphore,
+        .uber_cmd_semaphores = try uber_cmd_semaphores.toOwnedSlice(),
     };
 }
 
@@ -742,26 +750,24 @@ fn update(self: *Self) !void {
         return;
     };
 
+    const uber_semaphore = &self.uber_cmd_semaphores[gfx.GfxState.get().current_frame_index()];
     engine().gfx.submit_command_buffer(.{
         .command_buffers = &.{ cmd },
         .wait_semaphores = &.{ .{
             .semaphore = &image_available_semaphore,
             .dst_stage = gfx.PipelineStageFlags{ .color_attachment_output = true, },
         } },
-        .signal_semaphores = &.{ &self.uber_cmd_semaphore },
+        .signal_semaphores = &.{ uber_semaphore },
     }) catch |err| {
         std.log.warn("Unable to submit command buffer: {}", .{err});
         return;
     };
 
     // Present
-    engine().gfx.present(&.{ &self.uber_cmd_semaphore }) catch |err| {
+    engine().gfx.present(&.{ uber_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
-
-    // Scuffed synchronisation, TODO do this properly
-    engine().gfx.flush();
 }
 
 pub fn render_model(
