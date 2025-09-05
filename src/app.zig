@@ -3,108 +3,38 @@ const Self = @This();
 const std = @import("std");
 
 const eng = @import("engine");
-const engine = eng.get;
-const Engine = eng.Engine;
-
 const zphy = eng.physics.zphy;
 const zm = eng.zmath;
 const Transform = eng.Transform;
 const gfx = eng.gfx;
 const window = eng.window;
-const input = eng.input;
 const KeyCode = eng.input.KeyCode;
-const cm = eng.camera;
-const ms = eng.mesh;
 const gen = eng.gen;
 const ph = eng.physics;
-const path = eng.path;
-const particle = eng.particles;
 const es = eng.easings;
 const anim = eng.animation;
 const assets = eng.assets;
 const sr = eng.serialize;
+const FontEnum = eng.ui.FontEnum;
 
-const Terrain = @import("terrain/terrain.zig");
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
 const EditMode = @import("edit_mode.zig");
 
-const ui = eng.ui;
-const FontEnum = ui.FontEnum;
-
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
 
-pub const EntityData = struct {
-    pub const Descriptor = struct {
-        health_points: ?i32 = null,
-        anim_controller_desc: ?anim.AnimController.Descriptor = null,
-        particle_system_settings: ?particle.ParticleSystemSettings = null,
-        light: ?StandardRenderer.Light = null,
-        terrain: ?Terrain.Descriptor = null,
-    };
+pub const EntityData = @import("entity.zig");
 
-    health_points: ?i32,
-    anim_controller: ?anim.AnimController,
-    particle_system: ?particle.ParticleSystem,
-    light: ?StandardRenderer.Light,
-    terrain: ?Terrain,
-
-    pub fn deinit(self: *EntityData) void {
-        if (self.anim_controller) |*anim_controller| {
-            anim_controller.deinit();
-        }
-        if (self.particle_system) |*particle_system| {
-            particle_system.deinit();
-        }
-        if (self.terrain) |*terrain| {
-            terrain.deinit();
-        }
-    }
-
-    pub fn init(desc: Descriptor) !EntityData {
-        return EntityData {
-            .health_points = desc.health_points,
-            .anim_controller = if (desc.anim_controller_desc) |anim_desc| 
-                try anim.AnimController.init(engine().general_allocator, anim_desc) 
-                else null,
-            .particle_system = if (desc.particle_system_settings) |ps| 
-                try particle.ParticleSystem.init(engine().general_allocator, ps) 
-                else null,
-            .light = if (desc.light) |l| l else null,
-            .terrain = if (desc.terrain) |t| 
-                try Terrain.init(engine().general_allocator, t, .{}) 
-                else null,
-        };
-    }
-
-    pub fn descriptor(self: *const EntityData, alloc: std.mem.Allocator) !Descriptor {
-        const anim_desc = if (self.anim_controller) |ac| try ac.descriptor(alloc) else null;
-        errdefer if (anim_desc) |ad| alloc.free(ad);
-
-        const particle_system_settings = if (self.particle_system) |ps| ps.settings else null;
-
-        const terrain_desc = if (self.terrain) |t| try t.descriptor(alloc) else null;
-        errdefer if (terrain_desc) |td| alloc.free(td);
-
-        return Descriptor {
-            .health_points = self.health_points,
-            .anim_controller_desc = anim_desc,
-            .particle_system_settings = particle_system_settings,
-            .light = self.light,
-            .terrain = terrain_desc,
-        };
-    }
-};
-
-camera: cm.Camera,
+camera: eng.camera.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
 character_idx: gen.GenerationalIndex,
+opponent_idx: gen.GenerationalIndex,
 
 app_life_asset_pack_id: assets.AssetPackId,
 
-player_attack_particle_system: particle.ParticleSystem,
+player_attack_particle_system: eng.particles.ParticleSystem,
 
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
@@ -122,7 +52,7 @@ pub fn deinit(self: *Self) void {
 
     self.player_attack_particle_system.deinit();
 
-    engine().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
+    eng.get().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
         catch unreachable;
 
     for (self.uber_cmd_semaphores) |s| {
@@ -140,17 +70,18 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     std.log.info("App init!", .{});
+    const engine = eng.get();
 
-    var asset_pack = try assets.AssetPack.init_from_file(engine().general_allocator, "default", "default_asset_pack.zon");
+    var asset_pack = try assets.AssetPack.init_from_file(engine.general_allocator, "default", "default_asset_pack.zon");
     errdefer asset_pack.deinit();
 
-    const asset_pack_id = try engine().asset_manager.add_asset_pack(asset_pack);
-    try engine().asset_manager.load_asset_pack(asset_pack_id);
+    const asset_pack_id = try engine.asset_manager.add_asset_pack(asset_pack);
+    try engine.asset_manager.load_asset_pack(asset_pack_id);
     
     // Print model animation names
     //
-    // const character_model_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
-    // const character_model = engine().asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
+    // const character_model_id = engine.asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
+    // const character_model = engine.asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
     // std.log.info("character model animations:", .{});
     // for (character_model.animations, 0..) |*animation, i| {
     //     std.log.info("{}. anim: {s}", .{i, animation.name});
@@ -158,7 +89,7 @@ pub fn init() !Self {
 
     // for (0..100) |_| {
     //     chara_transform.position += zm.f32x4(0.0, 0.5, 0.0, 0.0);
-    //     _ = try engine().entities.new_entity(Engine.EntityDescriptor {
+    //     _ = try engine.entities.new_entity(Engine.EntityDescriptor {
     //         .name = "opponent entity",
     //         .should_serialize = true,
     //         .model = "default|character",
@@ -173,10 +104,10 @@ pub fn init() !Self {
     //         });
     // }
 
-    engine().physics.zphy.optimizeBroadPhase();
+    engine.physics.zphy.optimizeBroadPhase();
 
-    var player_attack_particle_system = try particle.ParticleSystem.init(
-        engine().general_allocator,
+    var player_attack_particle_system = try eng.particles.ParticleSystem.init(
+        engine.general_allocator,
         .{
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
@@ -188,17 +119,17 @@ pub fn init() !Self {
             .spawn_rate_variance = 0.0,
             .burst_count = 60,
             .particle_lifetime = 1.0,
-            .scale = try particle.ScaleKeyFrameArray.fromSlice(&.{
+            .scale = try eng.particles.ScaleKeyFrameArray.fromSlice(&.{
                 .{ .value = zm.f32x4s(0.05), },
             }),
-            .colour = try particle.ColourKeyFrameArray.fromSlice(&.{
+            .colour = try eng.particles.ColourKeyFrameArray.fromSlice(&.{
                 .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0, },
                 .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 0.0)), .key_time = 1.0, .easing_into = .OutLinear },
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.0, 1.0, 1.0, 1.0)), .key_time = 0.0, },
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.5, 1.0, 1.0, 1.0)), .key_time = 0.5, },
                 // .{ .value = zm.hsvToRgb(zm.f32x4(0.999, 1.0, 1.0, 1.0)), .key_time = 1.0, },
             }),
-            .forces = try particle.ForceArray.fromSlice(&.{
+            .forces = try eng.particles.ForceArray.fromSlice(&.{
                 .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0, } },
                 .{ .Drag = 5.0 },
             }),
@@ -224,8 +155,8 @@ pub fn init() !Self {
     }
 
     return Self {
-        .camera = cm.Camera {
-            .field_of_view_y = cm.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine().gfx.swapchain_aspect()),
+        .camera = eng.camera.Camera {
+            .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine.gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 1000.0,
             .move_speed = 10.0,
@@ -236,6 +167,7 @@ pub fn init() !Self {
         },
 
         .character_idx = gen.GenerationalIndex.invalid(),
+        .opponent_idx = gen.GenerationalIndex.invalid(),
 
         //.character_ignore_self_filter = character_ignore_self_filter,
 
@@ -244,7 +176,7 @@ pub fn init() !Self {
         .player_attack_particle_system = player_attack_particle_system,
 
         .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainRenderer.init(engine().general_allocator),
+        .terrain_renderer = try TerrainRenderer.init(engine.general_allocator),
         .edit_mode = try EditMode.init(),
 
         .command_pool = command_pool,
@@ -255,23 +187,25 @@ pub fn init() !Self {
 }
 
 fn update(self: *Self) !void {
+    const engine = eng.get();
+
     // switch modes
-    if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.F1)) {
+    if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.F1)) {
         switch (self.current_mode) {
             .Edit => {
                 self.current_mode = .Play;
-                engine().time.time_scale = 1.0;
+                engine.time.time_scale = 1.0;
             },
             .Play => {
                 self.current_mode = .Edit;
                 self.edit_mode.editor_camera.transform = self.camera.transform;
-                engine().time.time_scale = 0.01;
+                engine.time.time_scale = 0.01;
             },
         }
     }
 
     // update
-    var render_camera: *cm.Camera = undefined;
+    var render_camera: *eng.camera.Camera = undefined;
     switch (self.current_mode) {
         .Edit => {
             self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer) catch |err| {
@@ -283,8 +217,8 @@ fn update(self: *Self) !void {
             blk: {
                 if (self.character_idx.is_invalid()) {
                     // spawn character
-                    const character_spawner_idx = engine().entities.find_entity_by_name("character-spawner") orelse break :blk;
-                    const character_spawner = engine().entities.get(character_spawner_idx).?;
+                    const character_spawner_idx = engine.entities.find_entity_by_name("character-spawner") orelse break :blk;
+                    const character_spawner = engine.entities.get(character_spawner_idx).?;
                     const character_spawner_transform = character_spawner.transform;
 
                     const chara_shape = ph.ShapeSettings {
@@ -308,7 +242,7 @@ fn update(self: *Self) !void {
                         .character_padding = 0.02,
                     };
 
-                    self.character_idx = try engine().entities.new_entity(Engine.EntityDescriptor {
+                    self.character_idx = try engine.entities.new_entity(eng.Engine.EntityDescriptor {
                         .name = "character entity",
                         .should_serialize = false,
                         .model = "default|character",
@@ -329,49 +263,102 @@ fn update(self: *Self) !void {
                 }
             }
 
+            blk: {
+                if (self.opponent_idx.is_invalid()) {
+                    // spawn character
+                    const spawner_idx = engine.entities.find_entity_by_name("opponent-spawner") orelse break :blk;
+                    const spawner = engine.entities.get(spawner_idx).?;
+                    const spawner_transform = spawner.transform;
+
+                    const chara_shape = ph.ShapeSettings {
+                        .shape = .{ .Capsule = .{
+                            .half_height = 0.7,
+                            .radius = 0.2,
+                        } },
+                        .offset_transform = Transform {
+                            .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
+                            .rotation = zm.qidentity(),
+                        },
+                    };
+
+                    const character_virtual_settings = ph.CharacterVirtualSettings {
+                        .base = ph.CharacterBaseSettings {
+                            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
+                            .max_slope_angle = 70.0,
+                            .shape = chara_shape,
+                        },
+                        .mass = 70.0,
+                        .character_padding = 0.02,
+                    };
+
+                    self.opponent_idx = try engine.entities.new_entity(eng.Engine.EntityDescriptor {
+                        .name = "opponent entity",
+                        .should_serialize = false,
+                        .model = "default|character",
+                        .transform = Transform {
+                            .position = spawner_transform.position,
+                            .rotation = spawner_transform.rotation,
+                        },
+                        .physics = .{ .CharacterVirtual = .{
+                            .settings = character_virtual_settings,
+                            .create_character = true,
+                            .extended_update_settings = .{},
+                        } },
+                        .app = .{
+                            .health_points = 100,
+                            .anim_controller_desc = character_anim_description(),
+                        },
+                    });
+                }
+            }
+
             // Input to move the model around
-            if (engine().entities.get(self.character_idx)) |character_entity| {
+            if (engine.entities.get(self.character_idx)) |character_entity| {
                 var movement_direction = zm.f32x4s(0.0);
-                if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.W)) {
+                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.W)) {
                     movement_direction[2] += 1.0;
                 }
-                if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.S)) {
+                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.S)) {
                     movement_direction[2] -= 1.0;
                 }
-                if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.D)) {
+                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.D)) {
                     movement_direction[0] += 1.0;
                 }
-                if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.A)) {
+                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.A)) {
                     movement_direction[0] -= 1.0;
+                }
+
+                if (!zm.all(movement_direction == zm.f32x4s(0.0), 3)) {
+                    movement_direction = zm.normalize3(movement_direction);
+                }
+
+                const is_running = (!engine.imui.has_focus() and engine.input.get_key(KeyCode.Shift));
+                if (is_running) {
+                    movement_direction *= zm.f32x4s(2.0);
+                }
+
+                // Move slower walking backwards
+                if (!is_running and movement_direction[2] < 0.0) {
+                    movement_direction[2] *= 0.8;
                 }
 
                 const camera_right = self.camera.transform.right_direction();
                 const camera_forward_no_pitch = zm.cross3(zm.f32x4(0.0, 1.0, 0.0, 0.0), camera_right);
 
-                movement_direction = 
+                var world_movement_direction = 
                     camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
                     + camera_right * zm.f32x4s(movement_direction[0]);
 
-                //const ground_normal = zm.normalize3(zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getGroundNormal()));
-                //movement_direction = zm.cross3(zm.cross3(ground_normal, movement_direction), ground_normal);
-
-                engine().debug.draw_line(.{
-                    .p0 = character_entity.transform.position,
-                    .p1 = character_entity.transform.position + zm.normalize3(movement_direction),
-                    .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
-                });
-
-                if (@reduce(.Add, @abs(movement_direction)) != 0.0) {
-                    movement_direction = zm.normalize3(movement_direction);
-                }
-                if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.Shift)) {
-                    movement_direction *= zm.f32x4s(2.0);
-                }
+                // engine.debug.draw_line(.{
+                //     .p0 = character_entity.transform.position,
+                //     .p1 = character_entity.transform.position + zm.normalize3(movement_direction),
+                //     .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
+                // });
 
                 // disable movement when attacking
                 if (character_entity.app.anim_controller) |*ac| {
                     if (ac.active_node == 2) {
-                        movement_direction *= zm.f32x4s(0.0);
+                        world_movement_direction = zm.f32x4s(0.0);
                     }
                 }
 
@@ -387,29 +374,38 @@ fn update(self: *Self) !void {
 
                     character_velocity = character_velocity
                         // apply supported movement
-                        + movement_direction * zm.f32x4s(character_movement_speed * friction * engine().time.delta_time_f32())
+                        + world_movement_direction * zm.f32x4s(character_movement_speed * friction * engine.time.delta_time_f32())
                         // apply friction
-                        - character_velocity * zm.f32x4s(friction * engine().time.delta_time_f32());
+                        - character_velocity * zm.f32x4s(friction * engine.time.delta_time_f32());
                 } else {
                     // if not supported then apply gravity
                     character_velocity = character_velocity
-                        + zm.loadArr3(engine().physics.zphy.getGravity()) * zm.f32x4s(engine().time.delta_time_f32());
+                        + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
                 }
 
                 character.setLinearVelocity(zm.vecToArr3(character_velocity));
 
                 // Rotate character model to match the input desired direction
                 // If no input desired direction (normalized to nan) then remain in last rotation
-                const dir = zm.normalize3(movement_direction);
-                if (!std.math.isNan(dir[0])) {
-                    const rot = zm.lookAtRh(zm.f32x4s(0.0), dir * zm.f32x4(1.0, 1.0, -1.0, 0.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
+                const rotate_towards_dir = if (!is_running) blk: {
+                    break :blk zm.normalize3(camera_forward_no_pitch + world_movement_direction);
+                } else blk: {
+                    break :blk zm.normalize3(world_movement_direction);
+                };
+
+                if (!std.math.isNan(rotate_towards_dir[0])) {
+                    const rot = zm.lookAtRh(
+                        zm.f32x4s(0.0),
+                        rotate_towards_dir * zm.f32x4(1.0, 1.0, -1.0, 0.0),
+                        zm.f32x4(0.0, 1.0, 0.0, 0.0)
+                    );
                     character.setRotation(
                         zm.slerp(character_entity.transform.rotation, zm.matToQuat(rot), 0.1)
                     );
                 }
 
-                if (!engine().imui.has_focus() and engine().input.get_key_down(KeyCode.MouseLeft)) {
-                    var collector = CollideShapeCollector.init(engine().frame_allocator);
+                if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.MouseLeft)) {
+                    var collector = CollideShapeCollector.init(engine.frame_allocator);
                     defer collector.deinit();
 
                     const box_shape_settings = zphy.BoxShapeSettings.create([3]f32{0.5, 0.5, 0.5}) catch unreachable;
@@ -438,7 +434,7 @@ fn update(self: *Self) !void {
                     self.player_attack_particle_system.settings.initial_velocity = zm.f32x4s(0.0); //camera_forward_2d * zm.f32x4s(10.0);
                     self.player_attack_particle_system.emit_particle_burst();
 
-                    engine().physics.zphy.getNarrowPhaseQuery().collideShape(
+                    engine.physics.zphy.getNarrowPhaseQuery().collideShape(
                         box_shape,
                         [3]f32{1.0, 1.0, 1.0},
                         matrix,
@@ -449,11 +445,11 @@ fn update(self: *Self) !void {
 
                     std.log.info("hits: {}", .{collector.hits.items.len});
                     for (collector.hits.items) |hit| {
-                        var read_lock = engine().physics.init_body_read_lock(hit.body2_id) catch unreachable;
+                        var read_lock = engine.physics.init_body_read_lock(hit.body2_id) catch unreachable;
                         defer read_lock.deinit();
 
                         const user_data = ph.PhysicsSystem.extract_entity_from_user_data(read_lock.body.getUserData());
-                        if (engine().entities.get(user_data.entity)) |entity| {
+                        if (engine.entities.get(user_data.entity)) |entity| {
                             std.log.info("- {s}", .{entity.name orelse "unnamed"});
 
                             if (entity.app.health_points) |*hp| {
@@ -467,9 +463,58 @@ fn update(self: *Self) !void {
                 }
             }
 
+            blk: {
+                const opponent = engine.entities.get(self.opponent_idx) orelse break :blk;
+                const character = engine.entities.get(self.character_idx) orelse break :blk;
+
+                var desired_movement_direction = zm.f32x4s(0.0);
+
+                const pos_diff = character.transform.position - opponent.transform.position;
+                const desired_distance = 5.0;
+                if (zm.length3(pos_diff)[0] > desired_distance) {
+                    desired_movement_direction += zm.normalize3(pos_diff);
+                }
+
+                const character_physics = opponent.physics.?.CharacterVirtual.virtual;
+
+                if (zm.length3(desired_movement_direction)[0] != 0.0) {
+                    desired_movement_direction = zm.normalize3(desired_movement_direction);
+
+                    var character_velocity = zm.loadArr3(character_physics.getLinearVelocity());
+
+                    if (character_is_supported(character_physics)) {
+                        // remove any gravity
+                        character_velocity[1] = 0.0;
+
+                        const character_movement_speed = 4.0;
+                        const friction = 8.0;
+
+                        character_velocity = character_velocity
+                            // apply supported movement
+                            + desired_movement_direction * zm.f32x4s(character_movement_speed * friction * engine.time.delta_time_f32())
+                            // apply friction
+                            - character_velocity * zm.f32x4s(friction * engine.time.delta_time_f32());
+                    } else {
+                        // if not supported then apply gravity
+                        character_velocity = character_velocity
+                            + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                    }
+
+                    character_physics.setLinearVelocity(zm.vecToArr3(character_velocity));
+                } else {
+                    character_physics.setLinearVelocity(zm.vecToArr3(zm.f32x4s(0.0)));
+                }
+
+                // Rotate to face character
+                const rot = zm.lookAtRh(zm.f32x4s(0.0), zm.normalize3(pos_diff), zm.f32x4(0.0, 1.0, 0.0, 0.0));
+                character_physics.setRotation(
+                    zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)
+                );
+            }
+
             // // Cast ray from camera
-            // if (engine().entities.get(self.camera_idx)) |camera_entity| {
-            //     var raycast_result = engine().physics.zphy.getNarrowPhaseQuery().castRay(.{
+            // if (engine.entities.get(self.camera_idx)) |camera_entity| {
+            //     var raycast_result = engine.physics.zphy.getNarrowPhaseQuery().castRay(.{
             //         .origin = camera_entity.transform.position,
             //         .direction = camera_entity.transform.forward_direction(),
             //     }, .{});
@@ -479,12 +524,12 @@ fn update(self: *Self) !void {
             // }
 
             var target_pos = zm.f32x4s(0.0);
-            if (engine().entities.get(self.character_idx)) |character_entity| {
+            if (engine.entities.get(self.character_idx)) |character_entity| {
                 target_pos = character_entity.transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
             }
 
             // update camera
-            self.camera.orbit_camera_update(target_pos, &engine().window, &engine().input, &engine().time);
+            self.camera.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
 
             render_camera = &self.camera;
         },
@@ -498,7 +543,7 @@ fn update(self: *Self) !void {
 
     // update character animation variables.
     // TODO this should be generalized to all entities with animation controllers
-    if (engine().entities.get(self.character_idx)) |character_entity| {
+    if (engine.entities.get(self.character_idx)) |character_entity| {
         const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
         if (character_entity.app.anim_controller) |*ac| {
             ac.set_variable("character speed", zm.length3(character_velocity)[0]);
@@ -507,21 +552,21 @@ fn update(self: *Self) !void {
     }
 
     // update bones for all animated entities
-    var bone_transforms: []zm.Mat = engine().frame_allocator.alloc(zm.Mat, ms.MAX_BONES) catch unreachable;
-    var null_bone_transforms: []zm.Mat = engine().frame_allocator.alloc(zm.Mat, ms.MAX_BONES) catch unreachable;
+    var bone_transforms: []zm.Mat = engine.frame_allocator.alloc(zm.Mat, eng.mesh.MAX_BONES) catch unreachable;
+    var null_bone_transforms: []zm.Mat = engine.frame_allocator.alloc(zm.Mat, eng.mesh.MAX_BONES) catch unreachable;
     @memset(null_bone_transforms[0..], zm.identity());
     // Iterate through all entities finding those which contain a mesh to be rendered
-    for (engine().entities.list.data.items, 0..) |*it, entity_id| {
+    for (engine.entities.list.data.items, 0..) |*it, entity_id| {
         if (it.item_data) |*entity| {
             // Find the transform of the entity to be rendered taking into account it's parent
             if (entity.model) |mid| {
-                const m = engine().asset_manager.get_asset(assets.ModelAsset, mid) catch unreachable;
+                const m = engine.asset_manager.get_asset(assets.ModelAsset, mid) catch unreachable;
 
                 var pose: []zm.Mat = null_bone_transforms;
                 const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
-                    anim_controller.update(&engine().asset_manager, &engine().time);
+                    anim_controller.update(&engine.asset_manager, &engine.time);
                     anim_controller.calculate_bone_transforms(
-                        &engine().asset_manager,
+                        &engine.asset_manager,
                         m,
                         bone_transforms
                     );
@@ -552,8 +597,8 @@ fn update(self: *Self) !void {
                 ) catch unreachable;
             } else {
                 if (self.current_mode == .Edit) {
-                    const sphere_asset_id = engine().asset_manager.find_asset_id(assets.ModelAsset, "core|sphere") catch unreachable;
-                    const m = engine().asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
+                    const sphere_asset_id = engine.asset_manager.find_asset_id(assets.ModelAsset, "core|sphere") catch unreachable;
+                    const m = engine.asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
                     self.render_model(
                         @truncate(entity_id),
                         m,
@@ -572,11 +617,11 @@ fn update(self: *Self) !void {
     }
 
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
-    const camera_projection_matrix = render_camera.generate_perspective_matrix(engine().gfx.swapchain_aspect());
+    const camera_projection_matrix = render_camera.generate_perspective_matrix(engine.gfx.swapchain_aspect());
 
     var vel_buf: [128]u8 = [_]u8{0} ** 128;
     var vel_text: []u8 = vel_buf[0..0];
-    if (engine().entities.get(self.character_idx)) |character_entity| {
+    if (engine.entities.get(self.character_idx)) |character_entity| {
         const character = character_entity.physics.?.CharacterVirtual.virtual;
         const character_velocity = zm.loadArr3(character.getLinearVelocity());
         vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}\nis supported: {}", .{
@@ -586,37 +631,37 @@ fn update(self: *Self) !void {
         }) catch unreachable;
 
         {
-            _ = engine().imui.push_floating_layout(.Y, 100, 500, .{@src()});
-            const l = engine().imui.label(vel_text);
-            if (engine().imui.get_widget(l.id)) |tw| {
+            _ = engine.imui.push_floating_layout(.Y, 100, 500, .{@src()});
+            const l = engine.imui.label(vel_text);
+            if (engine.imui.get_widget(l.id)) |tw| {
                 tw.text_content.?.font = .GeistMono;
                 tw.text_content.?.size = 15;
             }
-            _ = engine().imui.pop_layout();
+            _ = engine.imui.pop_layout();
         }
     }
 
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
     const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
-        engine().time.get_fps(),
-        (engine().time.delta_time_f32() - engine().time.last_frame_wait_time_s) * std.time.ms_per_s,
-        engine().time.last_frame_wait_time_s * std.time.ms_per_s,
-        (engine().time.last_frame_wait_time_s / engine().time.last_frame_time_s) * 100.0
+        engine.time.get_fps(),
+        (engine.time.delta_time_f32() - engine.time.last_frame_wait_time_s) * std.time.ms_per_s,
+        engine.time.last_frame_wait_time_s * std.time.ms_per_s,
+        (engine.time.last_frame_wait_time_s / engine.time.last_frame_time_s) * 100.0
     }) catch unreachable;
 
     {
-        _ = engine().imui.push_floating_layout(
+        _ = engine.imui.push_floating_layout(
             .Y, 
             5.0, 
-            25.0 - engine().imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            25.0 - engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
-        const l = engine().imui.label(fps_text);
-        if (engine().imui.get_widget(l.id)) |tw| {
+        const l = engine.imui.label(fps_text);
+        if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
         }
-        _ = engine().imui.pop_layout();
+        _ = engine.imui.pop_layout();
     }
 
     var rev_buf: [64]u8 = [_]u8{0} ** 64;
@@ -625,19 +670,19 @@ fn update(self: *Self) !void {
         blk: { if (gitchanged) { break :blk "*"; } else { break :blk ""; } },
     }) catch unreachable;
     {
-        _ = engine().imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine().gfx.swapchain_size()[1])) - 
-            engine().imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
-        const l = engine().imui.label(rev_text);
-        if (engine().imui.get_widget(l.id)) |tw| {
+        _ = engine.imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine.gfx.swapchain_size()[1])) - 
+            engine.imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
+        const l = engine.imui.label(rev_text);
+        if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
         }
-        _ = engine().imui.pop_layout();
+        _ = engine.imui.pop_layout();
     }
 
 
     // Draw frame
-    const image_available_semaphore = engine().gfx.begin_frame() catch |err| {
+    const image_available_semaphore = engine.gfx.begin_frame() catch |err| {
         std.log.warn("Unable to begin frame: {}", .{err});
         return;
     };
@@ -665,10 +710,9 @@ fn update(self: *Self) !void {
     ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
-    self.standard_renderer.clear();
 
     // render terrains
-    var entity_iter = engine().entities.list.iterator();
+    var entity_iter = engine.entities.list.iterator();
     while (entity_iter.next()) |entity| {
         if (entity.app.terrain) |*terrain| {
             self.terrain_renderer.render(
@@ -676,28 +720,30 @@ fn update(self: *Self) !void {
                 render_camera,
                 terrain,
                 entity.transform,
+                &self.standard_renderer
             );
         }
     }
+    self.standard_renderer.clear();
 
     // update and render particle systems
-    var entities = engine().entities.list.iterator();
+    var entities = engine.entities.list.iterator();
     while (entities.next()) |entity| {
         if (entity.app.particle_system) |*ps| {
             ps.settings.spawn_origin = entity.transform.position;
-            ps.update(&engine().time);
+            ps.update(&engine.time);
             ps.draw(cmd, render_camera) catch |err| {
                 std.log.warn("Unable to render particle system for entity '{}': {}", .{entity.name orelse "", err});
             };
         }
     }
 
-    self.player_attack_particle_system.update(&engine().time);
+    self.player_attack_particle_system.update(&engine.time);
     self.player_attack_particle_system.draw(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render particle system for attack system: {}", .{err});
     };
 
-    engine().gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
+    engine.gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
         std.log.warn("Unable to apply bloom filter: {}", .{err});
     };
 
@@ -717,7 +763,7 @@ fn update(self: *Self) !void {
     });
 
     // Tonemap HDR image onto LDR buffer
-    engine().gfx.tone_mapping_filter.apply_filter(cmd) catch |err| {
+    engine.gfx.tone_mapping_filter.apply_filter(cmd) catch |err| {
         std.log.warn("Unable to apply tone mapping filter: {}", .{err});
     };
 
@@ -728,19 +774,19 @@ fn update(self: *Self) !void {
         };
     }
 
-    if (!engine().imui.has_focus() and engine().input.get_key(KeyCode.C)) {
-        engine().physics.debug_draw_bodies(
+    if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.C)) {
+        engine.physics.debug_draw_bodies(
             cmd,
             camera_projection_matrix,
             camera_view_matrix,
         );
     }
 
-    engine().debug.render_cmd(cmd, render_camera) catch |err| {
+    engine.debug.render_cmd(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render debug: {}", .{err});
     };
 
-    engine().imui.render_imui(cmd) catch |err| {
+    engine.imui.render_imui(cmd) catch |err| {
         std.log.warn("Unable to render imui: {}", .{err});
     };
 
@@ -751,7 +797,7 @@ fn update(self: *Self) !void {
     };
 
     const uber_semaphore = &self.uber_cmd_semaphores[gfx.GfxState.get().current_frame_index()];
-    engine().gfx.submit_command_buffer(.{
+    engine.gfx.submit_command_buffer(.{
         .command_buffers = &.{ cmd },
         .wait_semaphores = &.{ .{
             .semaphore = &image_available_semaphore,
@@ -764,7 +810,7 @@ fn update(self: *Self) !void {
     };
 
     // Present
-    engine().gfx.present(&.{ uber_semaphore }) catch |err| {
+    engine.gfx.present(&.{ uber_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
@@ -773,7 +819,7 @@ fn update(self: *Self) !void {
 pub fn render_model(
     self: *Self,
     entity_id: u32,
-    model: *const ms.Model,
+    model: *const eng.mesh.Model,
     bones_data: ?struct {
         pose_data: []const zm.Mat,
         bone_info: StandardRenderer.AnimatedRenderObject.BoneInfo,
@@ -782,10 +828,10 @@ pub fn render_model(
 ) !void {
     var queue = std.ArrayList(
         struct { 
-            node: *const ms.ModelNode,
+            node: *const eng.mesh.ModelNode,
             mat: zm.Mat
         }
-    ).initCapacity(engine().frame_allocator, model.nodes_list.len) catch unreachable;
+    ).initCapacity(eng.get().frame_allocator, model.nodes_list.len) catch unreachable;
     defer queue.deinit();
 
     const root_mat = transform.generate_model_matrix();
@@ -812,7 +858,7 @@ pub fn render_model(
                 if (maybe_prim) |prim_idx| {
                     const p = &model.mesh_list[prim_idx];
 
-                    var material = ms.MaterialTemplate {};
+                    var material = eng.mesh.MaterialTemplate {};
                     if (p.material_template) |m_idx| {
                         material = model.materials[m_idx];
                     }
@@ -881,6 +927,7 @@ const CollideShapeCollector = extern struct {
     const vtable = zphy.CollideShapeCollector.VTable{ 
         .reset = _Reset,
         .onBody = _OnBody,
+        .setUserData = _SetUserData,
         .addHit = _AddHit,
     };
 
@@ -895,6 +942,13 @@ const CollideShapeCollector = extern struct {
     ) callconv(.C) void { 
         _ = self;
         _ = in_body;
+    }
+    fn _SetUserData(
+        self: *zphy.CollideShapeCollector,
+        in_user_data: u64,
+    ) callconv(.C) void {
+        _ = self;
+        _ = in_user_data;
     }
     fn _AddHit(
         self: *zphy.CollideShapeCollector,
@@ -918,13 +972,15 @@ const CollideShapeCollector = extern struct {
 };
 
 fn character_anim_description() anim.AnimController.Descriptor {
-    const character_animation_idle_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
+    const engine = eng.get();
+    
+    const character_animation_idle_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
         catch unreachable;
-    const character_animation_walk_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.walk")
+    const character_animation_walk_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.walk")
         catch unreachable;
-    const character_animation_run_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.run")
+    const character_animation_run_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.run")
         catch unreachable;
-    const character_animation_attack_id = engine().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
+    const character_animation_attack_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
         catch unreachable;
 
     var anim_nodes = [_]anim.Node{

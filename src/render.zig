@@ -71,8 +71,8 @@ pub const Light = extern struct {
     light_type: LightType = .Directional,
 };
 
-const MAX_LIGHTS: usize = 4;
-const LightsStruct = extern struct {
+pub const MAX_LIGHTS: usize = 4;
+pub const LightsStruct = extern struct {
     lights: [MAX_LIGHTS]Light,
 };
 
@@ -942,7 +942,7 @@ pub fn render_cmd(
         // Set lights data
         {
             const entity_position = ro.transform[3];
-            std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
+            self.sort_lights(entity_position);
 
             const mapped_lights = &mapped_lights_data.data_array(LightsStruct, Self.MAX_OBJECTS_PER_LIGHTS_BUFFER)[idx % Self.MAX_OBJECTS_PER_LIGHTS_BUFFER];
 
@@ -1116,7 +1116,7 @@ pub fn render_cmd(
         // Set lights data
         {
             const entity_position = ro.transform[3];
-            std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
+            self.sort_lights(entity_position);
 
             const mapped_lights = &mapped_lights_data.data_array(LightsStruct, Self.MAX_OBJECTS_PER_LIGHTS_BUFFER)[idx % Self.MAX_OBJECTS_PER_LIGHTS_BUFFER];
 
@@ -1437,10 +1437,14 @@ fn lights_sort_func(pos: zm.F32x4, a: Light, b: Light) bool {
     return a_dist < b_dist;
 }
 
+pub fn sort_lights(self: *Self, position: zm.F32x4) void {
+    std.mem.sort(Light, self.lights.items, position, lights_sort_func);
+}
+
 fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
     const entity_position = transform[3];
     // TODO: probably should use a quadtree or something here
-    std.mem.sort(Light, self.lights.items, entity_position, lights_sort_func);
+    self.sort_lights(entity_position);
 
     { // Update lights buffer
         const mapped_buffer = self.lights_buffer.map(.{ .write = true, }) catch unreachable;

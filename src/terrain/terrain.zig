@@ -36,6 +36,9 @@ vertex_density_m: f32 = 0.1, // meters between vertices
 heightmap_texture: gf.Image.Ref,
 heightmap_texture_view: gf.ImageView.Ref,
 
+normal_texture: gf.Image.Ref,
+normal_texture_view: gf.ImageView.Ref,
+
 physics_body_id: ?ph.zphy.BodyId = null,
 
 modify_radius: f32 = 1.0,
@@ -51,6 +54,8 @@ const ModifyMode = enum {
 pub fn deinit(self: *Self) void {
     self.heightmap_texture.deinit();
     self.heightmap_texture_view.deinit();
+    self.normal_texture.deinit();
+    self.normal_texture_view.deinit();
     self.remove_physics_body();
     self.alloc.free(self.heightmap);
 }
@@ -71,8 +76,81 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
     std.debug.assert(hmt_image.is_hdr and hmt_image.num_components == 1 and hmt_image.bytes_per_component == @sizeOf(f32));
     @memcpy(std.mem.sliceAsBytes(heightmap_data), hmt_image.data);
 
+    const normal_data = try alloc.alloc(zm.F32x4, heightmap_data.len);
+    defer alloc.free(normal_data);
+    @memset(normal_data, zm.f32x4s(1.0));
+
+    for (0..hmt_image.width) |w| {
+        for (0..hmt_image.height) |h| {
+            const idx: usize = w + (h * hmt_image.width);
+            const idxm1: isize = @max((@as(isize, @intCast(w)) - 1) + @as(isize, @intCast(h * hmt_image.width)), 0);
+            const idxp1: isize = @min((@as(isize, @intCast(w)) + 1) + @as(isize, @intCast(h * hmt_image.width)), @as(isize, @intCast(heightmap_data.len)) - 1);
+            normal_data[idx][0] = 
+                (heightmap_data[@intCast(idx)] - heightmap_data[@intCast(idxm1)] +
+                heightmap_data[@intCast(idxp1)] - heightmap_data[@intCast(idx)]) / 2.0;
+        }
+    }
+    for (0..hmt_image.height) |h| {
+        for (0..hmt_image.width) |w| {
+            const idx: usize = w + (h * hmt_image.width);
+            const idxm1: isize = @max(@as(isize, @intCast(w)) + ((@as(isize, @intCast(h)) - 1) * hmt_image.width), 0);
+            const idxp1: isize = @min(@as(isize, @intCast(w)) + ((@as(isize, @intCast(h)) + 1) * hmt_image.width), @as(isize, @intCast(heightmap_data.len)) - 1);
+            normal_data[idx][1] = 
+                (heightmap_data[@intCast(idx)] - heightmap_data[@intCast(idxm1)] +
+                heightmap_data[@intCast(idxp1)] - heightmap_data[@intCast(idx)]) / 2.0;
+        }
+    }
+    for (normal_data) |*n| {
+        n.* = zm.normalize3(n.*);
+    }
+
+    const normal_data_u8 = try alloc.alloc([4]u8, normal_data.len);
+    defer alloc.free(normal_data_u8);
+    for (normal_data_u8, 0..) |*n, idx| {
+        n.* = [4]u8{
+            @intFromFloat(std.math.clamp((normal_data[idx][0] * 255.0) + 128.0, 0.0, 255.0)),
+            @intFromFloat(std.math.clamp((normal_data[idx][1] * 255.0) + 128.0, 0.0, 255.0)),
+            @intFromFloat(std.math.clamp(normal_data[idx][2] * 255.0, 0.0, 255.0)),
+            255,
+        };
+    }
+
+    const normal_file = try std.fs.cwd().createFile("heightmap_normal.bmp", std.fs.File.CreateFlags{});
+    defer normal_file.close();
+    try normal_file.writeAll(std.mem.sliceAsBytes(normal_data));
+
+    var normal_image = try (eng.image.Image {
+        .alloc = eng.get().general_allocator,
+        .width = hmt_image.width,
+        .height = hmt_image.height,
+        .bytes_per_component = @sizeOf(u8),
+        .num_components = 4,
+        .bytes_per_row = (4 * @sizeOf(u8)) * hmt_image.width,
+        .is_hdr = false,
+        .data = std.mem.sliceAsBytes(normal_data_u8),
+    }).to_zstbi();
+    defer normal_image.deinit();
+
+    try normal_image.writeToFile("heightmap_normal.png", .png);
+
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
+
+    const normal_texture = try gf.Image.init(
+        .{
+            .width = hmt_image.width,
+            .height = hmt_image.height,
+            .dst_layout = .ShaderReadOnlyOptimal,
+            .format = .Rgba8_Unorm,
+            .usage_flags = .{ .ShaderResource = true, },
+            .access_flags = .{},
+        },
+        std.mem.sliceAsBytes(normal_data_u8),
+    );
+    errdefer normal_texture.deinit();
+
+    const normal_texture_view = try gf.ImageView.init(.{ .image = normal_texture, .view_type = .ImageView2DArray, });
+    errdefer normal_texture_view.deinit();
 
     var self = Self {
         .alloc = alloc,
@@ -85,6 +163,9 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
 
         .heightmap_texture = hmt.*,
         .heightmap_texture_view = heightmap_texture_view,
+
+        .normal_texture = normal_texture,
+        .normal_texture_view = normal_texture_view,
 
         .heightmap = heightmap_data,
         .physics_body_id = null,
