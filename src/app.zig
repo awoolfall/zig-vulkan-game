@@ -38,6 +38,7 @@ player_attack_particle_system: eng.particles.ParticleSystem,
 
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
+particles_renderer: eng.particles_renderer.ParticleRenderer,
 
 edit_mode: EditMode,
 current_mode: enum { Edit, Play } = .Edit,
@@ -62,6 +63,7 @@ pub fn deinit(self: *Self) void {
 
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
+    self.particles_renderer.deinit();
     self.edit_mode.deinit();
 
     for (self.command_buffers[0..]) |c| { c.deinit(); }
@@ -177,6 +179,7 @@ pub fn init() !Self {
 
         .standard_renderer = try StandardRenderer.init(),
         .terrain_renderer = try TerrainRenderer.init(engine.general_allocator),
+        .particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator),
         .edit_mode = try EditMode.init(),
 
         .command_pool = command_pool,
@@ -212,6 +215,15 @@ fn update(self: *Self) !void {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
             render_camera = &self.edit_mode.editor_camera;
+
+            if (self.edit_mode.render_only_selected_entity) blk: {
+                if (self.edit_mode.selected_entity) |si| {
+                    const selected_entity = eng.get().entities.get(si) orelse break :blk;
+                    try self.push_entity_for_rendering(eng.get().frame_allocator, selected_entity, si.index);
+                }
+            } else {
+                try self.push_all_entities_for_rendering();
+            }
         },
         .Play => {
             blk: {
@@ -461,6 +473,34 @@ fn update(self: *Self) !void {
                         } else { std.log.warn("Failed to get entity!", .{}); }
                     }
                 }
+
+                // Update character animation parameters
+                if (character_entity.app.anim_controller) |*ac| {
+                    ac.set_variable("character speed", zm.length3(character_velocity)[0]);
+                    ac.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
+                }
+            }
+
+            var vel_buf: [128]u8 = [_]u8{0} ** 128;
+            var vel_text: []u8 = vel_buf[0..0];
+            if (engine.entities.get(self.character_idx)) |character_entity| {
+                const character = character_entity.physics.?.CharacterVirtual.virtual;
+                const character_velocity = zm.loadArr3(character.getLinearVelocity());
+                vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}\nis supported: {}", .{
+                    zm.length3(character_velocity)[0],
+                    character_velocity,
+                    character_is_supported(character_entity.physics.?.CharacterVirtual.virtual),
+                }) catch unreachable;
+
+                {
+                    _ = engine.imui.push_floating_layout(.Y, 100, 500, .{@src()});
+                    const l = engine.imui.label(vel_text);
+                    if (engine.imui.get_widget(l.id)) |tw| {
+                        tw.text_content.?.font = .GeistMono;
+                        tw.text_content.?.size = 15;
+                    }
+                    _ = engine.imui.pop_layout();
+                }
             }
 
             blk: {
@@ -532,113 +572,9 @@ fn update(self: *Self) !void {
             self.camera.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
 
             render_camera = &self.camera;
+
+            try self.push_all_entities_for_rendering();
         },
-    }
-
-    eng.get().debug.draw_point(.{
-        .point = zm.f32x4(0.0, 0.0, 0.0, 1.0),
-        .colour = zm.f32x4(0.0, 1.0, 0.3, 1.0),
-        .size = (std.math.sin(@as(f32, @floatCast(eng.get().time.time_since_start_of_app()))) + 1.0) * 0.5,
-    });
-
-    // update character animation variables.
-    // TODO this should be generalized to all entities with animation controllers
-    if (engine.entities.get(self.character_idx)) |character_entity| {
-        const character_velocity = zm.loadArr3(character_entity.physics.?.CharacterVirtual.virtual.getLinearVelocity());
-        if (character_entity.app.anim_controller) |*ac| {
-            ac.set_variable("character speed", zm.length3(character_velocity)[0]);
-            ac.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
-        }
-    }
-
-    // update bones for all animated entities
-    var bone_transforms: []zm.Mat = engine.frame_allocator.alloc(zm.Mat, eng.mesh.MAX_BONES) catch unreachable;
-    var null_bone_transforms: []zm.Mat = engine.frame_allocator.alloc(zm.Mat, eng.mesh.MAX_BONES) catch unreachable;
-    @memset(null_bone_transforms[0..], zm.identity());
-    // Iterate through all entities finding those which contain a mesh to be rendered
-    for (engine.entities.list.data.items, 0..) |*it, entity_id| {
-        if (it.item_data) |*entity| {
-            // Find the transform of the entity to be rendered taking into account it's parent
-            if (entity.model) |mid| {
-                const m = engine.asset_manager.get_asset(assets.ModelAsset, mid) catch unreachable;
-
-                var pose: []zm.Mat = null_bone_transforms;
-                const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
-                    anim_controller.update(&engine.asset_manager, &engine.time);
-                    anim_controller.calculate_bone_transforms(
-                        &engine.asset_manager,
-                        m,
-                        bone_transforms
-                    );
-
-                    pose = bone_transforms;
-
-                    const bone_index_info = self.standard_renderer.push_bones(bone_transforms[0..]) catch unreachable;
-
-                    break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
-                        .bone_count = bone_transforms.len,
-                        .bone_offset = bone_index_info.start_idx,
-                    };
-                } else {
-                    break :blk null;
-                }};
-
-                // Finally, render the model
-                self.render_model(
-                    @truncate(entity_id),
-                    m,
-                    if (bone_info) |bi| 
-                    .{
-                        .pose_data = pose,
-                        .bone_info = bi,
-                    }
-                    else null,
-                    entity.transform
-                ) catch unreachable;
-            } else {
-                if (self.current_mode == .Edit) {
-                    const sphere_asset_id = engine.asset_manager.find_asset_id(assets.ModelAsset, "core|sphere") catch unreachable;
-                    const m = engine.asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
-                    self.render_model(
-                        @truncate(entity_id),
-                        m,
-                        null,
-                        entity.transform
-                    ) catch unreachable;
-                }
-            }
-
-            if (entity.app.light) |*light| {
-                light.position = entity.transform.position;
-                light.direction = entity.transform.forward_direction();
-                self.standard_renderer.push_light(light.*) catch unreachable;
-            }
-        }
-    }
-
-    const camera_view_matrix = render_camera.transform.generate_view_matrix();
-    const camera_projection_matrix = render_camera.generate_perspective_matrix(engine.gfx.swapchain_aspect());
-
-    var vel_buf: [128]u8 = [_]u8{0} ** 128;
-    var vel_text: []u8 = vel_buf[0..0];
-    if (engine.entities.get(self.character_idx)) |character_entity| {
-        const character = character_entity.physics.?.CharacterVirtual.virtual;
-        const character_velocity = zm.loadArr3(character.getLinearVelocity());
-        vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}\nis supported: {}", .{
-            zm.length3(character_velocity)[0],
-            character_velocity,
-            character_is_supported(character_entity.physics.?.CharacterVirtual.virtual),
-        }) catch unreachable;
-
-        {
-            _ = engine.imui.push_floating_layout(.Y, 100, 500, .{@src()});
-            const l = engine.imui.label(vel_text);
-            if (engine.imui.get_widget(l.id)) |tw| {
-                tw.text_content.?.font = .GeistMono;
-                tw.text_content.?.size = 15;
-            }
-            _ = engine.imui.pop_layout();
-        }
     }
 
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
@@ -682,6 +618,9 @@ fn update(self: *Self) !void {
 
 
     // Draw frame
+    const camera_view_matrix = render_camera.transform.generate_view_matrix();
+    const camera_projection_matrix = render_camera.generate_perspective_matrix(engine.gfx.swapchain_aspect());
+
     const image_available_semaphore = engine.gfx.begin_frame() catch |err| {
         std.log.warn("Unable to begin frame: {}", .{err});
         return;
@@ -726,23 +665,36 @@ fn update(self: *Self) !void {
     }
     self.standard_renderer.clear();
 
-    // update and render particle systems
+    // update particle systems
     var entities = engine.entities.list.iterator();
     while (entities.next()) |entity| {
         if (entity.app.particle_system) |*ps| {
             ps.settings.spawn_origin = entity.transform.position;
             ps.update(&engine.time);
-            ps.draw(cmd, render_camera) catch |err| {
-                std.log.warn("Unable to render particle system for entity '{}': {}", .{entity.name orelse "", err});
+            self.particles_renderer.push_particle_system(ps) catch |err| {
+                std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{
+                    entity.name orelse "unknown",
+                    err
+                });
             };
         }
     }
 
     self.player_attack_particle_system.update(&engine.time);
-    self.player_attack_particle_system.draw(cmd, render_camera) catch |err| {
-        std.log.warn("Unable to render particle system for attack system: {}", .{err});
+    self.particles_renderer.push_particle_system(&self.player_attack_particle_system) catch |err| {
+        std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{
+            "player attack",
+            err
+        });
     };
 
+    // render particle systems
+    self.particles_renderer.render(cmd, render_camera) catch |err| {
+        std.log.warn("Unable to render particle systems: {}", .{err});
+    };
+    self.particles_renderer.clear();
+
+    // apply bloom
     engine.gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
         std.log.warn("Unable to apply bloom filter: {}", .{err});
     };
@@ -814,6 +766,95 @@ fn update(self: *Self) !void {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
+}
+
+pub fn push_all_entities_for_rendering(
+    self: *Self,
+) !void {
+    var bone_arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
+    defer bone_arena.deinit();
+
+    // Iterate through all entities finding those which contain a mesh to be rendered
+    for (eng.get().entities.list.data.items, 0..) |*it, entity_id| {
+        if (it.item_data) |*entity| {
+            try self.push_entity_for_rendering(bone_arena.allocator(), entity, entity_id);
+            _ = bone_arena.reset(.retain_capacity);
+        }
+    }
+}
+
+pub fn push_entity_for_rendering(
+    self: *Self,
+    alloc: std.mem.Allocator,
+    entity: *eng.entity.EntitySuperStruct,
+    entity_id: usize,
+) !void {
+    try self.push_entity_model_for_rendering(alloc, entity, entity_id);
+
+    if (entity.app.light) |*light| {
+        light.position = entity.transform.position;
+        light.direction = entity.transform.forward_direction();
+        self.standard_renderer.push_light(light.*) catch unreachable;
+    }
+}
+
+pub fn push_entity_model_for_rendering(
+    self: *Self,
+    alloc: std.mem.Allocator,
+    entity: *eng.entity.EntitySuperStruct,
+    entity_id: usize,
+) !void {
+    const engine = eng.get();
+
+    if (entity.model) |mid| {
+        const m = engine.asset_manager.get_asset(assets.ModelAsset, mid) catch unreachable;
+
+        const pose = try alloc.alloc(zm.Mat, eng.mesh.MAX_BONES);
+        defer alloc.free(pose);
+        @memset(pose, zm.identity());
+
+        const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
+            anim_controller.update(&engine.asset_manager, &engine.time);
+            anim_controller.calculate_bone_transforms(
+                &engine.asset_manager,
+                m,
+                pose
+            );
+
+            const bone_index_info = self.standard_renderer.push_bones(pose[0..]) catch unreachable;
+
+            break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
+                .bone_count = pose.len,
+                .bone_offset = bone_index_info.start_idx,
+            };
+        } else {
+            break :blk null;
+        }};
+
+        // Finally, render the model
+        self.render_model(
+            @truncate(entity_id),
+            m,
+            if (bone_info) |bi| 
+            .{
+                .pose_data = pose,
+                .bone_info = bi,
+            }
+            else null,
+            entity.transform
+        ) catch unreachable;
+    } else {
+        if (self.current_mode == .Edit) {
+            const sphere_asset_id = engine.asset_manager.find_asset_id(assets.ModelAsset, "core|sphere") catch unreachable;
+            const m = engine.asset_manager.get_asset(assets.ModelAsset, sphere_asset_id) catch unreachable;
+            self.render_model(
+                @truncate(entity_id),
+                m,
+                null,
+                entity.transform
+            ) catch unreachable;
+        }
+    }
 }
 
 pub fn render_model(

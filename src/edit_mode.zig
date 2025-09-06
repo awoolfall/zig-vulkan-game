@@ -25,6 +25,7 @@ editor_camera: Camera,
 gizmo: Gizmo,
 entity_editor_ui_data: EntityEditorUiData,
 selected_entity: ?GenerationalIndex = null,
+render_only_selected_entity: bool = false,
 
 file_dropdown_open: bool = false,
 edit_dropdown_open: bool = false,
@@ -69,6 +70,18 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
 pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer) !void {
     if (!eng.get().imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
+
+        // focus camera on selected entity
+        if (eng.get().input.get_key_down(KeyCode.F)) blk: {
+            if (self.selected_entity) |si| {
+                const selected_entity = eng.get().entities.get(si) orelse break :blk;
+                self.editor_camera.transform.position = 
+                    selected_entity.transform.position -
+                    (self.editor_camera.transform.forward_direction() * zm.f32x4s(10.0));
+            }
+        }
+
+        self.render_only_selected_entity = eng.get().input.get_key(KeyCode.G);
 
         // new entity button
         if (eng.get().input.get_key_down(KeyCode.E)) {
