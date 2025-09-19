@@ -207,6 +207,17 @@ fn update(self: *Self) !void {
         }
     }
 
+    // update particle systems
+    var entities = engine.entities.list.iterator();
+    while (entities.next()) |entity| {
+        if (entity.app.particle_system) |*ps| {
+            ps.settings.spawn_origin = entity.transform.position;
+            ps.update(&engine.time);
+        }
+    }
+
+    self.player_attack_particle_system.update(&engine.time);
+
     // update
     var render_camera: *eng.camera.Camera = undefined;
     switch (self.current_mode) {
@@ -665,22 +676,6 @@ fn update(self: *Self) !void {
     }
     self.standard_renderer.clear();
 
-    // update particle systems
-    var entities = engine.entities.list.iterator();
-    while (entities.next()) |entity| {
-        if (entity.app.particle_system) |*ps| {
-            ps.settings.spawn_origin = entity.transform.position;
-            ps.update(&engine.time);
-            self.particles_renderer.push_particle_system(ps) catch |err| {
-                std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{
-                    entity.name orelse "unknown",
-                    err
-                });
-            };
-        }
-    }
-
-    self.player_attack_particle_system.update(&engine.time);
     self.particles_renderer.push_particle_system(&self.player_attack_particle_system) catch |err| {
         std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{
             "player attack",
@@ -794,7 +789,21 @@ pub fn push_entity_for_rendering(
     if (entity.app.light) |*light| {
         light.position = entity.transform.position;
         light.direction = entity.transform.forward_direction();
-        self.standard_renderer.push_light(light.*) catch unreachable;
+        self.standard_renderer.push_light(light.*) catch |err| {
+            std.log.warn("Unable to push light '{s}' for rendering: {}", .{
+                entity.name orelse "unknown",
+                err
+            });
+        };
+    }
+
+    if (entity.app.particle_system) |*ps| {
+        self.particles_renderer.push_particle_system(ps) catch |err| {
+            std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{
+                entity.name orelse "unknown",
+                err
+            });
+        };
     }
 }
 
