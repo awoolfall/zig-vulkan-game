@@ -67,6 +67,8 @@ current_frame: usize = 0,
 current_terrain_index: usize = 0,
 
 pub fn deinit(self: *Self) void {
+    const general_alloc = eng.get().general_allocator;
+
     self.model.deinit();
 
     self.framebuffer.deinit();
@@ -79,7 +81,7 @@ pub fn deinit(self: *Self) void {
     for (self.images_descriptor_sets.items) |s| {
         s.set.deinit();
     }
-    self.images_descriptor_sets.deinit();
+    self.images_descriptor_sets.deinit(general_alloc);
     self.images_descriptor_pool.deinit();
     self.images_descriptor_layout.deinit();
 
@@ -91,7 +93,9 @@ pub fn deinit(self: *Self) void {
     self.sampler.deinit();
 }
 
-pub fn init(alloc: std.mem.Allocator) !Self {
+pub fn init() !Self {
+    const alloc = eng.get().general_allocator;
+
     var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2);
     errdefer plane_model.deinit();
 
@@ -156,8 +160,8 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     });
     errdefer images_descriptor_pool.deinit();
 
-    const images_descriptor_sets = try std.ArrayList(ImagesDescriptorSetData).initCapacity(alloc, 128);
-    errdefer images_descriptor_sets.deinit();
+    var images_descriptor_sets = try std.ArrayList(ImagesDescriptorSetData).initCapacity(alloc, 128);
+    errdefer images_descriptor_sets.deinit(alloc);
 
     const lights_buffer = try gf.Buffer.init(
         @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
@@ -354,7 +358,7 @@ pub fn render(
             std.log.warn("Unable to create new terrain system images descriptor set: {}", .{err});
             return;
         };
-        self.images_descriptor_sets.append(.{ .set = new_set, }) catch |err| {
+        self.images_descriptor_sets.append(eng.get().general_allocator, .{ .set = new_set, }) catch |err| {
             std.log.warn("Unable to append new terrain system images descriptor set to list: {}", .{err});
             new_set.deinit();
             return;
@@ -426,15 +430,15 @@ pub fn render(
     cmd.cmd_bind_vertex_buffers(.{
         .buffers = &.{
             gf.VertexBufferInput {
-                .buffer = self.model.buffers.vertices,
+                .buffer = self.model.vertices_buffer,
             },
         }
     });
 
     cmd.cmd_bind_index_buffer(.{
         .index_format = .U32,
-        .buffer = self.model.buffers.indices,
-        .offset = @intCast(self.model.mesh_list[0].indices_offset * @sizeOf(u32)),
+        .buffer = self.model.indices_buffer,
+        .offset = @intCast(self.model.meshes[0].indices_offset * @sizeOf(u32)),
     });
     //const grids_to_fill_space: usize = @intFromFloat(camera.far_field * 2.0 / grid_size);
     //const grids_to_fill_space: usize = 64;
@@ -477,7 +481,7 @@ pub fn render(
     });
 
     cmd.cmd_draw_indexed(.{
-        .index_count = @intCast(self.model.mesh_list[0].num_indices),
+        .index_count = @intCast(self.model.meshes[0].index_count),
         .instance_count = 64 * 64,
     });
 

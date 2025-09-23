@@ -108,9 +108,7 @@ pub fn init() !Self {
 
     engine.physics.zphy.optimizeBroadPhase();
 
-    var player_attack_particle_system = try eng.particles.ParticleSystem.init(
-        engine.general_allocator,
-        .{
+    var player_attack_particle_system_settings = eng.particles.ParticleSystemSettings {
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
             .shape = .Circle,
@@ -121,22 +119,25 @@ pub fn init() !Self {
             .spawn_rate_variance = 0.0,
             .burst_count = 60,
             .particle_lifetime = 1.0,
-            .scale = try eng.particles.ScaleKeyFrameArray.fromSlice(&.{
-                .{ .value = zm.f32x4s(0.05), },
-            }),
-            .colour = try eng.particles.ColourKeyFrameArray.fromSlice(&.{
-                .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0, },
-                .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 0.0)), .key_time = 1.0, .easing_into = .OutLinear },
-                // .{ .value = zm.hsvToRgb(zm.f32x4(0.0, 1.0, 1.0, 1.0)), .key_time = 0.0, },
-                // .{ .value = zm.hsvToRgb(zm.f32x4(0.5, 1.0, 1.0, 1.0)), .key_time = 0.5, },
-                // .{ .value = zm.hsvToRgb(zm.f32x4(0.999, 1.0, 1.0, 1.0)), .key_time = 1.0, },
-            }),
-            .forces = try eng.particles.ForceArray.fromSlice(&.{
-                .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0, } },
-                .{ .Drag = 5.0 },
-            }),
-        },
-    );
+    };
+    defer player_attack_particle_system_settings.deinit(eng.get().general_allocator);
+
+    try player_attack_particle_system_settings.scale.appendSlice(eng.get().general_allocator, &.{
+        .{ .value = zm.f32x4s(0.05), },
+    });
+    try player_attack_particle_system_settings.colour.appendSlice(eng.get().general_allocator, &.{
+        .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0, },
+        .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 0.0)), .key_time = 1.0, .easing_into = .OutLinear },
+        // .{ .value = zm.hsvToRgb(zm.f32x4(0.0, 1.0, 1.0, 1.0)), .key_time = 0.0, },
+        // .{ .value = zm.hsvToRgb(zm.f32x4(0.5, 1.0, 1.0, 1.0)), .key_time = 0.5, },
+        // .{ .value = zm.hsvToRgb(zm.f32x4(0.999, 1.0, 1.0, 1.0)), .key_time = 1.0, },
+    });
+    try player_attack_particle_system_settings.forces.appendSlice(eng.get().general_allocator, &.{
+        .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0, } },
+        .{ .Drag = 5.0 },
+    });
+
+    var player_attack_particle_system = try eng.particles.ParticleSystem.init(engine.general_allocator, player_attack_particle_system_settings);
     errdefer player_attack_particle_system.deinit();
 
     var command_pool = try gfx.CommandPool.init(.{
@@ -148,12 +149,14 @@ pub fn init() !Self {
     const command_buffers: [4]gfx.CommandBuffer = 
         (command_pool.get() catch unreachable).allocate_command_buffers(.{}, 4) catch unreachable;
 
-    var uber_cmd_semaphores = try std.ArrayList(gfx.Semaphore).initCapacity(eng.get().general_allocator, gfx.GfxState.get().frames_in_flight());
-    defer uber_cmd_semaphores.deinit();
-    errdefer for (uber_cmd_semaphores.items) |s| { s.deinit(); };
+    const uber_cmd_semaphores = try eng.get().general_allocator.alloc(gfx.Semaphore, gfx.GfxState.get().frames_in_flight());
+    errdefer eng.get().general_allocator.free(uber_cmd_semaphores);
+
+    var uber_cmd_semaphores_list = std.ArrayList(gfx.Semaphore).initBuffer(uber_cmd_semaphores);
+    errdefer for (uber_cmd_semaphores_list.items) |s| { s.deinit(); };
 
     for (0..gfx.GfxState.get().frames_in_flight()) |_| {
-        try uber_cmd_semaphores.append(try gfx.Semaphore.init(.{}));
+        try uber_cmd_semaphores_list.appendBounded(try gfx.Semaphore.init(.{}));
     }
 
     return Self {
@@ -178,14 +181,14 @@ pub fn init() !Self {
         .player_attack_particle_system = player_attack_particle_system,
 
         .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainRenderer.init(engine.general_allocator),
+        .terrain_renderer = try TerrainRenderer.init(),
         .particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator),
         .edit_mode = try EditMode.init(),
 
         .command_pool = command_pool,
         .command_buffers = command_buffers,
 
-        .uber_cmd_semaphores = try uber_cmd_semaphores.toOwnedSlice(),
+        .uber_cmd_semaphores = uber_cmd_semaphores,
     };
 }
 
@@ -428,13 +431,16 @@ fn update(self: *Self) !void {
                 }
 
                 if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.MouseLeft)) {
-                    var collector = CollideShapeCollector.init(engine.frame_allocator);
+                    var collector = CollideShapeCollector.init(engine.frame_allocator) catch |err| {
+                        std.log.warn("Unable to create physics collector: {}", .{err});
+                        unreachable;
+                    };
                     defer collector.deinit();
 
                     const box_shape_settings = zphy.BoxShapeSettings.create([3]f32{0.5, 0.5, 0.5}) catch unreachable;
-                    defer box_shape_settings.release();
+                    defer box_shape_settings.asShapeSettings().release();
 
-                    const box_shape = box_shape_settings.createShape() catch unreachable;
+                    const box_shape = box_shape_settings.asShapeSettings().createShape() catch unreachable;
                     defer box_shape.release();
 
                     var camera_forward_2d = self.camera.transform.forward_direction();
@@ -825,6 +831,7 @@ pub fn push_entity_model_for_rendering(
         const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
             anim_controller.update(&engine.asset_manager, &engine.time);
             anim_controller.calculate_bone_transforms(
+                eng.get().general_allocator,
                 &engine.asset_manager,
                 m,
                 pose
@@ -876,90 +883,87 @@ pub fn render_model(
     },
     transform: Transform,
 ) !void {
-    var queue = std.ArrayList(
-        struct { 
-            node: *const eng.mesh.ModelNode,
-            mat: zm.Mat
-        }
-    ).initCapacity(eng.get().frame_allocator, model.nodes_list.len) catch unreachable;
-    defer queue.deinit();
+    const node_matrix_list = try eng.get().general_allocator.alloc(zm.Mat, model.nodes.len);
+    defer eng.get().general_allocator.free(node_matrix_list);
 
-    const root_mat = transform.generate_model_matrix();
-    try queue.append(.{ .node = &model.nodes_list[0], .mat = root_mat });
+    const root_transform = transform.generate_model_matrix();
 
-    while (queue.items.len > 0) {
-        const item = queue.pop().?;
+    for (model.nodes, 0..) |*node, node_index| {
+        const parent_matrix = if (node.parent) |parent_node_index| blk: {
+            std.debug.assert(parent_node_index < node_index);
+            break :blk node_matrix_list[parent_node_index];
+        } else root_transform;
 
-        var node_model_matrix = zm.mul(item.node.transform.generate_model_matrix(), item.mat);
+        var node_model_matrix = zm.mul(node.transform.generate_model_matrix(), parent_matrix);
 
         // Apply pose
         if (bones_data) |bd| {
-            if (item.node.name) |node_name| {
-                if (model.bone_mapping.get(node_name)) |bone_id| {
-                    const bone_data = &model.bone_info.items[@intCast(bone_id)];
+            if (node.name) |node_name| {
+                if (model.bones_names_map.get(node_name)) |bone_id| {
+                    const bone_data = &model.bones_info[@intCast(bone_id)];
                     // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
-                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset), bd.pose_data[@intCast(bone_id)]), root_mat);
+                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset_matrix), bd.pose_data[@intCast(bone_id)]), root_transform);
                 }
             }
         }
 
-        if (item.node.mesh) |*mesh_set| {
-            for (mesh_set.primitives) |maybe_prim| {
-                if (maybe_prim) |prim_idx| {
-                    const p = &model.mesh_list[prim_idx];
+        // Render mesh set
+        if (node.mesh_set) |*mesh_set| {
+            for (mesh_set.primitives_slice()) |prim_index| {
+                const mesh_prim = &model.meshes[prim_index];
 
-                    var material = eng.mesh.MaterialTemplate {};
-                    if (p.material_template) |m_idx| {
-                        material = model.materials[m_idx];
-                    }
+                var material = eng.mesh.MaterialTemplate {};
+                if (mesh_prim.material_template) |m_idx| {
+                    material = model.materials[m_idx];
+                }
 
-                    const indices_info = blk: { if (p.has_indices()) {
-                        break :blk StandardRenderer.RenderObject.IndexInfo {
-                            .buffer_info = .{ .buffer = model.buffers.indices, .offset = @intCast(p.indices_offset * @sizeOf(u32)), },
-                            .index_count = p.num_indices,
-                        };
-                    } else {
-                        break :blk null;
-                    } };
-
-                    const vertex_buffers = std.BoundedArray(gfx.VertexBufferInput, 8).fromSlice(&[_]gfx.VertexBufferInput{
-                        .{ .buffer = model.buffers.vertices, .offset = @truncate(model.buffers.offsets.positions), },
-                    }) catch unreachable;
-
-                    const render_object = StandardRenderer.RenderObject {
-                        .entity_id = entity_id,
-                        .transform = node_model_matrix,
-                        .vertex_buffers = vertex_buffers,
-                        .vertex_count = p.num_vertices,
-                        .pos_offset = p.pos_offset,
-                        .index_buffer = indices_info,
-                        .material = material,
+                const indices_info = blk: { if (mesh_prim.has_indices()) {
+                    break :blk StandardRenderer.RenderObject.IndexInfo {
+                        .buffer_info = .{ 
+                            .buffer = model.indices_buffer,
+                            .offset = @intCast(mesh_prim.indices_offset),
+                        },
+                        .index_count = mesh_prim.index_count,
                     };
+                } else {
+                    break :blk null;
+                } };
 
-                    if (bones_data) |bd| {
-                        self.standard_renderer.push_animated(.{
-                            .standard = render_object,
-                            .bone_info = bd.bone_info,
-                        }) catch unreachable;
-                    } else {
-                        self.standard_renderer.push(render_object)
-                            catch unreachable;
-                    }
+                var render_object = StandardRenderer.RenderObject {
+                    .entity_id = entity_id,
+                    .transform = node_model_matrix,
+                    .vertex_buffers = undefined,
+                    .vertex_count = mesh_prim.vertex_count,
+                    .pos_offset = 0,
+                    .index_buffer = indices_info,
+                    .material = material,
+                };
+                render_object.vertex_buffers[0] = .{ .buffer = model.vertices_buffer, .offset = mesh_prim.vertices_offset, };
+                render_object.vertex_buffers_count = 1;
+
+                if (bones_data) |bd| {
+                    self.standard_renderer.push_animated(.{
+                        .standard = render_object,
+                        .bone_info = bd.bone_info,
+                    }) catch unreachable;
+                } else {
+                    self.standard_renderer.push(render_object)
+                        catch unreachable;
                 }
             }
         }
 
-        for (item.node.children) |c| {
-            try queue.append(.{ .node = &model.nodes_list[c], .mat = node_model_matrix });
-        }
+        node_matrix_list[node_index] = node_model_matrix;
     }
 }
 
 pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void {
     switch (event.*) {
-        .EVENTS_CLEARED => { self.update() catch |err| {
-            std.log.err("update failed: {}", .{err});
-        }; },
+        .EVENTS_CLEARED => {
+            self.update() catch |err| {
+                std.log.err("update failed: {}", .{err});
+            };
+        },
         else => {},
     }
 }
@@ -969,53 +973,69 @@ fn character_is_supported(chr: *zphy.CharacterVirtual) bool {
 }
 
 const CollideShapeCollector = extern struct {
-    usingnamespace zphy.CollideShapeCollector.Methods(@This());
     __v: *const zphy.CollideShapeCollector.VTable = &vtable,
 
+    alloc: *std.mem.Allocator,
     hits: *std.ArrayList(zphy.CollideShapeResult),
 
     const vtable = zphy.CollideShapeCollector.VTable{ 
         .reset = _Reset,
         .onBody = _OnBody,
+        .onBodyEnd = _OnBodyEnd,
         .setUserData = _SetUserData,
         .addHit = _AddHit,
     };
 
     fn _Reset(
         self: *zphy.CollideShapeCollector,
-    ) callconv(.C) void { 
+    ) callconv(.c) void { 
         _ = self;
     }
     fn _OnBody(
         self: *zphy.CollideShapeCollector,
         in_body: *const zphy.Body,
-    ) callconv(.C) void { 
+    ) callconv(.c) void { 
         _ = self;
         _ = in_body;
+    }
+    fn _OnBodyEnd(
+        self: *zphy.CollideShapeCollector,
+    ) callconv(.c) void {
+        _ = self;
     }
     fn _SetUserData(
         self: *zphy.CollideShapeCollector,
         in_user_data: u64,
-    ) callconv(.C) void {
+    ) callconv(.c) void {
         _ = self;
         _ = in_user_data;
     }
     fn _AddHit(
         self: *zphy.CollideShapeCollector,
         collide_shape_result: *const zphy.CollideShapeResult,
-    ) callconv(.C) void {
-        @as(*CollideShapeCollector, @ptrCast(self)).hits.append(collide_shape_result.*) catch unreachable;
+    ) callconv(.c) void {
+        const pself = @as(*CollideShapeCollector, @ptrCast(self));
+        pself.hits.append(pself.alloc.*, collide_shape_result.*) catch unreachable;
     }
 
     pub fn deinit(self: *CollideShapeCollector) void {
-        self.hits.deinit();
-        self.hits.allocator.destroy(self.hits);
+        const alloc = self.alloc.*;
+        self.hits.deinit(alloc);
+        alloc.destroy(self.hits);
+        alloc.destroy(self.alloc);
     }
 
-    pub fn init(alloc: std.mem.Allocator) CollideShapeCollector {
-        const hits = alloc.create(std.ArrayList(zphy.CollideShapeResult)) catch unreachable;
-        hits.* = std.ArrayList(zphy.CollideShapeResult).init(alloc);
+    pub fn init(alloc: std.mem.Allocator) !CollideShapeCollector {
+        const alloc_ptr = try alloc.create(std.mem.Allocator);
+        errdefer alloc.destroy(alloc_ptr);
+        alloc_ptr.* = alloc;
+
+        const hits = try alloc.create(std.ArrayList(zphy.CollideShapeResult));
+        errdefer alloc.destroy(hits);
+        hits.* = std.ArrayList(zphy.CollideShapeResult).empty;
+
         return CollideShapeCollector {
+            .alloc = alloc_ptr,
             .hits = hits,
         };
     }

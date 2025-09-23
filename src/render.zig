@@ -20,7 +20,8 @@ const CameraStruct = extern struct {
 pub const RenderObject = struct {
     entity_id: ?u32,
     transform: zm.Mat,
-    vertex_buffers: std.BoundedArray(gfx.VertexBufferInput, 8),
+    vertex_buffers: [4]gfx.VertexBufferInput,
+    vertex_buffers_count: u8 = 0,
     vertex_count: usize,
     pos_offset: usize,
     index_buffer: ?IndexInfo,
@@ -30,6 +31,10 @@ pub const RenderObject = struct {
         buffer_info: gfx.VertexBufferInput,
         index_count: usize,
     };
+
+    pub fn vertex_buffers_slice(self: *const RenderObject) []const gfx.VertexBufferInput {
+        return self.vertex_buffers[0..self.vertex_buffers_count];
+    }
 };
 
 pub const AnimatedRenderObject = struct {
@@ -167,6 +172,8 @@ selection_textures: SelectionTextures.SelectionTextures(u32),
 
 
 pub fn deinit(self: *Self) void {
+    const general_alloc = eng.get().general_allocator;
+
     self.selection_textures.deinit();
 
     self.shaders.deinit();
@@ -174,11 +181,11 @@ pub fn deinit(self: *Self) void {
 
     self.camera_data_buffer.deinit();
     for (self.instance_buffers.items) |b| { b.deinit(); }
-    self.instance_buffers.deinit();
+    self.instance_buffers.deinit(general_alloc);
     for (self.lights_buffers.items) |b| { b.deinit(); }
-    self.lights_buffers.deinit();
+    self.lights_buffers.deinit(general_alloc);
     for (self.bone_buffers.items) |b| { b.deinit(); }
-    self.bone_buffers.deinit();
+    self.bone_buffers.deinit(general_alloc);
 
     self.camera_data_descriptor_pool.deinit();
     self.camera_data_layout.deinit();
@@ -194,7 +201,7 @@ pub fn deinit(self: *Self) void {
             s.deinit();
         }
     }
-    self.texture_data_sets.deinit();
+    self.texture_data_sets.deinit(general_alloc);
 
     self.default_textures_set.deinit();
     self.textures_data_descriptor_pool.deinit();
@@ -209,15 +216,13 @@ pub fn deinit(self: *Self) void {
     self.framebuffer.deinit();
     self.render_pass.deinit();
 
-    self.render_objects.deinit();
-    self.skeletal_render_objects.deinit();
-    self.render_bones.deinit();
-    self.lights.deinit();
+    self.render_objects.deinit(general_alloc);
+    self.skeletal_render_objects.deinit(general_alloc);
+    self.render_bones.deinit(general_alloc);
+    self.lights.deinit(general_alloc);
 }
 
 pub fn init() !Self {
-    const alloc = eng.get().general_allocator;
-    
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
@@ -560,15 +565,15 @@ pub fn init() !Self {
         .textures_data_layout = textures_data_layout,
         .textures_data_descriptor_pool = textures_descriptor_pool,
         .default_textures_set = default_textures_set,
-        .texture_data_sets = std.ArrayList(?gfx.DescriptorSet.Ref).init(alloc),
+        .texture_data_sets = std.ArrayList(?gfx.DescriptorSet.Ref).empty,
 
         .bones_data_layout = bones_data_layout,
         .bones_data_descriptor_pool = bones_data_descriptor_pool,
 
         .camera_data_buffer = camera_data_buffer,
-        .instance_buffers = std.ArrayList(BufferData).init(alloc),
-        .lights_buffers = std.ArrayList(BufferData).init(alloc),
-        .bone_buffers = std.ArrayList(BufferData).init(alloc),
+        .instance_buffers = std.ArrayList(BufferData).empty,
+        .lights_buffers = std.ArrayList(BufferData).empty,
+        .bone_buffers = std.ArrayList(BufferData).empty,
 
         .render_pass = render_pass,
         .framebuffer = framebuffer,
@@ -582,10 +587,10 @@ pub fn init() !Self {
             .transparent = skeletal_transparent_pipeline,
         },
 
-        .render_objects = std.ArrayList(RenderObject).init(alloc),
-        .skeletal_render_objects = std.ArrayList(AnimatedRenderObject).init(alloc),
-        .render_bones = std.ArrayList(zm.Mat).init(alloc),
-        .lights = std.ArrayList(Light).init(alloc),
+        .render_objects = std.ArrayList(RenderObject).empty,
+        .skeletal_render_objects = std.ArrayList(AnimatedRenderObject).empty,
+        .render_bones = std.ArrayList(zm.Mat).empty,
+        .lights = std.ArrayList(Light).empty,
 
         .selection_textures = selection_textures,
     };
@@ -692,22 +697,22 @@ fn init_shaders() !Shaders {
 }
 
 pub fn push(self: *Self, ro: RenderObject) !void {
-    self.render_objects.append(ro) catch unreachable;
+    self.render_objects.append(eng.get().general_allocator, ro) catch unreachable;
 }
 
 pub fn push_animated(self: *Self, sro: AnimatedRenderObject) !void {
-    self.skeletal_render_objects.append(sro) catch unreachable;
+    self.skeletal_render_objects.append(eng.get().general_allocator, sro) catch unreachable;
 }
 
 pub fn push_bones(self: *Self, bones: []const zm.Mat) !struct { start_idx: usize, end_idx: usize, } {
     const start_idx = self.render_bones.items.len;
-    self.render_bones.appendSlice(bones) catch unreachable;
+    self.render_bones.appendSlice(eng.get().general_allocator, bones) catch unreachable;
     const end_idx = self.render_bones.items.len;
     return .{ .start_idx = start_idx, .end_idx = end_idx, };
 }
 
 pub fn push_light(self: *Self, light: Light) !void {
-    self.lights.append(light) catch unreachable;
+    self.lights.append(eng.get().general_allocator, light) catch unreachable;
 }
 
 pub fn clear(self: *Self) void {
@@ -764,7 +769,7 @@ fn append_new_instance_buffer(
         .descriptor_set = descriptor_set,
     };
 
-    try self.instance_buffers.append(buffer_data);
+    try self.instance_buffers.append(eng.get().general_allocator, buffer_data);
 }
 
 fn append_new_lights_buffer(
@@ -798,7 +803,7 @@ fn append_new_lights_buffer(
         .descriptor_set = descriptor_set,
     };
 
-    try self.lights_buffers.append(buffer_data);
+    try self.lights_buffers.append(eng.get().general_allocator, buffer_data);
 }
 
 fn append_new_bones_buffer(
@@ -832,7 +837,7 @@ fn append_new_bones_buffer(
         .descriptor_set = descriptor_set,
     };
 
-    try self.bone_buffers.append(buffer_data);
+    try self.bone_buffers.append(eng.get().general_allocator, buffer_data);
 }
 
 pub fn render_cmd(
@@ -957,7 +962,7 @@ pub fn render_cmd(
 
         // textures
         if (idx == self.texture_data_sets.items.len) {
-            try self.texture_data_sets.append(null);
+            try self.texture_data_sets.append(eng.get().general_allocator, null);
         }
 
         if (ro.material.diffuse_map) |diffuse_map| {
@@ -1003,7 +1008,7 @@ pub fn render_cmd(
 
         cmd.cmd_bind_vertex_buffers(.{
             .first_binding = 0,
-            .buffers = ro.vertex_buffers.slice(),
+            .buffers = ro.vertex_buffers_slice(),
         });
 
         const push_constants = PushConstants {
@@ -1131,7 +1136,7 @@ pub fn render_cmd(
 
         // textures
         if (idx == self.texture_data_sets.items.len) {
-            try self.texture_data_sets.append(null);
+            try self.texture_data_sets.append(eng.get().general_allocator, null);
         }
 
         if (ro.material.diffuse_map) |diffuse_map| {
@@ -1209,7 +1214,7 @@ pub fn render_cmd(
 
         cmd.cmd_bind_vertex_buffers(.{
             .first_binding = 0,
-            .buffers = ro.vertex_buffers.slice(),
+            .buffers = ro.vertex_buffers_slice(),
         });
 
         const push_constants = PushConstants {
@@ -1326,7 +1331,7 @@ pub fn render(
         eng.get().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
         eng.get().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
 
-        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.items);
 
         if (ro.material.double_sided) {
             eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });
@@ -1403,7 +1408,7 @@ pub fn render(
         eng.get().gfx.cmd_set_constant_buffers(.Vertex, 1, &.{instance_buffer});
         eng.get().gfx.cmd_set_constant_buffers(.Pixel, 1, &.{instance_buffer});
 
-        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.slice());
+        eng.get().gfx.cmd_set_vertex_buffers(0, ro.vertex_buffers.items);
 
         if (ro.material.double_sided) {
             eng.get().gfx.cmd_set_rasterizer_state(.{ .FillFront = true, .FillBack = true, });

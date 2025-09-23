@@ -392,8 +392,8 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
     errdefer arena.deinit();
 
     // generate model option names from asset packs
-    var model_names = std.ArrayList([]u8).init(alloc);
-    defer model_names.deinit();
+    var model_names = std.ArrayList([]u8).empty;
+    defer model_names.deinit(alloc);
 
     var asset_packs_iter = eng.get().asset_manager.asset_packs.iterator();
     while (asset_packs_iter.next()) |it| {
@@ -407,7 +407,7 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
                     const asset_identifier_string = try asset_id.serialize(alloc);
                     defer alloc.free(asset_identifier_string);
 
-                    try model_names.append(try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
+                    try model_names.append(alloc, try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
                 },
                 else => {},
             }
@@ -416,14 +416,14 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
 
     return ModelNames {
         .arena = arena,
-        .names = try model_names.toOwnedSlice(),
+        .names = try model_names.toOwnedSlice(alloc),
     };
 }
 
 
 const EntityEditorTabWidth = 10;
 fn entity_editor_ui(
-    self: *Self, 
+    self: *Self,
     key: anytype,
 ) void {
     const imui = &eng.get().imui;
@@ -480,7 +480,7 @@ fn entity_editor_ui(
         // if name line edit has changed then update the entity's name
         if (name_edit.init) {
             const name_edit_data, _ = imui.get_widget_data(eng.ui.Imui.TextInputState, name_edit.id.box) catch unreachable;
-            name_edit_data.text.appendSlice(entity.name orelse "unnamed") catch unreachable;
+            name_edit_data.text.appendSlice(imui.widget_allocator(), entity.name orelse "unnamed") catch unreachable;
             name_edit_data.cursor = name_edit_data.text.items.len;
             name_edit_data.mark = name_edit_data.text.items.len;
         }
@@ -512,13 +512,14 @@ fn entity_editor_ui(
             std.log.info("model combobox init", .{});
 
             const model_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, model_combobox.id) catch unreachable;
-            model_combobox_data.default_text.appendSlice("None") catch unreachable;
+            model_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
             model_combobox_data.can_be_default = true;
 
             var model_names = get_all_model_names(eng.get().frame_allocator) catch unreachable;
             defer model_names.deinit();
+
             for (model_names.names) |option| {
-                model_combobox_data.append_option(option) catch |err| {
+                model_combobox_data.append_option(imui.widget_allocator(), option) catch |err| {
                     std.log.err("Failed to append combobox option: {}", .{err});
                     break;
                 };
@@ -528,7 +529,7 @@ fn entity_editor_ui(
                 sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable else "None";
             model_combobox_data.selected_index = null;
             for (model_combobox_data.options.items, 0..) |option, i| {
-                if (std.mem.eql(u8, option.items, model_text)) {
+                if (std.mem.eql(u8, option, model_text)) {
                     model_combobox_data.selected_index = i;
                     break;
                 }
@@ -537,7 +538,7 @@ fn entity_editor_ui(
         if (model_combobox.data_changed) {
             const model_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, model_combobox.id) catch unreachable;
             if (model_combobox_data.selected_index) |si| {
-                if (sr.deserialize(assets.ModelAssetId, arena.allocator(), model_combobox_data.options.items[si].items)) |model_id| {
+                if (sr.deserialize(assets.ModelAssetId, arena.allocator(), model_combobox_data.options.items[si])) |model_id| {
                     entity.model = model_id;
                 } else |_| { 
                     std.log.err("Failed to deserialize model id!", .{});
@@ -746,12 +747,12 @@ fn entity_editor_ui(
         const light_type_combobox = imui.combobox(key ++ .{@src()});
         const light_type_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, light_type_combobox.id) catch unreachable;
         if (light_type_combobox.init) {
-            light_type_combobox_data.default_text.appendSlice("None") catch unreachable;
+            light_type_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
             light_type_combobox_data.can_be_default = true;
 
             const light_type_options_fields = @typeInfo(StandardRenderer.LightType).@"enum".fields;
             inline for (light_type_options_fields) |field| {
-                light_type_combobox_data.append_option(field.name) catch unreachable;
+                light_type_combobox_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
             }
 
             light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.light_type) else null;
@@ -1057,8 +1058,18 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
         largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
     }
 
+    var json_writer = std.io.Writer.Allocating.init(arena.allocator());
+    defer json_writer.deinit();
+
+    var json = std.json.Stringify{
+        .writer = &json_writer.writer,
+    };
+    json.options.whitespace = .indent_2;
+
     it.reset();
     while (it.next()) |entity| {
+        json_writer.clearRetainingCapacity();
+
         if (!entity.should_serialize) continue;
         _ = arena.reset(.retain_capacity);
 
@@ -1077,10 +1088,11 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             continue;
         };
 
-        const res = std.json.stringifyAlloc(arena.allocator(), entity_s, .{.whitespace = .indent_2}) catch |err| {
+        json.write(entity_s) catch |err| {
             std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});
             continue;
         };
+
         const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity.serialize_id.?}) catch |err| {
             std.log.err("unable to produce file path for entity {}: {}\n", .{entity.serialize_id.?, err});
             continue;
@@ -1088,7 +1100,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
 
         scene_dir.writeFile(.{
             .sub_path = file_path,
-            .data = res,
+            .data = json_writer.written(),
             .flags = .{ .read = false, .truncate = true, },
         }) catch |err| {
             std.log.err("unable to write file for entity {}: {}\n", .{entity.serialize_id.?, err});

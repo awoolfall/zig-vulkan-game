@@ -206,15 +206,15 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
     // create the new physics body
     const heightmap_side_length: u32 = @intCast(std.math.sqrt(self.heightmap.len));
     const shape_settings = try ph.zphy.HeightFieldShapeSettings.create(self.heightmap.ptr, heightmap_side_length);
-    defer shape_settings.release();
+    defer shape_settings.asShapeSettings().release();
 
     const heightmap_side_length_f32: f32 = @floatFromInt(heightmap_side_length);
     const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
         shape_settings.asShapeSettings(), 
         [3]f32{ self.map_length_m / heightmap_side_length_f32, self.map_height_scale, self.map_length_m / heightmap_side_length_f32 });
-    defer scaled_shape_settings.release();
+    defer scaled_shape_settings.asShapeSettings().release();
 
-    const shape = try scaled_shape_settings.createShape();
+    const shape = try scaled_shape_settings.asShapeSettings().createShape();
     defer shape.release();
 
     const new_body = try body_interface.createAndAddBody(.{

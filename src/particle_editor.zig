@@ -19,7 +19,7 @@ const ParticleSettingsContainer = struct {
 
     pub fn clone(self: *ParticleSettingsContainer, alloc: std.mem.Allocator) !ParticleSettingsContainer {
         var new_settings = try ParticleSettingsContainer.init(alloc);
-        new_settings.settings = self.settings;
+        new_settings.settings = try self.settings.clone(alloc);
         return new_settings;
     }
 
@@ -40,7 +40,10 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     const running_settings = &running_settings_container.settings;
     if (running_settings_state == .Init) {
         if (entity.app.particle_system) |entity_ps| {
-            running_settings.* = entity_ps.settings;
+            running_settings.* = entity_ps.settings.clone(imui.widget_allocator()) catch |err| {
+                std.log.err("Unable to clone particle system settings: {}", .{err});
+                unreachable;
+            };
         }
     }
 
@@ -98,7 +101,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                 const shape_options_fields = @typeInfo(@typeInfo(ps.ParticleShape).@"union".tag_type.?).@"enum".fields;
                 inline for (shape_options_fields) |field| {
-                    shape_combobox_data.append_option(field.name) catch unreachable;
+                    shape_combobox_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
                 }
 
                 shape_combobox_data.selected_index = @intFromEnum(running_settings.shape);
@@ -126,7 +129,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                 const alignment_option_fields = @typeInfo(@typeInfo(ps.ParticleAlignment).@"union".tag_type.?).@"enum".fields;
                 inline for (alignment_option_fields) |field| {
-                    alignment_combobox_data.append_option(field.name) catch unreachable;
+                    alignment_combobox_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
                 }
 
                 alignment_combobox_data.selected_index = @intFromEnum(running_settings.alignment);
@@ -229,7 +232,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         const colour_keyframes_collapsible = imui.collapsible("colour keyframes", null, key ++ .{@src()});
         const colour_keyframes_collapsible_open, _ = imui.get_widget_data(bool, colour_keyframes_collapsible.id) catch .{ &false, .Cont };
         if (colour_keyframes_collapsible_open.*) {
-            for (running_settings.colour.slice(), 0..) |*c, i| {
+            for (running_settings.colour.items, 0..) |*c, i| {
                 {
                     push_row_item_layout("key time: ", key ++ .{i, @src()});
                     defer imui.pop_layout();
@@ -264,7 +267,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                         const easing_option_fields = @typeInfo(es.Easing).@"enum".fields;
                         inline for (easing_option_fields) |field| {
-                            easing_combobox_i_data.append_option(field.name) catch unreachable;
+                            easing_combobox_i_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
                         }
 
                         easing_combobox_i_data.selected_index = @intFromEnum(c.easing_into);
@@ -282,11 +285,11 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                 const add_button = imui.badge("add keyframe", key ++ .{@src()});
                 if (add_button.clicked) {
-                    running_settings.colour.append(.{ .value = zm.f32x4s(1.0) }) catch |err| {
+                    running_settings.colour.append(imui.widget_allocator(), .{ .value = zm.f32x4s(1.0) }) catch |err| {
                         std.log.err("Failed to add keyframe: {}", .{err});
                     };
                 }
-                if (running_settings.colour.len != 0) {
+                if (running_settings.colour.items.len != 0) {
                     const rem_button = imui.badge("remove keyframe", key ++ .{@src()});
                     if (rem_button.clicked) {
                         _ = running_settings.colour.pop();
@@ -298,7 +301,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         const scale_collapsible = imui.collapsible("scale keyframes", null, key ++ .{@src()});
         const scale_collapsible_open, _ = imui.get_widget_data(bool, scale_collapsible.id) catch .{ &false, .Cont };
         if (scale_collapsible_open.*) {
-            for (running_settings.scale.slice(), 0..) |*k, i| {
+            for (running_settings.scale.items, 0..) |*k, i| {
                 {
                     push_row_item_layout("key time: ", key ++ .{i, @src()});
                     defer imui.pop_layout();
@@ -331,7 +334,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                         const easing_option_fields = @typeInfo(es.Easing).@"enum".fields;
                         inline for (easing_option_fields) |field| {
-                            easing_combobox_i_data.append_option(field.name) catch unreachable;
+                            easing_combobox_i_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
                         }
 
                         easing_combobox_i_data.selected_index = @intFromEnum(k.easing_into);
@@ -349,11 +352,11 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                 const add_button = imui.badge("add keyframe", key ++ .{@src()});
                 if (add_button.clicked) {
-                    running_settings.scale.append(.{ .value = zm.f32x4s(1.0) }) catch |err| {
+                    running_settings.scale.append(imui.widget_allocator(), .{ .value = zm.f32x4s(1.0) }) catch |err| {
                         std.log.err("Failed to add keyframe: {}", .{err});
                     };
                 }
-                if (running_settings.scale.len != 0) {
+                if (running_settings.scale.items.len != 0) {
                     const rem_button = imui.badge("remove keyframe", key ++ .{@src()});
                     if (rem_button.clicked) {
                         _ = running_settings.scale.pop();
@@ -365,7 +368,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         const forces_collapsible = imui.collapsible("particle forces", null, key ++ .{@src()});
         const forces_collapsible_open, _ = imui.get_widget_data(bool, forces_collapsible.id) catch .{ &false, .Cont };
         if (forces_collapsible_open.*) {
-            for (running_settings.forces.slice(), 0..) |*f, i| {
+            for (running_settings.forces.items, 0..) |*f, i| {
                 {
                     push_row_item_layout("force: ", key ++ .{i, @src()});
                     defer imui.pop_layout();
@@ -377,7 +380,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                         const force_option_fields = @typeInfo(@typeInfo(ps.ForceEnum).@"union".tag_type.?).@"enum".fields;
                         inline for (force_option_fields) |field| {
-                            force_combobox_i_data.append_option(field.name) catch unreachable;
+                            force_combobox_i_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
                         }
 
                         force_combobox_i_data.selected_index = @intFromEnum(f.*);
@@ -455,7 +458,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
                 const add_button = imui.badge("add force", key ++ .{@src()});
                 if (add_button.clicked) {
-                    running_settings.forces.append(.{ .Constant = zm.f32x4s(0.0) }) catch |err| {
+                    running_settings.forces.append(imui.widget_allocator(), .{ .Constant = zm.f32x4s(0.0) }) catch |err| {
                         std.log.err("Failed to add force: {}", .{err});
                     };
                 }
@@ -463,12 +466,14 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         }
     }
 
-    if (entity.app.particle_system) |*eps| {
-        if (eps.settings.max_particles != running_settings.max_particles) {
-            eps.resize(running_settings.max_particles) catch unreachable;
-        }
-        eps.settings = running_settings.*;
-    }
+    // TODO: FIX: fix this. we cant just set settings here due to allocs. We need to know if something changed.
+    // or just work on the actual settings.
+
+    // if (entity.app.particle_system) |*eps| {
+    //     eps.set_settings(running_settings) catch |err| {
+    //         std.log.warn("Unable to set particle system settings: {}", .{err});
+    //     };
+    // }
 }
 
 fn push_row_item_layout(text: []const u8, key: anytype) void {
@@ -504,4 +509,3 @@ fn labeled_number_slider(
     }
     _ = eng.get().imui.number_slider(value, settings, key ++ .{@src()});
 }
-
