@@ -128,8 +128,8 @@ const StandardRenderPipeline = struct {
     }
 };
 
-const MAX_OBJECTS_PER_INSTANCE_BUFFER = 128;
-const MAX_OBJECTS_PER_LIGHTS_BUFFER = 128;
+const MAX_OBJECTS_PER_INSTANCE_BUFFER = 64;
+const MAX_OBJECTS_PER_LIGHTS_BUFFER = 64;
 const MAX_BONES_PER_BUFFER = 1024;
 
 shaders: Shaders,

@@ -828,24 +828,26 @@ pub fn push_entity_model_for_rendering(
         defer alloc.free(pose);
         @memset(pose, zm.identity());
 
-        const bone_info = blk: { if (entity.app.anim_controller) |*anim_controller| {
-            anim_controller.update(&engine.asset_manager, &engine.time);
-            anim_controller.calculate_bone_transforms(
-                eng.get().general_allocator,
-                &engine.asset_manager,
-                m,
-                pose
-            );
+        const bone_info = blk: {
+            if (entity.app.anim_controller) |*anim_controller| {
+                anim_controller.update(&engine.asset_manager, &engine.time);
+                anim_controller.calculate_bone_transforms(
+                    eng.get().general_allocator,
+                    &engine.asset_manager,
+                    m,
+                    pose
+                );
 
-            const bone_index_info = self.standard_renderer.push_bones(pose[0..]) catch unreachable;
+                const bone_index_info = self.standard_renderer.push_bones(pose[0..]) catch unreachable;
 
-            break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
-                .bone_count = pose.len,
-                .bone_offset = bone_index_info.start_idx,
-            };
-        } else {
-            break :blk null;
-        }};
+                break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
+                    .bone_count = pose.len,
+                    .bone_offset = bone_index_info.start_idx,
+                };
+            } else {
+                break :blk null;
+            }
+        };
 
         // Finally, render the model
         self.render_model(
