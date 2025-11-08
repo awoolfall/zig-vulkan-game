@@ -7,6 +7,7 @@ const zphy = eng.physics.zphy;
 const zm = eng.zmath;
 const Transform = eng.Transform;
 const gfx = eng.gfx;
+const Imui = eng.ui;
 const window = eng.window;
 const KeyCode = eng.input.KeyCode;
 const gen = eng.gen;
@@ -511,7 +512,7 @@ fn update(self: *Self) !void {
 
                 {
                     _ = engine.imui.push_floating_layout(.Y, 100, 500, .{@src()});
-                    const l = engine.imui.label(vel_text);
+                    const l = Imui.widgets.label.create(&eng.get().imui, vel_text);
                     if (engine.imui.get_widget(l.id)) |tw| {
                         tw.text_content.?.font = .GeistMono;
                         tw.text_content.?.size = 15;
@@ -609,7 +610,7 @@ fn update(self: *Self) !void {
             25.0 - engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
-        const l = engine.imui.label(fps_text);
+        const l = Imui.widgets.label.create(&eng.get().imui, fps_text);
         if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
@@ -625,7 +626,7 @@ fn update(self: *Self) !void {
     {
         _ = engine.imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine.gfx.swapchain_size()[1])) - 
             engine.imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
-        const l = engine.imui.label(rev_text);
+        const l = Imui.widgets.label.create(&eng.get().imui, rev_text);
         if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;

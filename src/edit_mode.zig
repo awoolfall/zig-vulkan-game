@@ -18,7 +18,7 @@ const KeyCode = eng.input.KeyCode;
 const EntityDescriptor = eng.Engine.EntityDescriptor;
 const Transform = eng.Transform;
 const Camera = eng.camera.Camera;
-const Imui = eng.ui.Imui;
+const Imui = eng.ui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
 
 const EditorMode = enum {
@@ -191,7 +191,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
         top_widget.background_colour.?[3] = 0.5;
     }
 
-    const l = imui.label(try std.fmt.allocPrint(eng.get().frame_allocator, "Edit Mode{s}", .{
+    const l = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Edit Mode{s}", .{
         if (self.loaded_scene_name) |scene_name|
             try std.fmt.allocPrint(eng.get().frame_allocator, ": {s}", .{scene_name})
          else ""
@@ -209,7 +209,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
     }
 
     {
-        const file_button = imui.button("File", key ++ .{@src()});
+        const file_button = Imui.widgets.button.create(imui, "File", key ++ .{@src()});
         if (imui.get_widget(file_button.id.box)) |file_widget| {
             file_widget.background_colour = zm.f32x4s(0.0);
             file_widget.border_width_px = .{};
@@ -239,7 +239,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
                 defer imui.pop_layout();
 
-                const save_button = imui.badge("Save Scene", key ++ .{@src()});
+                const save_button = Imui.widgets.badge.create(imui, "Save Scene", key ++ .{@src()});
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
                         save_entities_to_scene(scene_name) catch |err| {
@@ -248,7 +248,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                         std.log.debug("saved scene {s}!", .{scene_name});
                     }
                 }
-                const load_button = imui.badge("Load Scene", key ++ .{@src()});
+                const load_button = Imui.widgets.badge.create(imui, "Load Scene", key ++ .{@src()});
                 if (load_button.clicked) {
                     self.load_scene_popup_is_open = true;
                     // for (eng.get().entities.list.data.items, 0..) |*it, idx| {
@@ -266,7 +266,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
     }
 
     {
-        const edit_button = imui.button("Edit", key ++ .{@src()});
+        const edit_button = Imui.widgets.button.create(imui, "Edit", key ++ .{@src()});
         if (imui.get_widget(edit_button.id.box)) |edit_widget| {
             edit_widget.background_colour = zm.f32x4s(0.0);
             edit_widget.border_width_px = .{};
@@ -296,17 +296,17 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
                 defer imui.pop_layout();
 
-                const new_button = imui.badge("New Entity", key ++ .{@src()});
+                const new_button = Imui.widgets.badge.create(imui, "New Entity", key ++ .{@src()});
                 if (new_button.clicked) {
                     self.create_new_entity();
                 }
 
-                const delete_button = imui.badge("Delete Entity", key ++ .{@src()});
+                const delete_button = Imui.widgets.badge.create(imui, "Delete Entity", key ++ .{@src()});
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
 
-                const duplicate_button = imui.badge("Duplicate Entity", key ++ .{@src()});
+                const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity();
                 }
@@ -457,12 +457,12 @@ fn entity_editor_ui(
         entity_editor_background_position[1] += eng.get().input.mouse_delta[1];
     }
 
-    const entity_editor_title_text = imui.label("Entity Editor");
+    const entity_editor_title_text = Imui.widgets.label.create(imui, "Entity Editor");
     if (imui.get_widget(entity_editor_title_text.id)) |entity_editor_title_widget| {
         entity_editor_title_widget.anchor = .{ 0.5, 0.5 };
         entity_editor_title_widget.pivot = .{ 0.5, 0.5 };
     }
-    _ = imui.checkbox(&entity.should_serialize, "should serialize", key ++ .{@src()});
+    _ = Imui.widgets.checkbox.create(imui, &entity.should_serialize, "should serialize", key ++ .{@src()});
 
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -472,21 +472,21 @@ fn entity_editor_ui(
         }
         defer imui.pop_layout();
 
-        const labell = imui.label("name:");
+        const labell = Imui.widgets.label.create(imui, "name:");
         if (imui.get_widget(labell.id)) |label_widget| {
             label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
         }
-        const name_edit = imui.line_edit(key ++ .{@src()});
+        const name_edit = Imui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
         // if name line edit has changed then update the entity's name
         if (name_edit.init) {
-            const name_edit_data, _ = imui.get_widget_data(eng.ui.Imui.TextInputState, name_edit.id.box) catch unreachable;
+            const name_edit_data, _ = imui.get_widget_data(Imui.widgets.line_edit.TextInputState, name_edit.id.box) catch unreachable;
             name_edit_data.text.appendSlice(imui.widget_allocator(), entity.name orelse "unnamed") catch unreachable;
             name_edit_data.cursor = name_edit_data.text.items.len;
             name_edit_data.mark = name_edit_data.text.items.len;
         }
         if (name_edit.data_changed) {
             if (entity.name) |_| {
-                const name_edit_data, _ = imui.get_widget_data(eng.ui.Imui.TextInputState, name_edit.id.box) catch unreachable;
+                const name_edit_data, _ = imui.get_widget_data(Imui.widgets.line_edit.TextInputState, name_edit.id.box) catch unreachable;
                 eng.get().general_allocator.free(entity.name.?);
                 entity.name = eng.get().general_allocator.dupe(u8, name_edit_data.text.items) catch unreachable;
             }
@@ -502,16 +502,16 @@ fn entity_editor_ui(
         }
         defer imui.pop_layout();
 
-        const labell = imui.label("model: ");
+        const labell = Imui.widgets.label.create(imui, "model: ");
         if (imui.get_widget(labell.id)) |label_widget| {
             label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
         }
 
-        const model_combobox = imui.combobox(key ++ .{@src()});
+        const model_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
         if (model_combobox.init) {
             std.log.info("model combobox init", .{});
 
-            const model_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, model_combobox.id) catch unreachable;
+            const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
             model_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
             model_combobox_data.can_be_default = true;
 
@@ -536,7 +536,7 @@ fn entity_editor_ui(
             }
         }
         if (model_combobox.data_changed) {
-            const model_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, model_combobox.id) catch unreachable;
+            const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
             if (model_combobox_data.selected_index) |si| {
                 if (sr.deserialize(assets.ModelAssetId, arena.allocator(), model_combobox_data.options.items[si])) |model_id| {
                     entity.model = model_id;
@@ -551,7 +551,7 @@ fn entity_editor_ui(
     }
     _ = arena.reset(.retain_capacity);
 
-    const transform_collapsible = imui.collapsible("Transform", null, .{@src()});
+    const transform_collapsible = Imui.widgets.collapsible.create(imui, "Transform", null, .{@src()});
     const transform_collapsible_open, _ = imui.get_widget_data(bool, transform_collapsible.id) catch .{ &false, .Cont };
 
     if (transform_collapsible_open.*) {
@@ -575,13 +575,13 @@ fn entity_editor_ui(
             }
             defer imui.pop_layout();
 
-            const ll = imui.label("position: ");
+            const ll = Imui.widgets.label.create(imui, "position: ");
             if (imui.get_widget(ll.id)) |ll_widget| {
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
-            _ = imui.number_slider(&entity.transform.position[0], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.position[1], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.position[2], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[0], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[1], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[2], .{}, key ++ .{@src()});
         }
         {
             const pl = imui.push_layout(.X, key ++ .{@src()});
@@ -592,14 +592,14 @@ fn entity_editor_ui(
             }
             defer imui.pop_layout();
 
-            const ll = imui.label("rotation: ");
+            const ll = Imui.widgets.label.create(imui, "rotation: ");
             if (imui.get_widget(ll.id)) |ll_widget| {
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
             var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
-            _ = imui.number_slider(&rot[0], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&rot[1], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&rot[2], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &rot[0], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &rot[1], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &rot[2], .{}, key ++ .{@src()});
 
             // TODO set entity rotation when number sliders change
             //entity.transform.rotation = zm.quatFromRollPitchYawV(rot / zm.f32x4s(180.0 / std.math.pi));
@@ -613,18 +613,18 @@ fn entity_editor_ui(
             }
             defer imui.pop_layout();
 
-            const ll = imui.label("scale: ");
+            const ll = Imui.widgets.label.create(imui, "scale: ");
             if (imui.get_widget(ll.id)) |ll_widget| {
                 ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
             }
-            _ = imui.number_slider(&entity.transform.scale[0], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.scale[1], .{}, key ++ .{@src()});
-            _ = imui.number_slider(&entity.transform.scale[2], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[0], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[1], .{}, key ++ .{@src()});
+            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[2], .{}, key ++ .{@src()});
         }
     }
 
     // physics
-    const physics_collapsible = imui.collapsible("Physics", null, key ++ .{@src()});
+    const physics_collapsible = Imui.widgets.collapsible.create(imui, "Physics", null, key ++ .{@src()});
     const physics_collapsible_open, _ = imui.get_widget_data(bool, physics_collapsible.id) catch .{ &false, .Cont };
     if (physics_collapsible_open.*) {
         // TODO fix this
@@ -706,7 +706,7 @@ fn entity_editor_ui(
         // }
     }
 
-    const particle_collapsible = imui.collapsible("Particle System", null, key ++ .{@src()});
+    const particle_collapsible = Imui.widgets.collapsible.create(imui, "Particle System", null, key ++ .{@src()});
     defer { 
         const particle_collapsible_open, _ = imui.get_widget_data(bool, particle_collapsible.id) catch unreachable;
         if (particle_collapsible_open.*) {
@@ -741,11 +741,11 @@ fn entity_editor_ui(
         }
     }
 
-    const light_collapsible = imui.collapsible("Light", null, key ++ .{@src()});
+    const light_collapsible = Imui.widgets.collapsible.create(imui, "Light", null, key ++ .{@src()});
     const light_collapsible_open, _ = imui.get_widget_data(bool, light_collapsible.id) catch .{ &false, .Cont };
     if (light_collapsible_open.*) {
-        const light_type_combobox = imui.combobox(key ++ .{@src()});
-        const light_type_combobox_data, _ = imui.get_widget_data(Imui.ComboBoxState, light_type_combobox.id) catch unreachable;
+        const light_type_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+        const light_type_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, light_type_combobox.id) catch unreachable;
         if (light_type_combobox.init) {
             light_type_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
             light_type_combobox_data.can_be_default = true;
@@ -778,10 +778,10 @@ fn entity_editor_ui(
                 }
                 defer eng.get().imui.pop_layout();
 
-                _ = imui.label("colour: ");
-                _ = imui.number_slider(&light.colour[0], .{}, key ++ .{@src()});
-                _ = imui.number_slider(&light.colour[1], .{}, key ++ .{@src()});
-                _ = imui.number_slider(&light.colour[2], .{}, key ++ .{@src()});
+                _ = Imui.widgets.label.create(imui, "colour: ");
+                _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
+                _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
+                _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
             }
             labeled_number_slider("intensity:", &light.intensity, key ++ .{@src()});
 
@@ -797,11 +797,11 @@ fn entity_editor_ui(
         }
     }
 
-    const terrain_collapsible = imui.collapsible("Terrain", null, key ++ .{@src()});
+    const terrain_collapsible = Imui.widgets.collapsible.create(imui, "Terrain", null, key ++ .{@src()});
     const terrain_collapsible_open, _ = imui.get_widget_data(bool, terrain_collapsible.id) catch .{ &false, .Cont };
     if (terrain_collapsible_open.*) {
         var enable_terrain_value: bool = entity.app.terrain != null;
-        const enable_terrain_checkbox = imui.checkbox(&enable_terrain_value, "Enable Terrain", key ++ .{@src()});
+        const enable_terrain_checkbox = Imui.widgets.checkbox.create(imui, &enable_terrain_value, "Enable Terrain", key ++ .{@src()});
         if (enable_terrain_checkbox.clicked) {
             if (entity.app.terrain == null) {
                 entity.app.terrain = Terrain.init(eng.get().general_allocator, .{}, entity.transform) catch |err| {
@@ -819,6 +819,8 @@ fn entity_editor_ui(
         if (entity.app.terrain) |*terrain| {
             terrain.editor_ui(entity, key ++ .{@src()});
         }
+
+        _ = Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber, }, key ++ .{@src()});
     }
 }
 
@@ -894,11 +896,11 @@ fn labeled_number_slider(
     }
     defer eng.get().imui.pop_layout();
 
-    const label = eng.get().imui.label(text);
+    const label = Imui.widgets.label.create(&eng.get().imui, text);
     if (eng.get().imui.get_widget(label.id)) |label_widget| {
         label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
     }
-    _ = eng.get().imui.number_slider(value, .{}, key ++ .{@src()});
+    _ = Imui.widgets.number_slider.create(&eng.get().imui, value, .{}, key ++ .{@src()});
 }
 
 const LoadScenePopup = struct {
@@ -938,24 +940,24 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
             continue;
         }
 
-        const b = imui.button(v.name, key ++ .{@src(), idx});
+        const b = Imui.widgets.button.create(imui, v.name, key ++ .{@src(), idx});
         if (b.clicked) {
            try data.set_selected_name(v.name);
         }
     }
 
-    const create_new_button = imui.button("create new", key ++ .{@src()});
+    const create_new_button = Imui.widgets.button.create(imui, "create new", key ++ .{@src()});
     if (create_new_button.clicked) {
         std.log.info("should create new scene...", .{});
     }
 
-    _ = imui.label(try std.fmt.allocPrint(eng.get().frame_allocator, "Scene to load: '{s}'", .{ data.selected_name orelse "None" }));
+    _ = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Scene to load: '{s}'", .{ data.selected_name orelse "None" }));
 
     {
         _ = imui.push_layout(.X, key ++ .{@src()});
         defer imui.pop_layout();
 
-        const load_button = imui.button("Load", key ++ .{@src()});
+        const load_button = Imui.widgets.button.create(imui, "Load", key ++ .{@src()});
         if (load_button.clicked) {
             if (data.selected_name) |name| {
                 // Remove all existing entities
@@ -975,7 +977,7 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
             }
         }
 
-        const cancel_button = imui.button("Cancel", key ++ .{@src()});
+        const cancel_button = Imui.widgets.button.create(imui, "Cancel", key ++ .{@src()});
         if (cancel_button.clicked) {
             self.load_scene_popup_is_open = false;
         }

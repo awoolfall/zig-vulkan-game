@@ -6,6 +6,7 @@ const TerrainRenderer = @import("terrain_renderer.zig");
 const KeyCode = eng.input.KeyCode;
 const zm = eng.zmath;
 const gf = eng.gfx;
+const Imui = eng.ui;
 const ph = eng.physics;
 const as = eng.assets;
 const path = eng.path;
@@ -250,12 +251,12 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("texture: ");
-        _ = imui.number_slider(&self.map_length_m, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "texture: ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_length_m, .{}, key ++ .{@src()});
     }
 
     var physics_checkbox = (self.physics_body_id != null);
-    const enable_physics_checkbox = imui.checkbox(&physics_checkbox, "physics", key ++ .{@src()});
+    const enable_physics_checkbox = Imui.widgets.checkbox.create(imui, &physics_checkbox, "physics", key ++ .{@src()});
     if (enable_physics_checkbox.clicked) {
         if (physics_checkbox) {
             self.generate_heightmap_physics(entity.transform) catch |err| {
@@ -276,8 +277,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("map length (m): ");
-        _ = imui.number_slider(&self.map_length_m, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "map length (m): ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_length_m, .{}, key ++ .{@src()});
     }
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -287,8 +288,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("height scale: ");
-        _ = imui.number_slider(&self.map_height_scale, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "height scale: ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_height_scale, .{}, key ++ .{@src()});
     }
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -298,8 +299,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("vertex density (m): ");
-        _ = imui.number_slider(&self.vertex_density_m, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "vertex density (m): ");
+        _ = Imui.widgets.number_slider.create(imui, &self.vertex_density_m, .{}, key ++ .{@src()});
     }
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -309,8 +310,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         }
         defer imui.pop_layout();
 
-        _ = imui.label("modify radius: ");
-        _ = imui.number_slider(&self.modify_radius, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "modify radius: ");
+        _ = Imui.widgets.number_slider.create(imui, &self.modify_radius, .{}, key ++ .{@src()});
     }
 }
 
