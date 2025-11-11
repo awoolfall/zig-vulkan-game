@@ -85,26 +85,6 @@ const PushConstants = extern struct {
     __pad: u32 = 0,
 };
 
-const ShaderSet = struct {
-    vertex_shader: gfx.VertexShader,
-    pixel_shader: gfx.PixelShader,
-
-    pub fn deinit(self: *ShaderSet) void {
-        self.vertex_shader.deinit();
-        self.pixel_shader.deinit();
-    }
-};
-
-const Shaders = struct {
-    static: ShaderSet,
-    skeletal: ShaderSet,
-
-    pub fn deinit(self: *Shaders) void {
-        self.static.deinit();
-        self.skeletal.deinit();
-    }
-};
-
 const BufferData = struct {
     buffer: gfx.Buffer.Ref, // TODO frames in flight
     descriptor_set: gfx.DescriptorSet.Ref,
@@ -125,11 +105,20 @@ const StandardRenderPipeline = struct {
     }
 };
 
+const GraphicsPipelines = struct {
+    static: StandardRenderPipeline,
+    skeletal: StandardRenderPipeline,
+
+    pub fn deinit(self: *const GraphicsPipelines) void {
+        self.static.deinit();
+        self.skeletal.deinit();
+    }
+};
+
 const MAX_OBJECTS_PER_INSTANCE_BUFFER = 64;
 const MAX_OBJECTS_PER_LIGHTS_BUFFER = 64;
 const MAX_BONES_PER_BUFFER = 1024;
 
-shaders: Shaders,
 shader_watcher: eng.assets.FileWatcher,
 
 camera_data_buffer: BufferData,
@@ -154,8 +143,7 @@ texture_data_sets: std.ArrayList(?gfx.DescriptorSet.Ref),
 bones_data_layout: gfx.DescriptorLayout.Ref,
 bones_data_descriptor_pool: gfx.DescriptorPool.Ref,
 
-static_pipeline: StandardRenderPipeline,
-skeletal_pipeline: StandardRenderPipeline,
+graphics_pipelines: GraphicsPipelines,
 
 render_pass: gfx.RenderPass.Ref,
 framebuffer: gfx.FrameBuffer.Ref,
@@ -173,7 +161,6 @@ pub fn deinit(self: *Self) void {
 
     self.selection_textures.deinit();
 
-    self.shaders.deinit();
     self.shader_watcher.deinit();
 
     self.camera_data_buffer.deinit();
@@ -207,9 +194,7 @@ pub fn deinit(self: *Self) void {
     self.bones_data_descriptor_pool.deinit();
     self.bones_data_layout.deinit();
 
-    self.static_pipeline.deinit();
-    self.skeletal_pipeline.deinit();
-
+    self.graphics_pipelines.deinit();
     self.framebuffer.deinit();
     self.render_pass.deinit();
 
@@ -222,8 +207,6 @@ pub fn deinit(self: *Self) void {
 pub fn init() !Self {
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
-
-    const shaders = try init_shaders();
 
     const shader_path = try path.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.slang"});
     defer shader_path.deinit();
@@ -472,68 +455,19 @@ pub fn init() !Self {
     });
     errdefer framebuffer.deinit();
 
-    // static pipelines
-    const solid_pipeline_info = gfx.GraphicsPipelineInfo {
-        .vertex_shader = &shaders.static.vertex_shader,
-        .pixel_shader = &shaders.static.pixel_shader,
-        .attachments = attachments,
-        .cull_mode = .CullBack,
-        .descriptor_set_layouts = &.{
-            camera_data_descriptor_layout,
-            instance_data_layout,
-            lights_data_layout,
-            textures_data_layout,
-        },
-        .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
-                .size = @sizeOf(PushConstants),
-                .offset = 0,
-            },
-        },
-        .depth_test = .{ .write = true, },
+    const graphics_pipelines = try create_graphics_pipelines(.{
         .render_pass = render_pass,
-        .subpass_index = 0,
-    };
+        
+        .camera_data_descriptor_layout = camera_data_descriptor_layout,
+        .instance_data_layout = instance_data_layout,
+        .lights_data_layout = lights_data_layout,
+        .textures_data_layout = textures_data_layout,
+        .bones_data_layout = bones_data_layout,
+    });
+    errdefer graphics_pipelines.deinit();
 
-    var transparent_pipeline_info = solid_pipeline_info;
-    transparent_pipeline_info.depth_test = .{ .write = false, };
-    transparent_pipeline_info.subpass_index = 1;
-
-    const static_solid_pipeline = try gfx.GraphicsPipeline.init(solid_pipeline_info);
-    errdefer static_solid_pipeline.deinit();
-
-    const static_transparent_pipeline = try gfx.GraphicsPipeline.init(transparent_pipeline_info);
-    errdefer static_transparent_pipeline.deinit();
-
-
-    // skeletal pipelines
-    const skeletal_descriptor_layouts: []const gfx.DescriptorLayout.Ref = &.{
-        camera_data_descriptor_layout,
-        instance_data_layout,
-        lights_data_layout,
-        textures_data_layout,
-        bones_data_layout,
-    };
-
-    var skeletal_solid_pipeline_info = solid_pipeline_info;
-    skeletal_solid_pipeline_info.vertex_shader = &shaders.skeletal.vertex_shader;
-    skeletal_solid_pipeline_info.pixel_shader = &shaders.skeletal.pixel_shader;
-    skeletal_solid_pipeline_info.descriptor_set_layouts = skeletal_descriptor_layouts;
-
-    var skeletal_transparent_pipeline_info = transparent_pipeline_info;
-    skeletal_transparent_pipeline_info.vertex_shader = &shaders.skeletal.vertex_shader;
-    skeletal_transparent_pipeline_info.pixel_shader = &shaders.skeletal.pixel_shader;
-    skeletal_transparent_pipeline_info.descriptor_set_layouts = skeletal_descriptor_layouts;
-
-    const skeletal_solid_pipeline = try gfx.GraphicsPipeline.init(skeletal_solid_pipeline_info);
-    errdefer skeletal_solid_pipeline.deinit();
-
-    const skeletal_transparent_pipeline = try gfx.GraphicsPipeline.init(skeletal_transparent_pipeline_info);
-    errdefer skeletal_transparent_pipeline.deinit();
 
     return Self {
-        .shaders = shaders,
         .shader_watcher = shader_watcher,
 
         .camera_data_layout = camera_data_descriptor_layout,
@@ -560,15 +494,7 @@ pub fn init() !Self {
 
         .render_pass = render_pass,
         .framebuffer = framebuffer,
-
-        .static_pipeline = StandardRenderPipeline {
-            .solid = static_solid_pipeline,
-            .transparent = static_transparent_pipeline,
-        },
-        .skeletal_pipeline = StandardRenderPipeline {
-            .solid = skeletal_solid_pipeline,
-            .transparent = skeletal_transparent_pipeline,
-        },
+        .graphics_pipelines = graphics_pipelines,
 
         .render_objects = std.ArrayList(RenderObject).empty,
         .skeletal_render_objects = std.ArrayList(AnimatedRenderObject).empty,
@@ -579,104 +505,216 @@ pub fn init() !Self {
     };
 }
 
-fn init_shaders() !Shaders {
-    const shader_path = try path.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.slang"});
+const CreateGraphicsPipelinesInfo = struct {
+    render_pass: gfx.RenderPass.Ref,
+
+    camera_data_descriptor_layout: gfx.DescriptorLayout.Ref,
+    instance_data_layout: gfx.DescriptorLayout.Ref,
+    lights_data_layout: gfx.DescriptorLayout.Ref,
+    textures_data_layout: gfx.DescriptorLayout.Ref,
+    bones_data_layout: gfx.DescriptorLayout.Ref,
+};
+
+fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelines {
+    const alloc = eng.get().general_allocator;
+
+    const skeletal_vertex_input = try gfx.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+        },
+        .attributes = &.{
+            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+            .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+            //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+            .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
+            .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
+            .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
+        },
+    });
+    defer skeletal_vertex_input.deinit();
+
+    const static_vertex_input = try gfx.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+        },
+        .attributes = &.{
+            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+            .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+            //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+            .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
+            // .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
+            // .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
+        },
+    });
+    defer static_vertex_input.deinit();
+    
+    const shader_path = try path.Path.init(alloc, .{.ExeRelative = "../../src/shader.slang"});
     defer shader_path.deinit();
 
-    var shaders = Shaders{
-        .static = undefined,
-        .skeletal = undefined,
+    const resolved_shader_path = try shader_path.resolve_path(alloc);
+    defer alloc.free(resolved_shader_path);
+
+    const shader_file = try std.fs.openFileAbsolute(resolved_shader_path, .{ .mode = .read_only });
+    defer shader_file.close();
+
+    const slang_code = try alloc.alloc(u8, try shader_file.getEndPos());
+    defer alloc.free(slang_code);
+
+    _ = try shader_file.readAll(slang_code);
+
+    const skeletal_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = slang_code,
+        .preprocessor_macros = &.{
+            .{ "SKELETAL_RENDERING", "1" },
+            .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+        },
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_main",
+        }
+    });
+    defer alloc.free(skeletal_spirv);
+    
+    const static_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = slang_code,
+        .preprocessor_macros = &.{
+            .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+        },
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_main",
+        }
+    });
+    defer alloc.free(static_spirv);
+
+    const skeletal_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = skeletal_spirv,
+    });
+    defer skeletal_shader_module.deinit();
+
+    const static_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = static_spirv,
+    });
+    defer static_shader_module.deinit();
+    
+
+    // static pipelines
+    const solid_pipeline_info = gfx.GraphicsPipelineInfo {
+        .vertex_shader = .{
+            .module = &static_shader_module,
+            .entry_point = "vs_main",
+        },
+        .vertex_input = &static_vertex_input,
+        .pixel_shader = .{
+            .module = &static_shader_module,
+            .entry_point = "ps_main",
+        },
+
+        .cull_mode = .CullBack,
+        .descriptor_set_layouts = &.{
+            info.camera_data_descriptor_layout,
+            info.instance_data_layout,
+            info.lights_data_layout,
+            info.textures_data_layout,
+        },
+        .push_constants = &.{
+            gfx.PushConstantLayoutInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .size = @sizeOf(PushConstants),
+                .offset = 0,
+            },
+        },
+        .depth_test = .{ .write = true, },
+        .render_pass = info.render_pass,
+        .subpass_index = 0,
     };
 
-    shaders.skeletal = ShaderSet{
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
+    var transparent_pipeline_info = solid_pipeline_info;
+    transparent_pipeline_info.depth_test = .{ .write = false, };
+    transparent_pipeline_info.subpass_index = 1;
+
+    var static_solid_pipeline_info = solid_pipeline_info;
+    static_solid_pipeline_info.vertex_input = &static_vertex_input;
+    static_solid_pipeline_info.vertex_shader = .{
+        .module = &static_shader_module,
+        .entry_point = "vs_main",
+    };
+    static_solid_pipeline_info.pixel_shader = .{
+        .module = &static_shader_module,
+        .entry_point = "ps_main",
     };
 
-    shaders.skeletal.vertex_shader = try gfx.VertexShader.init_file(
-        eng.get().general_allocator, 
-        shader_path, 
-        "vs_main",
-        .{
-            .bindings = &.{
-                .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
-            },
-            .attributes = &.{
-                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-                .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-                .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
-                //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-                .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
-                .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
-                .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
-            },
-        },
-        .{
-            .defines = &.{
-                .{ "SKELETAL_RENDERING", "1" },
-                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
-            },
-        },
-    );
-    errdefer shaders.skeletal.vertex_shader.deinit();
-
-    shaders.skeletal.pixel_shader = try gfx.PixelShader.init_file(
-        eng.get().general_allocator, 
-        shader_path,
-        "ps_main",
-        .{
-            .defines = &.{
-                .{ "SKELETAL_RENDERING", "1" },
-                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
-            },
-        },
-    );
-    errdefer shaders.skeletal.pixel_shader.deinit();
-
-    shaders.static = ShaderSet{
-        .vertex_shader = undefined,
-        .pixel_shader = undefined,
+    var static_transparent_pipeline_info = transparent_pipeline_info;
+    static_transparent_pipeline_info.vertex_input = &static_vertex_input;
+    static_transparent_pipeline_info.vertex_shader = .{
+        .module = &static_shader_module,
+        .entry_point = "vs_main",
+    };
+    static_transparent_pipeline_info.pixel_shader = .{
+        .module = &static_shader_module,
+        .entry_point = "ps_main",
     };
 
-    shaders.static.vertex_shader = try gfx.VertexShader.init_file(
-        eng.get().general_allocator, 
-        shader_path, 
-        "vs_main",
-        .{
-            .bindings = &.{
-                .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
-            },
-            .attributes = &.{
-                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-                .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-                .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
-                //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-                .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
-                // .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
-                // .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
-            },
-        },
-        .{
-            .defines = &.{
-                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
-            },
-        },
-    );
-    errdefer shaders.static.vertex_shader.deinit();
+    const static_solid_pipeline = try gfx.GraphicsPipeline.init(static_solid_pipeline_info);
+    errdefer static_solid_pipeline.deinit();
 
-    shaders.static.pixel_shader = try gfx.PixelShader.init_file(
-        eng.get().general_allocator, 
-        shader_path,
-        "ps_main",
-        .{
-            .defines = &.{
-                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
-            },
-        },
-    );
-    errdefer shaders.static.pixel_shader.deinit();
+    const static_transparent_pipeline = try gfx.GraphicsPipeline.init(static_transparent_pipeline_info);
+    errdefer static_transparent_pipeline.deinit();
 
-    return shaders;
+
+    // skeletal pipelines
+    const skeletal_descriptor_layouts: []const gfx.DescriptorLayout.Ref = &.{
+        info.camera_data_descriptor_layout,
+        info.instance_data_layout,
+        info.lights_data_layout,
+        info.textures_data_layout,
+        info.bones_data_layout,
+    };
+
+    var skeletal_solid_pipeline_info = solid_pipeline_info;
+    skeletal_solid_pipeline_info.descriptor_set_layouts = skeletal_descriptor_layouts;
+    skeletal_solid_pipeline_info.vertex_input = &skeletal_vertex_input;
+    skeletal_solid_pipeline_info.vertex_shader = .{
+        .module = &skeletal_shader_module,
+        .entry_point = "vs_main",
+    };
+    skeletal_solid_pipeline_info.pixel_shader = .{
+        .module = &skeletal_shader_module,
+        .entry_point = "ps_main",
+    };
+    skeletal_solid_pipeline_info.descriptor_set_layouts = skeletal_descriptor_layouts;
+
+    var skeletal_transparent_pipeline_info = transparent_pipeline_info;
+    skeletal_transparent_pipeline_info.descriptor_set_layouts = skeletal_descriptor_layouts;
+    skeletal_transparent_pipeline_info.vertex_input = &skeletal_vertex_input;
+    skeletal_transparent_pipeline_info.vertex_shader = .{
+        .module = &skeletal_shader_module,
+        .entry_point = "vs_main",
+    };
+    skeletal_transparent_pipeline_info.pixel_shader = .{
+        .module = &skeletal_shader_module,
+        .entry_point = "ps_main",
+    };
+
+    const skeletal_solid_pipeline = try gfx.GraphicsPipeline.init(skeletal_solid_pipeline_info);
+    errdefer skeletal_solid_pipeline.deinit();
+
+    const skeletal_transparent_pipeline = try gfx.GraphicsPipeline.init(skeletal_transparent_pipeline_info);
+    errdefer skeletal_transparent_pipeline.deinit();
+
+
+    return GraphicsPipelines {
+        .skeletal = .{
+            .solid = skeletal_solid_pipeline,
+            .transparent = skeletal_transparent_pipeline,
+        },
+        .static = .{
+            .solid = static_solid_pipeline,
+            .transparent = static_transparent_pipeline,
+        }
+    };
 }
 
 pub fn push(self: *Self, ro: RenderObject) !void {
@@ -831,6 +869,26 @@ pub fn render_cmd(
     },
     cmd: *gfx.CommandBuffer,
 ) !void {
+    if (self.shader_watcher.was_modified_since_last_check()) blk: {
+        std.log.info("Recreating graphics pipelines for standard renderer", .{});
+        
+        const new_graphics_pipelines = create_graphics_pipelines(.{
+            .render_pass = self.render_pass,
+            
+            .camera_data_descriptor_layout = self.camera_data_layout,
+            .instance_data_layout = self.instance_data_layout,
+            .lights_data_layout = self.lights_data_layout,
+            .textures_data_layout = self.textures_data_layout,
+            .bones_data_layout = self.bones_data_layout,
+        }) catch |err| {
+            std.log.err("Unable to recreate graphics pipelines: {}", .{err});
+            break :blk;
+        };
+
+        self.graphics_pipelines.deinit();
+        self.graphics_pipelines = new_graphics_pipelines;
+    }
+
     cmd.cmd_begin_render_pass(.{
         .framebuffer = self.framebuffer,
         .render_pass = self.render_pass,
@@ -845,11 +903,11 @@ pub fn render_cmd(
         .scissors = &.{ .full_screen_pixels(), },
     });
 
-    cmd.cmd_bind_graphics_pipeline(self.static_pipeline.solid);
+    cmd.cmd_bind_graphics_pipeline(self.graphics_pipelines.static.solid);
 
     self.update_camera_data_buffer(data.camera);
     cmd.cmd_bind_descriptor_sets(.{
-        .graphics_pipeline = self.static_pipeline.solid,
+        .graphics_pipeline = self.graphics_pipelines.static.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
             self.camera_data_buffer.descriptor_set,
@@ -885,7 +943,7 @@ pub fn render_cmd(
             mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.static_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 1,
                 .descriptor_sets = &.{
                     self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
@@ -907,7 +965,7 @@ pub fn render_cmd(
             mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.static_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 2,
                 .descriptor_sets = &.{
                     self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
@@ -973,7 +1031,7 @@ pub fn render_cmd(
             });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.static_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     texture_data_set.*.?
@@ -981,7 +1039,7 @@ pub fn render_cmd(
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.static_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     self.default_textures_set
@@ -1003,7 +1061,7 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .graphics_pipeline = self.static_pipeline.solid,
+            .graphics_pipeline = self.graphics_pipelines.static.solid,
             .shader_stages = .{ .Vertex = true, .Pixel = true, },
         });
 
@@ -1029,11 +1087,11 @@ pub fn render_cmd(
 
     // render animated objects
 
-    cmd.cmd_bind_graphics_pipeline(self.skeletal_pipeline.solid);
+    cmd.cmd_bind_graphics_pipeline(self.graphics_pipelines.skeletal.solid);
 
     self.update_camera_data_buffer(data.camera);
     cmd.cmd_bind_descriptor_sets(.{
-        .graphics_pipeline = self.skeletal_pipeline.solid,
+        .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
             self.camera_data_buffer.descriptor_set,
@@ -1059,7 +1117,7 @@ pub fn render_cmd(
             mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 1,
                 .descriptor_sets = &.{
                     self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
@@ -1093,7 +1151,7 @@ pub fn render_cmd(
             mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 2,
                 .descriptor_sets = &.{
                     self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
@@ -1147,7 +1205,7 @@ pub fn render_cmd(
             });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     texture_data_set.*.?
@@ -1155,7 +1213,7 @@ pub fn render_cmd(
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     self.default_textures_set
@@ -1187,7 +1245,7 @@ pub fn render_cmd(
             );
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.skeletal_pipeline.solid,
+                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 4,
                 .descriptor_sets = &.{
                     self.bone_buffers.items[@intCast(current_bones_buffer_index)].descriptor_set,
@@ -1209,7 +1267,7 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .graphics_pipeline = self.skeletal_pipeline.solid,
+            .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
             .shader_stages = .{ .Vertex = true, .Pixel = true, },
         });
 

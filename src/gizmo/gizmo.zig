@@ -51,10 +51,6 @@ id_torus: RenderBuffers,
 id_cylinder: RenderBuffers,
 id_sphere: RenderBuffers,
 
-vertex_shader: gf.VertexShader,
-pixel_shader: gf.PixelShader,
-id_pixel_shader: gf.PixelShader,
-
 render_pass: gf.RenderPass.Ref,
 
 pipelines: Pipelines,
@@ -85,10 +81,6 @@ pub fn deinit(self: *Self) void {
     self.id_pipelines.deinit();
 
     self.render_pass.deinit();
-
-    self.vertex_shader.deinit();
-    self.pixel_shader.deinit();
-    self.id_pixel_shader.deinit();
 
     self.selection_textures.deinit();
 }
@@ -122,37 +114,39 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
     defer shader_path.deinit();
 
-    const vertex_shader = try gf.VertexShader.init_file(
-        alloc,
-        shader_path,
-        "vs_main",
-        .{
-            .bindings = &.{
-                .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
-            },
-            .attributes = &.{
-                .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-            },
+    const shader_resolved_path = try shader_path.resolve_path(alloc);
+    defer alloc.free(shader_resolved_path);
+
+    const slang_shader_file = try std.fs.openFileAbsolute(shader_resolved_path, .{ .mode = .read_only });
+    defer slang_shader_file.close();
+
+    const slang_shader = try alloc.alloc(u8, try slang_shader_file.getEndPos());
+    defer alloc.free(slang_shader);
+
+    _ = try slang_shader_file.readAll(slang_shader);
+
+    const shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = slang_shader,
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_colour_main",
+            "ps_id_main",
         },
-        .{},
-    ); 
-    errdefer vertex_shader.deinit();
+    });
+    defer alloc.free(shader_spirv);
 
-    const pixel_shader = try gf.PixelShader.init_file(
-        alloc,
-        shader_path,
-        "ps_colour_main",
-        .{},
-    );
-    errdefer pixel_shader.deinit();
+    const shader_module = try gf.ShaderModule.init(.{ .spirv_data = shader_spirv });
+    defer shader_module.deinit();
 
-    const id_pixel_shader = try gf.PixelShader.init_file(
-        alloc,
-        shader_path,
-        "ps_id_main",
-        .{},
-    );
-    errdefer id_pixel_shader.deinit();
+    const vertex_input = try gf.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+        },
+        .attributes = &.{
+            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+        },
+    });
+    defer vertex_input.deinit();
 
     // Gfx objects
     const attachments = &[_]gf.AttachmentInfo {
@@ -218,11 +212,17 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer render_pass.deinit();
 
     var pipeline_info = gf.GraphicsPipelineInfo {
-        .attachments = attachments,
         .render_pass = render_pass,
         .subpass_index = 0,
-        .vertex_shader = &vertex_shader,
-        .pixel_shader = &pixel_shader,
+        .vertex_shader = .{
+            .module = &shader_module,
+            .entry_point = "vs_main",
+        },
+        .vertex_input = &vertex_input,
+        .pixel_shader = .{
+            .module = &shader_module,
+            .entry_point = "ps_colour_main"
+        },
         // TODO change vertex and pixel shaders to go through asset system. That way we can add
         // pipelines to automatically re-generate when shaders change. Will need to add a system
         // to pull assets from the source code directories. Probably will need to create asset packs
@@ -239,7 +239,10 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     var id_pipeline_info = pipeline_info;
     id_pipeline_info.subpass_index = 1;
-    id_pipeline_info.pixel_shader = &id_pixel_shader;
+    id_pipeline_info.pixel_shader = .{
+        .module = &shader_module,
+        .entry_point = "ps_id_main",
+    };
 
     const pipeline = try gf.GraphicsPipeline.init(pipeline_info);
     errdefer pipeline.deinit();
@@ -275,10 +278,6 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .id_sphere = id_sphere,
 
         .selection_textures = selection_textures,
-
-        .vertex_shader = vertex_shader,
-        .pixel_shader = pixel_shader,
-        .id_pixel_shader = id_pixel_shader,
 
         .render_pass = render_pass,
 

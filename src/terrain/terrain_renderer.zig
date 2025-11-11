@@ -41,9 +41,6 @@ const ImagesDescriptorSetData = struct {
     image_view: ?gf.ImageView.Ref = null,
 };
 
-vertex_shader: gf.VertexShader,
-pixel_shader: gf.PixelShader,
-
 selection_textures: st.SelectionTextures([2]f32),
 
 render_pass: gf.RenderPass.Ref,
@@ -75,8 +72,6 @@ pub fn deinit(self: *Self) void {
     self.pipeline.deinit();
     self.render_pass.deinit();
     self.selection_textures.deinit();
-    self.vertex_shader.deinit();
-    self.pixel_shader.deinit();
 
     for (self.images_descriptor_sets.items) |s| {
         s.set.deinit();
@@ -102,36 +97,45 @@ pub fn init() !Self {
     var selection_textures = try st.SelectionTextures([2]f32).init();
     errdefer selection_textures.deinit();
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.slang" });
-    defer path.deinit();
+    // const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.slang" });
+    // defer path.deinit();
 
-    const vertex_shader = try gf.VertexShader.init_file(
-        alloc,
-        path,
-        "vs_main",
-        .{
-            .bindings = &.{
-                .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
-            },
-            .attributes = &.{
-                .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-                // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-                // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
-                // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-                //.{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
-            },
+    // const resolved_shader_path = try path.resolve_path(alloc);
+    // alloc.free(resolved_shader_path);
+
+    // const slang_shader_file = try std.fs.openFileAbsolute(resolved_shader_path, .{ .mode = .read_only });
+    // defer slang_shader_file.close();
+
+    // const slang_shader = try alloc.alloc(u8, try slang_shader_file.getEndPos());
+    // defer alloc.free(slang_shader);
+
+    // _ = try slang_shader_file.readAll(slang_shader);
+
+    const shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("terrain.slang"),
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_main",
+        }
+    });
+    defer alloc.free(shader_spirv);
+
+    const shader_module = try gf.ShaderModule.init(.{ .spirv_data = shader_spirv });
+    defer shader_module.deinit();
+
+    const vertex_input = try gf.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
         },
-        .{},
-    );
-    errdefer vertex_shader.deinit();
-
-    const pixel_shader = try gf.PixelShader.init_file(
-        alloc,
-        path,
-        "ps_main",
-        .{},
-    );
-    errdefer pixel_shader.deinit();
+        .attributes = &.{
+            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
+            // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+            // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
+            //.{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
+        },
+    });
+    defer vertex_input.deinit();
 
     const images_descriptor_layout = try gf.DescriptorLayout.init(.{
         .bindings = &.{
@@ -253,9 +257,15 @@ pub fn init() !Self {
     const pipeline = try gf.GraphicsPipeline.init(.{
         .render_pass = render_pass,
         .subpass_index = 0,
-        .attachments = attachments,
-        .vertex_shader = &vertex_shader,
-        .pixel_shader = &pixel_shader,
+        .vertex_shader = .{
+            .module = &shader_module,
+            .entry_point = "vs_main",
+        },
+        .vertex_input = &vertex_input,
+        .pixel_shader = .{
+            .module = &shader_module,
+            .entry_point = "ps_main",
+        },
         .depth_test = .{ .write = true, },
         .push_constants = &.{
             gf.PushConstantLayoutInfo {
@@ -297,8 +307,6 @@ pub fn init() !Self {
 
     return Self {
         .model = plane_model,
-        .vertex_shader = vertex_shader,
-        .pixel_shader = pixel_shader,
         .selection_textures = selection_textures,
         .render_pass = render_pass,
         .pipeline = pipeline,
