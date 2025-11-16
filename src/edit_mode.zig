@@ -215,9 +215,6 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
             file_widget.border_width_px = .{};
             file_widget.padding_px = .lr_tb(10, 5);
         }
-        if (imui.get_widget(file_button.id.text)) |text_widget| {
-            text_widget.text_content.?.colour = imui.palette().text_dark;
-        }
         if (file_button.clicked) {
             self.file_dropdown_open = !self.file_dropdown_open;
         }
@@ -271,9 +268,6 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
             edit_widget.background_colour = zm.f32x4s(0.0);
             edit_widget.border_width_px = .{};
             edit_widget.padding_px = .lr_tb(10, 5);
-        }
-        if (imui.get_widget(edit_button.id.text)) |text_widget| {
-            text_widget.text_content.?.colour = imui.palette().text_dark;
         }
         if (edit_button.clicked) {
             self.edit_dropdown_open = !self.edit_dropdown_open;
@@ -367,7 +361,7 @@ fn remove_selected_entity(self: *Self) void {
 }
 
 fn set_background_widget_layout(background_widget: *Imui.Widget) void {
-    background_widget.semantic_size[0].minimum_pixel_size = 350;
+    background_widget.semantic_size[0].minimum_pixel_size = 400;
     background_widget.flags.clickable = true;
     background_widget.flags.render = true;
     background_widget.flags.hover_effect = false;
@@ -420,6 +414,24 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
     };
 }
 
+const PhysicsData = struct {
+    desc: eng.entity.PhysicsOptionsDescriptor,
+
+    pub fn deinit(self: *PhysicsData, alloc: std.mem.Allocator) void {
+        _ = self;
+        _ = alloc;
+    }
+
+    pub fn init(alloc: std.mem.Allocator) !PhysicsData {
+        _ = alloc;
+        return PhysicsData { .desc = .{ .Body = .{} } };
+    }
+
+    pub fn clone(self: *PhysicsData, alloc: std.mem.Allocator) !PhysicsData {
+        _ = alloc;
+        return self.*;
+    }
+};
 
 const EntityEditorTabWidth = 10;
 fn entity_editor_ui(
@@ -571,7 +583,7 @@ fn entity_editor_ui(
         defer imui.pop_layout();
 
         {
-            imui.push_form_layout_item(.{@src()});
+            _ = imui.push_form_layout_item(.{@src()});
             defer imui.pop_layout();
 
             _ = Imui.widgets.label.create(imui, "position: ");
@@ -580,17 +592,22 @@ fn entity_editor_ui(
             _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[2], .{}, key ++ .{@src()});
         }
         {
-            imui.push_form_layout_item(.{@src()});
+            _ = imui.push_form_layout_item(.{@src()});
             defer imui.pop_layout();
 
             _ = Imui.widgets.label.create(imui, "rotation: ");
             var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
-            _ = Imui.widgets.number_slider.create(imui, &rot[0], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &rot[1], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &rot[2], .{}, key ++ .{@src()});
+            const rx = Imui.widgets.number_slider.create(imui, &rot[0], .{}, key ++ .{@src()});
+            const ry = Imui.widgets.number_slider.create(imui, &rot[1], .{}, key ++ .{@src()});
+            const rz = Imui.widgets.number_slider.create(imui, &rot[2], .{}, key ++ .{@src()});
+
+            if (rx.data_changed or ry.data_changed or rz.data_changed) {
+                rot = rot * zm.f32x4s(std.math.pi / 180.0);
+                entity.transform.rotation = zm.quatFromRollPitchYawV(rot);
+            }
         }
         {
-            imui.push_form_layout_item(.{@src()});
+            _ = imui.push_form_layout_item(.{@src()});
             defer imui.pop_layout();
 
             _ = Imui.widgets.label.create(imui, "scale: ");
@@ -603,84 +620,83 @@ fn entity_editor_ui(
     // physics
     const physics_collapsible = Imui.widgets.collapsible.create(imui, "Physics", null, key ++ .{@src()});
     const physics_collapsible_open, _ = imui.get_widget_data(bool, physics_collapsible.id) catch .{ &false, .Cont };
-    if (physics_collapsible_open.*) {
-        // TODO fix this
-        //
-        // const physics_button = imui.badge("Set Physics", key ++ .{@src()});
-        // if (physics_button.clicked) {
-        //     if (data.physics_combobox_data.selected_index) |_| {
-        //         entity.set_physics(self.selected_entity.?, data.running_physics_desc.?, &eng.get().physics) catch unreachable;
-        //     } else {
-        //         entity.remove_physics(&eng.get().physics);
-        //     }
-        // }
-        //
-        // data.physics_combobox_data.selected_index = if (data.running_physics_desc) |d| @intFromEnum(d) else null;
-        // const physics_combobox = imui.combobox(&data.physics_combobox_data, key ++ .{@src()});
-        // const physics_combobox_data = imui.get_widget_data(Imui.ComboBoxState, physics_combobox.id) catch |err| {
-        //     std.log.err("Unable to get physics combobox data: {}", .{err});
-        //     unreachable;
-        // };
-        // if (physics_combobox.init) {
-        //     physics_combobox_data.default_text.appendSlice("None") catch |err| {
-        //         std.log.err("Failed to set default physics combobox text: {}", .{err});
-        //         unreachable;
-        //     };
-        //     physics_combobox_data.can_be_default = true;
-        //
-        //     // generate physics option names from enum
-        //     const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
-        //     inline for (physics_options_fields) |field| {
-        //         physics_combobox_data.append_option(field.name) catch |err| {
-        //             std.log.err("Failed to append physics option to combobox: {}", .{err});
-        //             unreachable;
-        //         };
-        //     }
-        //
-        //     // set physics descriptor
-        //     if (entity.physics) |*physics| {
-        //         physics_combobox_data.selected_index = @intFromEnum(physics.descriptor().?);
-        //     } else {
-        //         physics_combobox_data.selected_index = null;
-        //     }
-        // }
-        // if (physics_combobox.data_changed) {
-        //     if (physics_combobox_data.selected_index) |si| {
-        //         switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
-        //             .Body => data.running_physics_desc = .{ .Body = .{} },
-        //             .Character => data.running_physics_desc = .{ .Character = .{} },
-        //             .CharacterVirtual => data.running_physics_desc = .{ .CharacterVirtual = .{} },
-        //         }
-        //     }
-        // }
-        // if (physics_combobox_data.selected_index != null) {
-        //     const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
-        //     if (imui.get_widget(transform_layout)) |transform_layout_widget| {
-        //         transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
-        //         transform_layout_widget.semantic_size[0].value = 1.0;
-        //         transform_layout_widget.children_gap = 5;
-        //         transform_layout_widget.padding_px = .{
-        //             .left = EntityEditorTabWidth,
-        //         };
-        //     }
-        //     defer imui.pop_layout();
-        //
-        //     if (data.running_physics_desc) |*running_physics_desc| {
-        //         switch (running_physics_desc.*) {
-        //             .Body => |*b| {
-        //                 physics_shape_editor_ui(entity, &b.settings, data, key ++ .{@src()});
-        //                 _ = imui.checkbox(&b.is_sensor, "is sensor", key ++ .{@src()});
-        //                 _ = imui.checkbox(&b.is_static, "is static", key ++ .{@src()});
-        //             },
-        //             .Character => |_| {
-        //                 _ = imui.label("is character");
-        //             },
-        //             .CharacterVirtual => |_| {
-        //                 _ = imui.label("is virtual character");
-        //             },
-        //         }
-        //     }
-        // }
+    if (physics_collapsible_open.*) physics_collapsible_blk: {
+        const physics_button = Imui.widgets.badge.create(imui, "Set Physics", key ++ .{@src()});
+        const data, _ = imui.get_widget_data(PhysicsData, physics_button.id.box) catch break :physics_collapsible_blk;
+        
+        const physics_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+        const physics_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, physics_combobox.id) catch |err| {
+            std.log.err("Unable to get physics combobox data: {}", .{err});
+            unreachable;
+        };
+        if (physics_combobox.init) {
+            physics_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch |err| {
+                std.log.err("Failed to set default physics combobox text: {}", .{err});
+                unreachable;
+            };
+            physics_combobox_data.can_be_default = true;
+        
+            // generate physics option names from enum
+            const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
+            inline for (physics_options_fields) |field| {
+                physics_combobox_data.append_option(imui.widget_allocator(), field.name) catch |err| {
+                    std.log.err("Failed to append physics option to combobox: {}", .{err});
+                    unreachable;
+                };
+            }
+        
+            // set physics descriptor
+            if (entity.physics) |*ph| {
+                data.desc = ph.descriptor();
+                physics_combobox_data.selected_index = @intFromEnum(data.desc);
+            } else {
+                data.desc = eng.entity.PhysicsOptionsDescriptor { .Body = .{} };
+                physics_combobox_data.selected_index = null;
+            }
+        }
+        if (physics_combobox.data_changed) {
+            if (physics_combobox_data.selected_index) |si| {
+                switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
+                    .Body => data.desc = .{ .Body = .{} },
+                    .Character => data.desc = .{ .Character = .{} },
+                    .CharacterVirtual => data.desc = .{ .CharacterVirtual = .{} },
+                }
+            }
+        }
+        if (physics_combobox_data.selected_index != null) {
+            const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
+            if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+                transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
+                transform_layout_widget.semantic_size[0].value = 1.0;
+                transform_layout_widget.children_gap = 5;
+                transform_layout_widget.padding_px = .{
+                    .left = EntityEditorTabWidth,
+                };
+            }
+            defer imui.pop_layout();
+        
+            switch (data.desc) {
+                .Body => |*b| {
+                    physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
+                    _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "is sensor", key ++ .{@src()});
+                    _ = Imui.widgets.checkbox.create(imui, &b.is_static, "is static", key ++ .{@src()});
+                },
+                .Character => |_| {
+                    _ = Imui.widgets.label.create(imui, "is character");
+                },
+                .CharacterVirtual => |_| {
+                    _ = Imui.widgets.label.create(imui, "is virtual character");
+                },
+            }
+        }
+
+        if (physics_button.clicked) {
+            if (physics_combobox_data.selected_index) |_| {
+                entity.set_physics(self.selected_entity.?, data.desc, &eng.get().physics) catch unreachable;
+            } else {
+                entity.remove_physics(&eng.get().physics);
+            }
+        }
     }
 
     const particle_collapsible = Imui.widgets.collapsible.create(imui, "Particle System", null, key ++ .{@src()});
@@ -748,30 +764,24 @@ fn entity_editor_ui(
         }
         if (entity.app.light) |*light| {
             {
-                const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
-                if (eng.get().imui.get_widget(ll)) |ll_widget| {
-                    ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-                    ll_widget.children_gap = 4;
-                }
-                defer eng.get().imui.pop_layout();
+                _ = imui.push_form_layout_item(.{@src()});
+                defer imui.pop_layout();
 
-                const cl = Imui.widgets.label.create(imui, "colour: ");
-                if (imui.get_widget(cl.id)) |cl_widget| {
-                    cl_widget.semantic_size[0] = form_label_size;
-                }
+                _ = Imui.widgets.label.create(imui, "colour: ");
                 _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
                 _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
                 _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
             }
-            labeled_number_slider("intensity:", form_label_size, &light.intensity, key ++ .{@src()});
+
+            labeled_number_slider("intensity:", &light.intensity, key ++ .{@src()});
 
             if (light.light_type == .Spot) {
                 var umbra_degrees = std.math.radiansToDegrees(light.umbra);
-                labeled_number_slider("umbra:", form_label_size, &umbra_degrees, key ++ .{@src()});
+                labeled_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
                 light.umbra = std.math.degreesToRadians(umbra_degrees);
 
                 var penumbra_degrees = std.math.radiansToDegrees(light.delta_penumbra);
-                labeled_number_slider("delta penumbra:", form_label_size, &penumbra_degrees, key ++ .{@src()});
+                labeled_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
                 light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
             }
         }
@@ -804,84 +814,95 @@ fn entity_editor_ui(
     }
 }
 
-// fn physics_shape_editor_ui(
-//     entity: *eng.entity.EntitySuperStruct,
-//     shape_settings: *eng.physics.ShapeSettings, 
-//     key: anytype
-// ) void {
-//     const imui = &eng.get().imui;
-//     data.shape_combobox_data.selected_index = @intFromEnum(shape_settings.shape);
-//     const shape_combobox = imui.combobox(&data.shape_combobox_data, key ++ .{@src()});
-//     if (shape_combobox.data_changed) {
-//         if (data.shape_combobox_data.selected_index) |si| {
-//             switch (@as(eng.physics.ShapeSettingsEnum, @enumFromInt(si))) {
-//                 .Capsule => shape_settings.shape = .{ .Capsule = .{
-//                     .half_height = 0.7,
-//                     .radius = 0.2,
-//                 } },
-//                 .Sphere => shape_settings.shape = .{ .Sphere = .{
-//                     .radius = 1.0,
-//                 } },
-//                 .Box => shape_settings.shape = .{ .Box = .{
-//                     .width = 1.0,
-//                     .height = 1.0,
-//                     .depth = 1.0,
-//                 } },
-//                 .ModelCompoundConvexHull => shape_settings.shape = .{ .ModelCompoundConvexHull = entity.model.? },
-//             }
-//         }
-//     }
-//
-//     const sl = imui.push_layout(.Y, key ++ .{@src()});
-//     if (imui.get_widget(sl)) |sl_widget| {
-//         sl_widget.semantic_size[0].kind = .ParentPercentage;
-//         sl_widget.semantic_size[0].value = 1.0;
-//         sl_widget.padding_px = .{
-//             .left = EntityEditorTabWidth,
-//         };
-//         sl_widget.children_gap = 5;
-//     }
-//
-//     switch (shape_settings.shape) {
-//         .Capsule => |*c| {
-//             labeled_number_slider("radius:", &c.radius, key ++ .{@src()});
-//             var height = c.half_height * 2.0;
-//             labeled_number_slider("height:", &height, key ++ .{@src()});
-//             c.half_height = height * 0.5;
-//         },
-//         .Sphere => |*s| {
-//             labeled_number_slider("radius:", &s.radius, key ++ .{@src()});
-//         },
-//         .Box => |*b| {
-//             labeled_number_slider("width:", &b.width, key ++ .{@src()});
-//             labeled_number_slider("height:", &b.height, key ++ .{@src()});
-//             labeled_number_slider("depth:", &b.depth, key ++ .{@src()});
-//         },
-//         .ModelCompoundConvexHull => |_| {
-//         },
-//     }
-//
-//     imui.pop_layout(); // sl
-// }
+fn physics_shape_editor_ui(
+    entity: *eng.entity.EntitySuperStruct,
+    shape_settings: *eng.physics.ShapeSettings, 
+    key: anytype
+) void {
+    const imui = &eng.get().imui;
+
+    const shape_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+    const shape_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, shape_combobox.id) catch |err| {
+        std.log.err("Unable to get combobox widget data: {}", .{ err });
+        unreachable;
+    };
+    if (shape_combobox.init) {
+        shape_combobox_data.can_be_default = false;
+        const shape_fields = @typeInfo(eng.physics.ShapeSettingsEnum).@"enum".fields;
+        inline for (shape_fields) |field| {
+            shape_combobox_data.append_option(imui.widget_allocator(), field.name) catch |err| {
+                std.log.err("Failed to append physics option to combobox: {}", .{err});
+                unreachable;
+            };
+        }
+    }
+    if (shape_combobox.data_changed) {
+        if (shape_combobox_data.selected_index) |si| {
+            switch (@as(eng.physics.ShapeSettingsEnum, @enumFromInt(si))) {
+                .Capsule => shape_settings.shape = .{ .Capsule = .{
+                    .half_height = 0.7,
+                    .radius = 0.2,
+                } },
+                .Sphere => shape_settings.shape = .{ .Sphere = .{
+                    .radius = 1.0,
+                } },
+                .Box => shape_settings.shape = .{ .Box = .{
+                    .width = 1.0,
+                    .height = 1.0,
+                    .depth = 1.0,
+                } },
+                .ModelCompoundConvexHull => shape_settings.shape = .{ .ModelCompoundConvexHull = entity.model.? },
+            }
+        }
+    }
+
+    const sl = imui.push_layout(.Y, key ++ .{@src()});
+    if (imui.get_widget(sl)) |sl_widget| {
+        sl_widget.semantic_size[0].kind = .ParentPercentage;
+        sl_widget.semantic_size[0].value = 1.0;
+        sl_widget.padding_px = .{
+            .left = EntityEditorTabWidth,
+        };
+        sl_widget.children_gap = 5;
+    }
+
+    switch (shape_settings.shape) {
+        .Capsule => |*c| {
+            labeled_number_slider("radius:", &c.radius, key ++ .{@src()});
+            var height = c.half_height * 2.0;
+            labeled_number_slider("height:", &height, key ++ .{@src()});
+            c.half_height = height * 0.5;
+        },
+        .Sphere => |*s| {
+            labeled_number_slider("radius:", &s.radius, key ++ .{@src()});
+        },
+        .Box => |*b| {
+            labeled_number_slider("width:", &b.width, key ++ .{@src()});
+            labeled_number_slider("height:", &b.height, key ++ .{@src()});
+            labeled_number_slider("depth:", &b.depth, key ++ .{@src()});
+        },
+        .ModelCompoundConvexHull => |_| {
+        },
+    }
+
+    imui.pop_layout(); // sl
+}
 
 fn labeled_number_slider(
     text: []const u8,
-    label_semantic_size: Imui.SemanticSize, 
     value: *f32, 
     key: anytype
 ) void {
-    const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
-    if (eng.get().imui.get_widget(ll)) |ll_widget| {
-        ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+    const imui = &eng.get().imui;
+
+    const ll = imui.push_form_layout_item(key ++ .{@src()});
+    if (imui.get_widget(ll)) |ll_widget| {
         ll_widget.children_gap = 4;
     }
-    defer eng.get().imui.pop_layout();
+    defer imui.pop_layout();
 
-    const label = Imui.widgets.label.create(&eng.get().imui, text);
-    if (eng.get().imui.get_widget(label.id)) |label_widget| {
-        label_widget.semantic_size[0] = label_semantic_size;
-    }
-    _ = Imui.widgets.number_slider.create(&eng.get().imui, value, .{}, key ++ .{@src()});
+    _ = Imui.widgets.label.create(imui, text);
+    _ = Imui.widgets.number_slider.create(imui, value, .{}, key ++ .{@src()});
 }
 
 const LoadScenePopup = struct {

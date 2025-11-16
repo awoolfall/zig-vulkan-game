@@ -80,6 +80,10 @@ pub fn init() !Self {
 
     const asset_pack_id = try engine.asset_manager.add_asset_pack(asset_pack);
     try engine.asset_manager.load_asset_pack(asset_pack_id);
+
+    // asset_pack.save_to_file(engine.general_allocator, "zig-out") catch |err| {
+    //     std.log.err("Unable to save asset pack: {}", .{ err });
+    // };
     
     // Print model animation names
     //
@@ -174,8 +178,6 @@ pub fn init() !Self {
 
         .character_idx = gen.GenerationalIndex.invalid(),
         .opponent_idx = gen.GenerationalIndex.invalid(),
-
-        //.character_ignore_self_filter = character_ignore_self_filter,
 
         .app_life_asset_pack_id = asset_pack_id,
 
@@ -432,7 +434,7 @@ fn update(self: *Self) !void {
                 }
 
                 if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.MouseLeft)) {
-                    var collector = CollideShapeCollector.init(engine.frame_allocator) catch |err| {
+                    var collector = eng.physics.util.CollideShapeCollector.init(engine.frame_allocator) catch |err| {
                         std.log.warn("Unable to create physics collector: {}", .{err});
                         unreachable;
                     };
@@ -516,6 +518,7 @@ fn update(self: *Self) !void {
                     if (engine.imui.get_widget(l.id)) |tw| {
                         tw.text_content.?.font = .GeistMono;
                         tw.text_content.?.size = 15;
+                        tw.text_content.?.colour = eng.get().imui.palette().text_dark;
                     }
                     _ = engine.imui.pop_layout();
                 }
@@ -607,13 +610,14 @@ fn update(self: *Self) !void {
         _ = engine.imui.push_floating_layout(
             .Y, 
             5.0, 
-            25.0 - engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            25.0 + engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
         const l = Imui.widgets.label.create(&eng.get().imui, fps_text);
         if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
+            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
         }
         _ = engine.imui.pop_layout();
     }
@@ -630,6 +634,7 @@ fn update(self: *Self) !void {
         if (engine.imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
+            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
         }
         _ = engine.imui.pop_layout();
     }
@@ -974,75 +979,6 @@ pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void
 fn character_is_supported(chr: *zphy.CharacterVirtual) bool {
     return chr.getGroundState() == zphy.CharacterGroundState.on_ground;
 }
-
-const CollideShapeCollector = extern struct {
-    __v: *const zphy.CollideShapeCollector.VTable = &vtable,
-
-    alloc: *std.mem.Allocator,
-    hits: *std.ArrayList(zphy.CollideShapeResult),
-
-    const vtable = zphy.CollideShapeCollector.VTable{ 
-        .reset = _Reset,
-        .onBody = _OnBody,
-        .onBodyEnd = _OnBodyEnd,
-        .setUserData = _SetUserData,
-        .addHit = _AddHit,
-    };
-
-    fn _Reset(
-        self: *zphy.CollideShapeCollector,
-    ) callconv(.c) void { 
-        _ = self;
-    }
-    fn _OnBody(
-        self: *zphy.CollideShapeCollector,
-        in_body: *const zphy.Body,
-    ) callconv(.c) void { 
-        _ = self;
-        _ = in_body;
-    }
-    fn _OnBodyEnd(
-        self: *zphy.CollideShapeCollector,
-    ) callconv(.c) void {
-        _ = self;
-    }
-    fn _SetUserData(
-        self: *zphy.CollideShapeCollector,
-        in_user_data: u64,
-    ) callconv(.c) void {
-        _ = self;
-        _ = in_user_data;
-    }
-    fn _AddHit(
-        self: *zphy.CollideShapeCollector,
-        collide_shape_result: *const zphy.CollideShapeResult,
-    ) callconv(.c) void {
-        const pself = @as(*CollideShapeCollector, @ptrCast(self));
-        pself.hits.append(pself.alloc.*, collide_shape_result.*) catch unreachable;
-    }
-
-    pub fn deinit(self: *CollideShapeCollector) void {
-        const alloc = self.alloc.*;
-        self.hits.deinit(alloc);
-        alloc.destroy(self.hits);
-        alloc.destroy(self.alloc);
-    }
-
-    pub fn init(alloc: std.mem.Allocator) !CollideShapeCollector {
-        const alloc_ptr = try alloc.create(std.mem.Allocator);
-        errdefer alloc.destroy(alloc_ptr);
-        alloc_ptr.* = alloc;
-
-        const hits = try alloc.create(std.ArrayList(zphy.CollideShapeResult));
-        errdefer alloc.destroy(hits);
-        hits.* = std.ArrayList(zphy.CollideShapeResult).empty;
-
-        return CollideShapeCollector {
-            .alloc = alloc_ptr,
-            .hits = hits,
-        };
-    }
-};
 
 fn character_anim_description() anim.AnimController.Descriptor {
     const engine = eng.get();
