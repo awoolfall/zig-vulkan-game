@@ -176,8 +176,8 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
         top_widget.semantic_size[0].kind = .ParentPercentage;
         top_widget.semantic_size[0].value = 1.0;
         top_widget.semantic_size = .{
-            .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 },
-            .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable_percent = 0.0 },
+            .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, },
+            .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = false, },
         };
         top_widget.padding_px = .{
             .left = 10,
@@ -229,7 +229,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
         file_blk: {
             if (self.file_dropdown_open) {
                 const file_lfw = imui.get_widget_from_last_frame(file_button.id.box) orelse break :file_blk;
-                const file_lfw_rect = file_lfw.computed.rect();
+                const file_lfw_rect = file_lfw.rect();
                 const file_dropdown = imui.push_priority_floating_layout(.Y, file_lfw_rect.left, file_lfw_rect.bottom, key ++ .{@src()});
                 if (imui.get_widget(file_dropdown)) |file_dropdown_widget| {
                     file_dropdown_widget.flags.render = true;
@@ -283,7 +283,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
         edit_blk: {
             if (self.edit_dropdown_open) {
                 const edit_lfw = imui.get_widget_from_last_frame(edit_button.id.box) orelse break :edit_blk;
-                const edit_lfw_rect = edit_lfw.computed.rect();
+                const edit_lfw_rect = edit_lfw.rect();
                 const edit_dropdown = imui.push_priority_floating_layout(.Y, edit_lfw_rect.left, edit_lfw_rect.bottom, key ++ .{@src()});
                 if (imui.get_widget(edit_dropdown)) |edit_dropdown_widget| {
                     edit_dropdown_widget.flags.render = true;
@@ -461,12 +461,12 @@ fn entity_editor_ui(
     }
 
     const form_label_size = Imui.SemanticSize {
-        .kind = .ParentPercentage, .value = 0.3, .shrinkable_percent = 0.0,
+        .kind = .ParentPercentage, .value = 0.3, .shrinkable = false,
     };
 
     const entity_editor_background_signals = imui.generate_widget_signals(background_box);
     if (entity_editor_background_signals.init) {
-        entity_editor_background_position.* = .{ -10.0, 10.0 };
+        entity_editor_background_position.* = .{ -10.0, 35.0 };
     }
     if (entity_editor_background_signals.dragged) {
         entity_editor_background_position[0] += eng.get().input.mouse_delta[0];
@@ -483,7 +483,7 @@ fn entity_editor_ui(
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
         if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
             ll_widget.children_gap = 4;
         }
         defer imui.pop_layout();
@@ -513,7 +513,7 @@ fn entity_editor_ui(
     {
         const ll = imui.push_layout(.X, .{@src()});
         if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
             ll_widget.children_gap = 4;
         }
         defer imui.pop_layout();
@@ -678,8 +678,21 @@ fn entity_editor_ui(
             switch (data.desc) {
                 .Body => |*b| {
                     physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
-                    _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "is sensor", key ++ .{@src()});
-                    _ = Imui.widgets.checkbox.create(imui, &b.is_static, "is static", key ++ .{@src()});
+
+                    {
+                        _ = imui.push_form_layout_item(key ++ .{@src()});
+                        defer imui.pop_layout();
+
+                        _ = Imui.widgets.label.create(imui, "is sensor:");
+                        _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "", key ++ .{@src()});
+                    }
+                    {
+                        _ = imui.push_form_layout_item(key ++ .{@src()});
+                        defer imui.pop_layout();
+                        
+                        _ = Imui.widgets.label.create(imui, "is static:");
+                        _ = Imui.widgets.checkbox.create(imui, &b.is_static, "", key ++ .{@src()});
+                    }
                 },
                 .Character => |_| {
                     _ = Imui.widgets.label.create(imui, "is character");
@@ -726,8 +739,8 @@ fn entity_editor_ui(
             }
 
             if (imui.get_widget(background)) |background_widget| {
-                background_widget.computed.relative_position[0] = position_data[0];
-                background_widget.computed.relative_position[1] = position_data[1];
+                background_widget.computed_relative_position[0] = position_data[0];
+                background_widget.computed_relative_position[1] = position_data[1];
             }
 
             pe.particle_editor(entity, key ++ .{@src()});
@@ -768,20 +781,37 @@ fn entity_editor_ui(
                 defer imui.pop_layout();
 
                 _ = Imui.widgets.label.create(imui, "colour: ");
-                _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
-                _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
-                _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
+                
+                // _ = imui.push_layout(.X, key ++ .{@src()});
+                // defer imui.pop_layout();
+
+                // if (imui.get_widget(container_layout)) |c| {
+                //     c.semantic_size[0] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
+                //     c.semantic_size[1] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
+                // }
+
+                var colour: ?zm.F32x4 = zm.f32x4(1.0, 0.0, 1.0, 1.0);
+                const colour_indicator_signals = Imui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
+
+                if (colour_indicator_signals.clicked) {
+                    std.log.info("open colour picker", .{});
+                }
+                //_ = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+
+                // _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
+                // _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
+                // _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
             }
 
-            labeled_number_slider("intensity:", &light.intensity, key ++ .{@src()});
+            create_form_number_slider("intensity:", &light.intensity, key ++ .{@src()});
 
             if (light.light_type == .Spot) {
                 var umbra_degrees = std.math.radiansToDegrees(light.umbra);
-                labeled_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
+                create_form_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
                 light.umbra = std.math.degreesToRadians(umbra_degrees);
 
                 var penumbra_degrees = std.math.radiansToDegrees(light.delta_penumbra);
-                labeled_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
+                create_form_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
                 light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
             }
         }
@@ -868,18 +898,18 @@ fn physics_shape_editor_ui(
 
     switch (shape_settings.shape) {
         .Capsule => |*c| {
-            labeled_number_slider("radius:", &c.radius, key ++ .{@src()});
+            create_form_number_slider("radius:", &c.radius, key ++ .{@src()});
             var height = c.half_height * 2.0;
-            labeled_number_slider("height:", &height, key ++ .{@src()});
+            create_form_number_slider("height:", &height, key ++ .{@src()});
             c.half_height = height * 0.5;
         },
         .Sphere => |*s| {
-            labeled_number_slider("radius:", &s.radius, key ++ .{@src()});
+            create_form_number_slider("radius:", &s.radius, key ++ .{@src()});
         },
         .Box => |*b| {
-            labeled_number_slider("width:", &b.width, key ++ .{@src()});
-            labeled_number_slider("height:", &b.height, key ++ .{@src()});
-            labeled_number_slider("depth:", &b.depth, key ++ .{@src()});
+            create_form_number_slider("width:", &b.width, key ++ .{@src()});
+            create_form_number_slider("height:", &b.height, key ++ .{@src()});
+            create_form_number_slider("depth:", &b.depth, key ++ .{@src()});
         },
         .ModelCompoundConvexHull => |_| {
         },
@@ -888,17 +918,14 @@ fn physics_shape_editor_ui(
     imui.pop_layout(); // sl
 }
 
-fn labeled_number_slider(
+fn create_form_number_slider(
     text: []const u8,
     value: *f32, 
     key: anytype
 ) void {
     const imui = &eng.get().imui;
 
-    const ll = imui.push_form_layout_item(key ++ .{@src()});
-    if (imui.get_widget(ll)) |ll_widget| {
-        ll_widget.children_gap = 4;
-    }
+    _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
 
     _ = Imui.widgets.label.create(imui, text);

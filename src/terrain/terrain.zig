@@ -238,76 +238,64 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
     if (imui.get_widget(container)) |w| {
-        w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+        w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
         w.children_gap = 4;
     }
     defer imui.pop_layout();
 
     {
-        const ll = imui.push_layout(.X, key ++ .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-            ll_widget.children_gap = 4;
-        }
+        _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
         _ = Imui.widgets.label.create(imui, "texture: ");
         _ = Imui.widgets.number_slider.create(imui, &self.map_length_m, .{}, key ++ .{@src()});
     }
 
-    var physics_checkbox = (self.physics_body_id != null);
-    const enable_physics_checkbox = Imui.widgets.checkbox.create(imui, &physics_checkbox, "physics", key ++ .{@src()});
-    if (enable_physics_checkbox.clicked) {
-        if (physics_checkbox) {
-            self.generate_heightmap_physics(entity.transform) catch |err| {
-                std.log.err("Failed to generate heightmap physics: {}", .{err});
-            };
-            std.log.info("Created physics body", .{});
-        } else {
-            self.remove_physics_body();
-            std.log.info("Removed physics body", .{});
+    {
+        _ = imui.push_form_layout_item(key ++ .{@src()});
+        defer imui.pop_layout();
+
+        _ = Imui.widgets.label.create(imui, "enable physics: ");
+
+        var physics_checkbox = (self.physics_body_id != null);
+        const enable_physics_checkbox = Imui.widgets.checkbox.create(imui, &physics_checkbox, "", key ++ .{@src()});
+
+        if (enable_physics_checkbox.clicked) {
+            if (physics_checkbox) {
+                self.generate_heightmap_physics(entity.transform) catch |err| {
+                    std.log.err("Failed to generate heightmap physics: {}", .{err});
+                };
+                std.log.info("Created physics body", .{});
+            } else {
+                self.remove_physics_body();
+                std.log.info("Removed physics body", .{});
+            }
         }
     }
 
     {
-        const ll = imui.push_layout(.X, key ++ .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-            ll_widget.children_gap = 4;
-        }
+        _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
         _ = Imui.widgets.label.create(imui, "map length (m): ");
         _ = Imui.widgets.number_slider.create(imui, &self.map_length_m, .{}, key ++ .{@src()});
     }
     {
-        const ll = imui.push_layout(.X, key ++ .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-            ll_widget.children_gap = 4;
-        }
+        _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
         _ = Imui.widgets.label.create(imui, "height scale: ");
         _ = Imui.widgets.number_slider.create(imui, &self.map_height_scale, .{}, key ++ .{@src()});
     }
     {
-        const ll = imui.push_layout(.X, key ++ .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-            ll_widget.children_gap = 4;
-        }
+        _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
         _ = Imui.widgets.label.create(imui, "vertex density (m): ");
         _ = Imui.widgets.number_slider.create(imui, &self.vertex_density_m, .{}, key ++ .{@src()});
     }
     {
-        const ll = imui.push_layout(.X, key ++ .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
-            ll_widget.children_gap = 4;
-        }
+        _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
         _ = Imui.widgets.label.create(imui, "modify radius: ");

@@ -55,7 +55,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
     const content_layout = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(content_layout)) |content_layout_widget| {
-        content_layout_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0 };
+        content_layout_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
         content_layout_widget.children_gap = 5;
     }
     defer imui.pop_layout();
@@ -63,7 +63,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     {
         const left_layout = imui.push_layout(.Y, key ++ .{@src()});
         if (imui.get_widget(left_layout)) |w| {
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable_percent = 0.0 };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false, };
             w.children_gap = 5;
         }
         defer imui.pop_layout();
@@ -224,7 +224,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     {
         const right_layout = imui.push_layout(.Y, key ++ .{@src()});
         if (imui.get_widget(right_layout)) |w| {
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable_percent = 0.0 };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false, };
             w.children_gap = 5;
         }
         defer imui.pop_layout();
@@ -480,13 +480,13 @@ fn push_row_item_layout(text: []const u8, key: anytype) void {
     const imui = &eng.get().imui;
     const xl = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(xl)) |xl_widget| {
-        xl_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 1.0, };
+        xl_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
         xl_widget.children_gap = 4;
     }
 
     const shape_label = Imui.widgets.label.create(imui, text);
     if (imui.get_widget(shape_label.id)) |shape_label_widget| {
-        shape_label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.3, .shrinkable_percent = 0.0, };
+        shape_label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.3, .shrinkable = false, };
     }
 }
 
@@ -498,14 +498,14 @@ fn labeled_number_slider(
 ) void {
     const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
     if (eng.get().imui.get_widget(ll)) |ll_widget| {
-        ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable_percent = 0.0 };
+        ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
         ll_widget.children_gap = 4;
     }
     defer eng.get().imui.pop_layout();
 
     const label = eng.get().imui.label(text);
     if (eng.get().imui.get_widget(label.id)) |label_widget| {
-        label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable_percent = 0.0 };
+        label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable = false, };
     }
     _ = eng.get().imui.number_slider(value, settings, key ++ .{@src()});
 }
