@@ -11,13 +11,15 @@ struct PushConstants
 
     float4 origin; // worldspace origin of the terrain. grid position (0, 0).
 
-    int2 terrain_grid_position; // index position of this terrain grid
     float terrain_grid_length; // vertices along each edge of grid square
-    float terrain_density_m; // meters between each vertex
 
-    float map_height_scale;
-    float map_length_m;
-    float2 __pad;
+    float terrain_length_m;    // meters along the length of heightmap
+    float terrain_length_scale;
+
+    float terrain_height_m;
+    float terrain_height_scale;
+
+    float3 __pad;
 
     float4 modify_cells;
     float2 modify_center;
@@ -60,23 +62,35 @@ struct vs_out
 };
 
 [shader("vertex")]
-vs_out vs_main(vs_in input, int instance_id : SV_InstanceID)
+vs_out vs_main(int vertex_index: SV_VertexID)
 {
-    vs_out output = (vs_out) 0;
-    output.grid_position = float2(instance_id / 64, instance_id % 64) - float2(64 / 2, 64 / 2);
-    
-    float size = push_constant.terrain_grid_length * push_constant.terrain_density_m;
-    float3 pos = push_constant.origin.xyz + input.pos * float3(size, 0.0, size);
-    float3 grid_offset = (push_constant.terrain_grid_position.xxy + output.grid_position.xxy) * float3(size, 0.0, size);
-    pos += grid_offset;
+    vs_out output = (vs_out)0;
 
-    float2 heightmap_uv = (pos.xz - push_constant.origin.xz) / push_constant.map_length_m;    
-    output.tex_coord = heightmap_uv;
+    // each quad requires 6 verts
+    float vti = vertex_index % 6;
+    float vii = vertex_index / 6;
 
-    float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(heightmap_uv, 0.0), 0).r;
+    // generate quad vertices
+    float vtx = float(((uint(vti) + 2u) / 3u) % 2u);
+    float vtz = float(((uint(vti) + 1u) / 3u) % 2u);
 
-    output.world_position = float4(pos, 1.0);
-    output.world_position += float4(0.0, height * push_constant.map_height_scale, 0.0, 0.0);
+    // calculate vert uv
+    output.tex_coord = float2(
+        vtz + (vii % push_constant.terrain_grid_length),
+        vtx + floor(vii / push_constant.terrain_grid_length)
+    ) / push_constant.terrain_grid_length;
+
+    // calculate world position from uv
+    output.world_position = float4(output.tex_coord.x, 0.0, output.tex_coord.y, 1.0) * push_constant.terrain_length_m * push_constant.terrain_length_scale;
+    output.world_position.w = 1.0;
+
+    // apply heightmap height
+    float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(output.tex_coord, 0.0), 0).r;
+    output.world_position.y = height * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+
+    // offset terrain mesh by origin
+    output.world_position += float4(push_constant.origin.xyz, 0.0);
+
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
     float c = (height + 1.0) / 5.0;
@@ -96,23 +110,20 @@ ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out) 0;
     output.colour = clamp(abs(float4(input.colour.rgb, 1.0) - 0.2), 0.0, 1.0);
+    output.colour = float4(0.1, 0.1, 0.1, 1.0);
 
     float3 view_dir = normalize(push_constant.camera_pos.xyz - input.world_position.xyz);
-    float roughness = 0.5;
+    float roughness = 0.9;
 
     float3 uv = float3(input.tex_coord, 0.0);
-    // float hx0 = heightmap_textures.Sample(diffuse_sampler, uv + float3(-0.005, 0.0, 0.0)).r * push_constant.map_height_scale;
-    // float hx1 = heightmap_textures.Sample(diffuse_sampler, uv + float3(+0.005, 0.0, 0.0)).r * push_constant.map_height_scale;
-    // float hy0 = heightmap_textures.Sample(diffuse_sampler, uv + float3(0.0, -0.005, 0.0)).r * push_constant.map_height_scale;
-    // float hy1 = heightmap_textures.Sample(diffuse_sampler, uv + float3(0.0, +0.005, 0.0)).r * push_constant.map_height_scale;
 
-    // float3 normal = normalize(float3(
-    //             (hx0 - hx1) / (0.01 * push_constant.map_length_m),
-    //             1.0,
-    //             (hy0 - hy1) / (0.01 * push_constant.map_length_m)
-    //             ));
-    float3 normal = normal_textures.Sample(diffuse_sampler, uv).rbg;
-    normal -= float3(0.5, 0.0, 0.5);
+    float3 n_sample = normal_textures.Sample(diffuse_sampler, uv).rbg;
+    // Map from [0,1] to [-1,1]
+    float3 normal = n_sample * 2.0 - 1.0;
+    // X/Z components encode slope; scale them by the height scale and length scale so normals
+    // reflect the actual vertical exaggeration of the heightmap.
+    normal.xz *= push_constant.terrain_height_scale;
+    normal.xz /= push_constant.terrain_length_scale;
     normal = normalize(normal);
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
@@ -122,7 +133,7 @@ ps_out ps_main(vs_out input)
                 light,
                 view_dir,
                 input.world_position.xyz,
-                normal, // TODO
+                normal,
                 roughness
                 );
 

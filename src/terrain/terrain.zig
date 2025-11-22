@@ -18,10 +18,12 @@ pub const Descriptor = struct {
     heightmap_asset_id: ?as.ImageAssetId = null,
     enable_physics: bool = true,
 
-    map_length_m: f32 = 1.0,
-    map_height_scale: f32 = 1.0,
+    map_length_m: f32 = 1000.0,
+    map_length_scale: f32 = 1.0,
 
-    vertex_density_m: f32 = 0.1,
+    map_minimum_height: f32 = 0.0,
+    map_maximum_height: f32 = 100.0,
+    map_height_scale: f32 = 1.0,
 };
 
 alloc: std.mem.Allocator,
@@ -29,10 +31,12 @@ alloc: std.mem.Allocator,
 heightmap_asset_id: ?as.ImageAssetId,
 heightmap: []f32,
 
-map_length_m: f32 = 1.0,
-map_height_scale: f32 = 1.0,
+map_length_m: f32 = 1000.0,
+map_length_scale: f32 = 1.0,
 
-vertex_density_m: f32 = 0.1, // meters between vertices
+map_minimum_height: f32 = 0.0,
+map_maximum_height: f32 = 100.0,
+map_height_scale: f32 = 1.0,
 
 heightmap_texture: gf.Image.Ref,
 heightmap_texture_view: gf.ImageView.Ref,
@@ -116,10 +120,6 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
         };
     }
 
-    const normal_file = try std.fs.cwd().createFile("heightmap_normal.bmp", std.fs.File.CreateFlags{});
-    defer normal_file.close();
-    try normal_file.writeAll(std.mem.sliceAsBytes(normal_data));
-
     var normal_image = try (eng.image.Image {
         .alloc = eng.get().general_allocator,
         .width = hmt_image.width,
@@ -131,8 +131,6 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
         .data = std.mem.sliceAsBytes(normal_data_u8),
     }).to_zstbi();
     defer normal_image.deinit();
-
-    try normal_image.writeToFile("heightmap_normal.png", .png);
 
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
@@ -159,8 +157,11 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
         .heightmap_asset_id = desc.heightmap_asset_id,
 
         .map_length_m = desc.map_length_m,
+        .map_length_scale = desc.map_length_scale,
+
+        .map_minimum_height = desc.map_minimum_height,
+        .map_maximum_height = desc.map_maximum_height,
         .map_height_scale = desc.map_height_scale,
-        .vertex_density_m = desc.vertex_density_m,
 
         .heightmap_texture = hmt.*,
         .heightmap_texture_view = heightmap_texture_view,
@@ -185,9 +186,11 @@ pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
         .enable_physics = (self.physics_body_id != null),
 
         .map_length_m = self.map_length_m,
-        .map_height_scale = self.map_height_scale,
+        .map_length_scale = self.map_length_scale,
 
-        .vertex_density_m = self.vertex_density_m,
+        .map_minimum_height = self.map_minimum_height,
+        .map_maximum_height = self.map_maximum_height,
+        .map_height_scale = self.map_height_scale,
     };
 }
 
@@ -284,16 +287,32 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
         _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
-        _ = Imui.widgets.label.create(imui, "height scale: ");
-        _ = Imui.widgets.number_slider.create(imui, &self.map_height_scale, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "map length scale: ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_length_scale, .{}, key ++ .{@src()});
+    }
+
+    {
+        _ = imui.push_form_layout_item(key ++ .{@src()});
+        defer imui.pop_layout();
+
+        _ = Imui.widgets.label.create(imui, "map minimum height (m): ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_minimum_height, .{}, key ++ .{@src()});
     }
     {
         _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
-        _ = Imui.widgets.label.create(imui, "vertex density (m): ");
-        _ = Imui.widgets.number_slider.create(imui, &self.vertex_density_m, .{}, key ++ .{@src()});
+        _ = Imui.widgets.label.create(imui, "map maximum height (m): ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_maximum_height, .{}, key ++ .{@src()});
     }
+    {
+        _ = imui.push_form_layout_item(key ++ .{@src()});
+        defer imui.pop_layout();
+
+        _ = Imui.widgets.label.create(imui, "map height scale: ");
+        _ = Imui.widgets.number_slider.create(imui, &self.map_height_scale, .{}, key ++ .{@src()});
+    }
+
     {
         _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();

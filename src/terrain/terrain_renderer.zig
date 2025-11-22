@@ -18,17 +18,19 @@ const HeightFieldModelSize = 32;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
-    camera_pos: zm.F32x4,
+    camera_pos: zm.F32x4, 
 
-    origin: zm.F32x4,
+    origin: zm.F32x4,           // origin of the heightmap mesh
 
-    terrain_grid_position: [2]i32, // index position of this terrain grid
-    terrain_grid_length: f32, // vertices along each edge of grid square
-    terrain_density_m: f32, // meters between each vertex
+    terrain_grid_length: f32,   // vertices along each edge of grid square
 
-    map_height_scale: f32,
-    map_length_m: f32,
-    __pad: [2]f32 = [2]f32{0.0, 0.0},
+    terrain_length_m: f32,      // length of the heightmap in meters
+    terrain_length_scale: f32,  // length scale of the heightmap
+
+    terrain_height_m: f32,      // difference between minimum and maximum height of the heightmap
+    terrain_height_scale: f32,  // height scale of the heightmap
+
+    __pad: [3]f32 = [3]f32{0.0, 0.0, 0.0},
 
     modify_cells: zm.F32x4,
     modify_center: [2]f32 = [_]f32{0.0, 0.0},
@@ -125,10 +127,10 @@ pub fn init() !Self {
 
     const vertex_input = try gf.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+            //.{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
         },
         .attributes = &.{
-            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            //.{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
             // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
             // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
             // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
@@ -274,6 +276,8 @@ pub fn init() !Self {
                 .size = @sizeOf(PushConstantData),
             },
         },
+        .topology = .TriangleList,
+        .rasterization_fill_mode = .Fill,
         .descriptor_set_layouts = &.{
             lights_descriptor_layout,
             images_descriptor_layout,
@@ -338,11 +342,6 @@ pub fn render(
         self.current_terrain_index = 0;
     }
     defer self.current_terrain_index += 1;
-
-    const grid_size = @as(f32, @floatFromInt(HeightFieldModelSize)) * terrain.vertex_density_m;
-    const grid_origin_at_camera_pos = ((camera.transform.position - transform.position) /
-        zm.f32x4s(grid_size)) *
-        zm.f32x4(1.0, 0.0, 1.0, 0.0);
 
     cmd.cmd_begin_render_pass(.{
         .render_pass = self.render_pass,
@@ -464,12 +463,13 @@ pub fn render(
 
         .origin = transform.position,
 
-        .map_height_scale = terrain.map_height_scale,
-        .map_length_m = terrain.map_length_m,
+        .terrain_length_m = terrain.map_length_m,
+        .terrain_length_scale = terrain.map_length_scale,
 
-        .terrain_grid_position = [2]i32{@intFromFloat(grid_origin_at_camera_pos[0]), @intFromFloat(grid_origin_at_camera_pos[2])},
-        .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
-        .terrain_density_m = terrain.vertex_density_m,
+        .terrain_height_m = terrain.map_maximum_height - terrain.map_minimum_height,
+        .terrain_height_scale = terrain.map_height_scale,
+
+        .terrain_grid_length = 1024,// @as(f32, @floatFromInt(HeightFieldModelSize)),
 
         .modify_cells = zm.f32x4(
             terrain.dbg_modify_cells[0][0], 
@@ -488,10 +488,14 @@ pub fn render(
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{
-        .index_count = @intCast(self.model.meshes[0].index_count),
-        .instance_count = 64 * 64,
+    cmd.cmd_draw(.{
+        .vertex_count = @as(u32, @intFromFloat(push_constant_data.terrain_grid_length * push_constant_data.terrain_grid_length)) * 6,
     });
+
+    // cmd.cmd_draw_indexed(.{
+    //     .index_count = @intCast(self.model.meshes[0].index_count),
+    //     .instance_count = 64 * 64,
+    // });
 
     // for (0..grids_to_fill_space) |rx| {
     //     const x: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[0])) + @as(i32, @intCast(rx)) - @as(i32, @intCast(grids_to_fill_space / 2));

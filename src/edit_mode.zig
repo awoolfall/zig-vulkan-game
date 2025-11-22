@@ -790,11 +790,43 @@ fn entity_editor_ui(
                 //     c.semantic_size[1] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
                 // }
 
-                var colour: ?zm.F32x4 = zm.f32x4(1.0, 0.0, 1.0, 1.0);
+                var colour: ?zm.F32x4 = light.colour;
                 const colour_indicator_signals = Imui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
+                const colour_indicator_data, _ = imui.get_widget_data(bool, colour_indicator_signals.id) catch unreachable;
+
+                if (colour_indicator_signals.init) {
+                    colour_indicator_data.* = false;
+                }
 
                 if (colour_indicator_signals.clicked) {
-                    std.log.info("open colour picker", .{});
+                    colour_indicator_data.* = !colour_indicator_data.*;
+                }
+
+                if (colour_indicator_data.*) {
+                    const picker_floating_layout = imui.push_floating_layout(.Y, 10.0, 10.0, key ++ .{@src()});
+                    defer imui.pop_layout();
+
+                    if (imui.get_widget(picker_floating_layout)) |w| {
+                        set_background_widget_layout(w);
+                        w.semantic_size[0].minimum_pixel_size = 350;
+                        w.semantic_size[1].minimum_pixel_size = 350;
+                    }
+
+                    const picker_floating_position, _ = imui.get_widget_data([2]f32, picker_floating_layout) catch unreachable;
+                    imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
+
+                    if (imui.generate_widget_signals(picker_floating_layout).dragged) {
+                        picker_floating_position[0] += eng.get().input.mouse_delta[0];
+                        picker_floating_position[1] += eng.get().input.mouse_delta[1];
+                    }
+
+                    _ = Imui.widgets.label.create(imui, "colour picker");
+                    const picker_signals = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+                    if (picker_signals.data_changed) {
+                        if (colour) |c| {
+                            light.colour = c;
+                        }
+                    }
                 }
                 //_ = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
 
