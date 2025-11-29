@@ -427,7 +427,6 @@ pub fn render(
     }
 
     cmd.cmd_bind_descriptor_sets(.{
-        .graphics_pipeline = self.pipeline,
         .descriptor_sets = &.{
             self.lights_descriptor_set,
             self.images_descriptor_sets.items[self.current_terrain_index].set,
@@ -482,7 +481,6 @@ pub fn render(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = self.pipeline,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),

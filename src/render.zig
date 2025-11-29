@@ -907,7 +907,6 @@ pub fn render_cmd(
 
     self.update_camera_data_buffer(data.camera);
     cmd.cmd_bind_descriptor_sets(.{
-        .graphics_pipeline = self.graphics_pipelines.static.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
             self.camera_data_buffer.descriptor_set,
@@ -943,7 +942,6 @@ pub fn render_cmd(
             mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 1,
                 .descriptor_sets = &.{
                     self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
@@ -965,7 +963,6 @@ pub fn render_cmd(
             mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 2,
                 .descriptor_sets = &.{
                     self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
@@ -1031,7 +1028,6 @@ pub fn render_cmd(
             });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     texture_data_set.*.?
@@ -1039,7 +1035,6 @@ pub fn render_cmd(
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.static.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     self.default_textures_set
@@ -1061,7 +1056,6 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .graphics_pipeline = self.graphics_pipelines.static.solid,
             .shader_stages = .{ .Vertex = true, .Pixel = true, },
         });
 
@@ -1091,7 +1085,6 @@ pub fn render_cmd(
 
     self.update_camera_data_buffer(data.camera);
     cmd.cmd_bind_descriptor_sets(.{
-        .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
         .first_binding = 0,
         .descriptor_sets = &.{
             self.camera_data_buffer.descriptor_set,
@@ -1117,7 +1110,6 @@ pub fn render_cmd(
             mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 1,
                 .descriptor_sets = &.{
                     self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
@@ -1151,7 +1143,6 @@ pub fn render_cmd(
             mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 2,
                 .descriptor_sets = &.{
                     self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
@@ -1205,7 +1196,6 @@ pub fn render_cmd(
             });
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     texture_data_set.*.?
@@ -1213,7 +1203,6 @@ pub fn render_cmd(
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 3,
                 .descriptor_sets = &.{
                     self.default_textures_set
@@ -1245,7 +1234,6 @@ pub fn render_cmd(
             );
 
             cmd.cmd_bind_descriptor_sets(.{
-                .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
                 .first_binding = 4,
                 .descriptor_sets = &.{
                     self.bone_buffers.items[@intCast(current_bones_buffer_index)].descriptor_set,
@@ -1267,7 +1255,6 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .graphics_pipeline = self.graphics_pipelines.skeletal.solid,
             .shader_stages = .{ .Vertex = true, .Pixel = true, },
         });
 

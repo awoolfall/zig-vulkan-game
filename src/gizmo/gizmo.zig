@@ -841,7 +841,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.dont_write_depth,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -860,7 +859,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -877,7 +875,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -894,7 +891,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -936,7 +932,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -953,7 +948,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -970,7 +964,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
@@ -1012,7 +1005,6 @@ pub fn render_objects_cmd(
     };
 
     cmd.cmd_push_constants(.{
-        .graphics_pipeline = pipelines.standard,
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),

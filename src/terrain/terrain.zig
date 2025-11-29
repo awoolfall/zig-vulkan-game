@@ -65,15 +65,6 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
     const hmt_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
     
-    const hmt_image_asset = try eng.get().asset_manager.get_asset_entry(as.ImageAsset, hmt_id);
-
-    var hmt_image = try hmt_image_asset.load_image_cpu(eng.get().general_allocator, 0);
-    defer hmt_image.deinit();
-
-    const heightmap_data = try alloc.alloc(f32, hmt_image.width * hmt_image.height);
-    errdefer alloc.free(heightmap_data);
-
-
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
 
@@ -82,6 +73,12 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
 
     const albedo_view = try gf.ImageView.init(.{ .image = albedo.*, .view_type = .ImageView2DArray, });
     errdefer albedo_view.deinit();
+
+    const HEIGHTMAP_SAMPLES = 512;
+    const heightmap_data = try alloc.alloc(f32, HEIGHTMAP_SAMPLES * HEIGHTMAP_SAMPLES);
+    errdefer alloc.free(heightmap_data);
+
+    try compute_heightmap_samples(alloc, hmt.*, heightmap_data);
 
     var self = Self {
         .alloc = alloc,
@@ -103,6 +100,7 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
         .heightmap = heightmap_data,
         .physics_body_id = null,
     };
+    
     if (desc.enable_physics) {
         try self.generate_heightmap_physics(transform);
     }
@@ -123,6 +121,134 @@ pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
         .map_maximum_height = self.map_maximum_height,
         .map_height_scale = self.map_height_scale,
     };
+}
+
+fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, output_buffer: []f32) !void {
+    const heightmap_texture_view_non_array = try gf.ImageView.init(.{ .image = heightmap, .view_type = .ImageView2D, });
+    defer heightmap_texture_view_non_array.deinit();
+
+    const heightmap_samples = std.math.sqrt(output_buffer.len);
+    if (output_buffer.len != (heightmap_samples * heightmap_samples)) {
+        return error.OutputBufferDoesNotRepresentASqaure;
+    }
+
+    const heightmap_samples_string = try std.fmt.allocPrint(alloc, "{}", .{ heightmap_samples });
+    defer alloc.free(heightmap_samples_string);
+
+    const heightmap_data_storage_buffer = try gf.Buffer.init(
+        @sizeOf(f32) * heightmap_samples * heightmap_samples,
+        .{ .StorageBuffer = true, },
+        .{ .CpuRead = true, .GpuWrite = true, },
+    );
+    defer heightmap_data_storage_buffer.deinit();
+
+    const sample_shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("terrain_sample.slang"),
+        .shader_entry_points = &.{
+            "cs_sample"
+        },
+        .preprocessor_macros = &.{
+            .{ "SAMPLES_PER_AXIS", heightmap_samples_string },
+        }
+    });
+    defer alloc.free(sample_shader_spirv);
+
+    const sample_shader = try gf.ShaderModule.init(.{
+        .spirv_data = sample_shader_spirv,
+    });
+    defer sample_shader.deinit();
+
+    const sample_descriptor_layout = try gf.DescriptorLayout.init(.{
+        .bindings = &.{
+            gf.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gf.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .Sampler,
+            },
+            gf.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 2,
+                .binding_type = .StorageBuffer,
+            },
+        },
+    });
+    defer sample_descriptor_layout.deinit();
+
+    const sample_descriptor_pool = try gf.DescriptorPool.init(.{ .strategy = .{ .Layout = sample_descriptor_layout, }, .max_sets = 1, });
+    defer sample_descriptor_pool.deinit();
+
+    const sample_descriptor_set = try (try sample_descriptor_pool.get()).allocate_set(.{ .layout = sample_descriptor_layout, });
+    defer sample_descriptor_set.deinit();
+
+    try (try sample_descriptor_set.get()).update(.{
+        .writes = &.{
+            gf.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .ImageView = heightmap_texture_view_non_array },
+            },
+            gf.DescriptorSetUpdateWriteInfo {
+                .binding = 1,
+                .data = .{ .Sampler = gf.GfxState.get().default.sampler },
+            },
+            gf.DescriptorSetUpdateWriteInfo {
+                .binding = 2,
+                .data = .{ .StorageBuffer = .{ .buffer = heightmap_data_storage_buffer, } },
+            },
+        },
+    });
+
+    const sample_compute_pipeline = try gf.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = &sample_shader,
+            .entry_point = "cs_sample",
+        },
+        .descriptor_set_layouts = &.{
+            sample_descriptor_layout,
+        },
+    });
+    defer sample_compute_pipeline.deinit();
+
+    const command_pool = try gf.CommandPool.init(.{ .queue_family = .Compute, });
+    defer command_pool.deinit();
+
+    var command_buffer = try (try command_pool.get()).allocate_command_buffer(.{ .level = .Primary, });
+    defer command_buffer.deinit();
+
+    {
+        try command_buffer.cmd_begin(.{ .one_time_submit = true, }); 
+        command_buffer.cmd_bind_compute_pipeline(sample_compute_pipeline);
+        command_buffer.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                sample_descriptor_set,
+            },
+        });
+        command_buffer.cmd_dispatch(.{ .group_count_x = heightmap_samples / 8, .group_count_y = heightmap_samples / 8 });
+        try command_buffer.cmd_end();
+    }
+
+    var sample_fence = try gf.Fence.init(.{});
+    defer sample_fence.deinit();
+
+    try gf.GfxState.get().submit_command_buffer(.{
+        .command_buffers = &.{
+            &command_buffer,
+        },
+        .fence = sample_fence,
+    });
+    try sample_fence.wait();
+
+    {
+        const mapped_storage_buffer = try (try heightmap_data_storage_buffer.get()).map(.{ .read = true, });
+        defer mapped_storage_buffer.unmap();
+
+        const mapped_data_array = mapped_storage_buffer.data_array(f32, heightmap_samples * heightmap_samples);
+        @memcpy(output_buffer[0..(heightmap_samples * heightmap_samples)], mapped_data_array[0..(heightmap_samples * heightmap_samples)]);
+    }
 }
 
 /// Removes the physics body from the terrain if it exists
@@ -146,7 +272,12 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
     const heightmap_side_length_f32: f32 = @floatFromInt(heightmap_side_length);
     const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
         shape_settings.asShapeSettings(), 
-        [3]f32{ self.map_length_m / heightmap_side_length_f32, self.map_height_scale, self.map_length_m / heightmap_side_length_f32 });
+        [3]f32{
+            (self.map_length_m * self.map_length_scale) / heightmap_side_length_f32,
+            (self.map_maximum_height - self.map_minimum_height) * self.map_height_scale,
+            (self.map_length_m * self.map_length_scale) / heightmap_side_length_f32
+        }
+    );
     defer scaled_shape_settings.asShapeSettings().release();
 
     const shape = try scaled_shape_settings.asShapeSettings().createShape();
@@ -154,8 +285,8 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     const new_body = try body_interface.createAndAddBody(.{
         .shape = shape,
-        .position = transform.position + 
-            zm.f32x4(self.map_length_m/heightmap_side_length_f32, 0.0, self.map_length_m/heightmap_side_length_f32, 0.0) / zm.f32x4s(2.0),
+        .position = transform.position,// + 
+        //    zm.f32x4(self.map_length_m/heightmap_side_length_f32, 0.0, self.map_length_m/heightmap_side_length_f32, 0.0) / zm.f32x4s(2.0),
         .motion_type = .static,
     }, .activate);
     errdefer body_interface.removeAndDestroyBody(new_body);
