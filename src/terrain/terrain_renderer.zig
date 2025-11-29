@@ -147,7 +147,7 @@ pub fn init() !Self {
                 .binding_type = .ImageView,
             },
             gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Pixel = true, },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
@@ -299,7 +299,7 @@ pub fn init() !Self {
         .border_mode = .BorderColour,
         .border_colour = zm.f32x4s(0.0),
         .filter_min_mag = .Linear,
-        .filter_mip = .Point,
+        .filter_mip = .Linear,
     });
     errdefer sampler.deinit();
 
@@ -388,7 +388,7 @@ pub fn render(
                 },
                 gf.DescriptorSetUpdateWriteInfo {
                     .binding = 1,
-                    .data = .{ .ImageView = terrain.normal_texture_view, },
+                    .data = .{ .ImageView = terrain.albedo_texture_view, },
                 },
                 gf.DescriptorSetUpdateWriteInfo {
                     .binding = 2,
@@ -469,7 +469,7 @@ pub fn render(
         .terrain_height_m = terrain.map_maximum_height - terrain.map_minimum_height,
         .terrain_height_scale = terrain.map_height_scale,
 
-        .terrain_grid_length = 1024,// @as(f32, @floatFromInt(HeightFieldModelSize)),
+        .terrain_grid_length = 2048,// @as(f32, @floatFromInt(HeightFieldModelSize)),
 
         .modify_cells = zm.f32x4(
             terrain.dbg_modify_cells[0][0], 

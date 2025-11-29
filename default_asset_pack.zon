@@ -47,7 +47,12 @@
     // Terrain image???
     .{
         .name = "terrain-texture",
-        .path = .{ .Image = .{ .Path = "terrain_a.r32" } },
+        //.path = .{ .Image = .{ .Path = "terrain_a.r32" } },
+        .path = .{ .Image = .{ .Path = "heightmap/rugged_peaks.r32" } },
+    },
+    .{
+        .name = "terrain-albedo",
+        .path = .{ .Image = .{ .Path = "heightmap/rugged_peaks.png" } },
     },
     .{
         .name = "hello-world-texture-array",

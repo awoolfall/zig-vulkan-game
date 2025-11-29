@@ -141,46 +141,20 @@ ps_out ps_main(vs_out input)
 
     ps_out output = (ps_out) 0;
 
-    float3 view_dir = normalize(camera_data.position.xyz - input.world_pos.xyz);
-    float roughness = 0.5;
+    float3 normals = normalize(input.normal);
+    float3 tangents = normalize(input.tangent);
+    float3 bitangents = normalize(cross(tangents, normals));
+    float3x3 tbn = float3x3(tangents, bitangents, normals);
 
-    float diffuse = 1.0;
-    if ((~data.flags & IS_UNLIT_BIT) != 0) {
-        float3 normals = normalize(input.normal);
-        float3 tangents = normalize(input.tangent);
-        float3 bitangents = normalize(cross(tangents, normals));
-        float3x3 tbn = float3x3(tangents, bitangents, normals);
-
-        float3 sun_direction = normalize(float3(0.0, 1.0, 0.0));
-        //diffuse = clamp(dot(normalize(input.normal), sun_direction), 0.1, 0.4);
-        diffuse = calculate_diffuse(
-            sun_direction, 
-            view_dir,
-            input.normal,
-            roughness
-        );
-    }
     float4 diffuse_colour = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
-
-    output.colour = float4(diffuse_colour.rgb * diffuse, 1.0);
 
     // TODO better ambient model
     float3 ambient_colour = float3(1.0, 1.0, 1.0);
     float ambient_intensity = 0.04;
-    output.colour.rgb += diffuse_colour.rgb * ambient_colour * ambient_intensity;
+    output.colour.rgb = diffuse_colour.rgb * ambient_colour * ambient_intensity;
 
-    if ((data.flags & IS_SELECTED_BIT) != 0) {
-        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(camera_data.time * 5.0 + (-input.world_pos.y) * 2.0)));
-    }
-
-    const float fresnel0 = 0.04;
-    float fresnel = clamp(dot(normalize(input.normal), -view_dir), 0.0, 1.0);
-    fresnel = pow(1.0 - fresnel, 5.0);
-    fresnel = fresnel0 + (1.0 - fresnel0) * fresnel;
-    //output.colour = 1.0 - fresnel;
-    //if (output.colour.r > 1.0) {
-    //    output.colour = float4(1.0, 0.0, 0.0, 1.0);
-    //}
+    float3 view_dir = normalize(camera_data.position.xyz - input.world_pos.xyz);
+    float roughness = 0.5;
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = ldata.lights[i];
@@ -195,14 +169,18 @@ ps_out ps_main(vs_out input)
 
         output.colour.rgb += light_diffuse * diffuse_colour.rgb;
     }
-    //output.colour = float4(diffuse, diffuse, diffuse, 1.0);
+
+    if ((data.flags & IS_UNLIT_BIT) != 0) {
+        output.colour = diffuse_colour;
+    }
+
+    if ((data.flags & IS_SELECTED_BIT) != 0) {
+        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(camera_data.time * 5.0 + (-input.world_pos.y) * 2.0)));
+    }
+
     output.colour.a = 1.0;
 
     //output.colour = float4((normalize(input.normal) + 1.0) / 2.0 , 1.0);
-    //output.colour = lerp(output.colour, float4(1.0, 1.0, 1.0, 1.0), fresnel);
-    //output.colour = float4(fresnel, fresnel, fresnel, 1.0);
-    //output.colour = float4(input.view_dir, 1.0);
-    //output.colour = dot(normalize(input.view_dir), float3(0.0, 0.0, 1.0));
 
 #ifdef RENDER_ENTITY_ID_BUFFER
     output.entity_id = data.entity_id;
