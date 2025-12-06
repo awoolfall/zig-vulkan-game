@@ -4,6 +4,10 @@
 #define MAX_LIGHTS 4
 #endif
 
+#ifndef CLIPMAP_QUAD_COUNT
+#define CLIPMAP_QUAD_COUNT 128
+#endif
+
 struct PushConstants
 {
     float4x4 view_projection_matrix;
@@ -19,12 +23,12 @@ struct PushConstants
     float terrain_height_m;
     float terrain_height_scale;
 
-    // float3 __pad;
+    float clipmap_level;
 
-    float4 modify_cells;
-    float2 modify_center;
-    float modify_radius;
-    float modify_strength;
+    // float4 modify_cells;
+    // float2 modify_center;
+    // float modify_radius;
+    // float modify_strength;
 }
 
 [[vk::push_constant]]
@@ -56,52 +60,62 @@ struct vs_out
 {
     float4 position : SV_POSITION;
     float4 world_position : WORLD_POS;
-    float4 colour : COLOR;
+    nointerpolation float4 colour : COLOR;
     float2 tex_coord : TEXCOORD0;
     float2 grid_position : TEXCOORD1;
 };
 
 [shader("vertex")]
-vs_out vs_main(int vertex_index: SV_VertexID)
+vs_out vs_main(vs_in input)
 {
     vs_out output = (vs_out)0;
 
-    // each quad requires 6 verts
-    float vti = vertex_index % 6;
-    float vii = vertex_index / 6;
+    float clipmap_scale = pow(2, push_constant.clipmap_level) * 100.0;
+    float upper_level_clipmap_scale = pow(2, push_constant.clipmap_level + 1) * 100.0;
 
-    // generate quad vertices
-    float vtx = float(((uint(vti) + 2u) / 3u) % 2u);
-    float vtz = float(((uint(vti) + 1u) / 3u) % 2u);
+    bool is_skirt_vert = input.pos.x > 1.0 || input.pos.x < 0.0 || input.pos.z > 1.0 || input.pos.z < 0.0;
 
-    // calculate vert uv
-    output.tex_coord = float2(
-        vtz + (vii % push_constant.terrain_grid_length),
-        vtx + floor(vii / push_constant.terrain_grid_length)
-    ) / push_constant.terrain_grid_length;
-    output.tex_coord -= 0.5;
+    output.world_position = float4(input.pos.xyz, 1.0);
+    output.world_position.xz -= 0.5;
+    output.world_position.z *= -1.0;
+    output.world_position.xz *= clipmap_scale;
 
-    // calculate world position from uv
-    output.world_position = float4(output.tex_coord.x, 0.0, output.tex_coord.y, 1.0);
-    output.world_position.w = 1.0;
+    float quad_scale = (clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
+    float upper_level_quad_scale = (upper_level_clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
 
-    float dist = length(output.world_position.xz);
-    output.world_position.xz = normalize(output.world_position.xz) * dist * dist;
-
-    output.world_position.xz *= 1000.0 * 2.0; // 2km by 2km terrain grid
-
-    output.world_position.xz += push_constant.camera_pos.xz;
+    if (is_skirt_vert) {
+        output.world_position.xz += round(push_constant.camera_pos.xz / upper_level_quad_scale) * upper_level_quad_scale;
+    } else {
+        output.world_position.xz += round(push_constant.camera_pos.xz / quad_scale) * quad_scale;
+    }
 
     output.tex_coord = (output.world_position.xz - push_constant.origin.xz) / (push_constant.terrain_length_m * push_constant.terrain_length_scale);
 
     // apply heightmap height
-    float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(output.tex_coord, 0.0), 0).r;
+    // TODO mip levels need improvement, calculate quad size and compare it to texel size to determine mip level
+    float mip_level = log2(length(output.world_position.xyz - push_constant.camera_pos.xyz) / 10.0);
+    mip_level = clamp(mip_level, 0.0, 7.0);
+
+    float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(output.tex_coord, 0.0), mip_level).r;
     output.world_position.y = height * push_constant.terrain_height_m * push_constant.terrain_height_scale;
 
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
-    float c = (height + 1.0) / 5.0;
-    output.colour = float4(c, c, c, height);
+    float c = mip_level / 7.0;
+    if (floor(mip_level % 3) == 0) {
+        output.colour = float4(1.0, 0.0, 0.0, 1.0);
+    } else if (floor(mip_level % 3) == 1) {
+        output.colour = float4(0.0, 1.0, 0.0, 1.0);
+    } else {
+        output.colour = float4(0.0, 0.0, 1.0, 1.0);
+    }
+
+    float cc = height * height * height * height;
+    output.colour.rgb = float3(cc, cc, cc);
+
+    float2 gg = floor((output.tex_coord * pow(2, 12.0 - mip_level)) % 2);
+    float g = (gg.x != gg.y) ? 1 : 0;
+    output.colour.rgb = float3(g, g, g);
 
     return output;
 }
@@ -134,16 +148,16 @@ ps_out ps_main(vs_out input)
     // Compute normals from the heightmap using central differences instead
     // of sampling a precomputed normal texture. This keeps normals consistent
     // with any runtime height edits.
-    float texel = 1.0 / push_constant.terrain_grid_length; // one texel in UV-space
+    float texel = 1.0 / 4097; // one texel in UV-space
 
     // world-space horizontal spacing per texel (meters)
-    float spacing = (push_constant.terrain_length_m * push_constant.terrain_length_scale) / push_constant.terrain_grid_length;
+    float spacing = (push_constant.terrain_length_m * push_constant.terrain_length_scale) / 4097;
 
     // Sample neighbor heights (convert sampled [0,1] to world meters)
-    float hL = heightmap_textures.SampleLevel(diffuse_sampler, float3(uv.xy + float2(-texel, 0.0), 0.0), 0).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hR = heightmap_textures.SampleLevel(diffuse_sampler, float3(uv.xy + float2(+texel, 0.0), 0.0), 0).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hU = heightmap_textures.SampleLevel(diffuse_sampler, float3(uv.xy + float2(0.0, -texel), 0.0), 0).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hD = heightmap_textures.SampleLevel(diffuse_sampler, float3(uv.xy + float2(0.0, +texel), 0.0), 0).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    float hL = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(-texel, 0.0), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    float hR = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(+texel, 0.0), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    float hU = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, -texel), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    float hD = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, +texel), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
 
     // central differences -> slopes (rise / run)
     float dx = (hR - hL) / (2.0 * spacing);
@@ -152,7 +166,7 @@ ps_out ps_main(vs_out input)
     // Build the normal (y-up). Negate dx/dz so higher neighbour on +x points normal towards -x.
     float3 normal = normalize(float3(-dx, 1.0, -dz));
 
-    float4 diffuse_colour = albedo_textures.SampleLevel(diffuse_sampler, float3(uv.xy, 0), 0);
+    float4 diffuse_colour = albedo_textures.Sample(diffuse_sampler, float3(uv.xy, 0));
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = lights_data[0].lights[i];
@@ -180,6 +194,7 @@ ps_out ps_main(vs_out input)
     // }
 
     output.tex_coord = input.tex_coord;
+    //output.colour.rgb = input.colour.rgb;
     return output;
 }
 

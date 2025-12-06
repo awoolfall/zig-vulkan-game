@@ -11,10 +11,13 @@ const Terrain = @import("terrain.zig");
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 const pt = eng.path;
+const FileWatcher = eng.assets.FileWatcher;
 
 const StandardRenderer = @import("../render.zig");
 
-const HeightFieldModelSize = 32;
+const ShaderFilePath = "../../src/terrain/terrain.slang";
+
+const CLIPMAP_QUAD_COUNT = 512;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
@@ -30,12 +33,12 @@ const PushConstantData = extern struct {
     terrain_height_m: f32,      // difference between minimum and maximum height of the heightmap
     terrain_height_scale: f32,  // height scale of the heightmap
 
-    __pad: [3]f32 = [3]f32{0.0, 0.0, 0.0},
+    clipmap_level: f32,
 
-    modify_cells: zm.F32x4,
-    modify_center: [2]f32 = [_]f32{0.0, 0.0},
-    modify_radius: f32 = 0.0,
-    modify_strength: f32 = 0.0,
+    // modify_cells: zm.F32x4,
+    // modify_center: [2]f32 = [_]f32{0.0, 0.0},
+    // modify_radius: f32 = 0.0,
+    // modify_strength: f32 = 0.0,
 };
 
 const ImagesDescriptorSetData = struct {
@@ -46,8 +49,10 @@ const ImagesDescriptorSetData = struct {
 selection_textures: st.SelectionTextures([2]f32),
 
 render_pass: gf.RenderPass.Ref,
-pipeline: gf.GraphicsPipeline.Ref,
 framebuffer: gf.FrameBuffer.Ref,
+
+shader_file_watcher: FileWatcher,
+pipeline: gf.GraphicsPipeline.Ref,
 
 sampler: gf.Sampler.Ref,
 
@@ -60,7 +65,7 @@ lights_descriptor_pool: gf.DescriptorPool.Ref,
 lights_descriptor_set: gf.DescriptorSet.Ref,
 lights_buffer: gf.Buffer.Ref,
 
-model: eng.mesh.Model,
+clipmap_mesh: ClipmapMesh,
 
 current_frame: usize = 0,
 current_terrain_index: usize = 0,
@@ -68,10 +73,11 @@ current_terrain_index: usize = 0,
 pub fn deinit(self: *Self) void {
     const general_alloc = eng.get().general_allocator;
 
-    self.model.deinit();
+    self.clipmap_mesh.deinit();
 
     self.framebuffer.deinit();
     self.pipeline.deinit();
+    self.shader_file_watcher.deinit();
     self.render_pass.deinit();
     self.selection_textures.deinit();
 
@@ -93,51 +99,11 @@ pub fn deinit(self: *Self) void {
 pub fn init() !Self {
     const alloc = eng.get().general_allocator;
 
-    var plane_model = try eng.mesh.Model.plane(alloc, HeightFieldModelSize * 2 - 2, HeightFieldModelSize * 2 - 2);
-    errdefer plane_model.deinit();
+    const clipmap_mesh = try ClipmapMesh.init(alloc, CLIPMAP_QUAD_COUNT);
+    errdefer clipmap_mesh.deinit();
 
     var selection_textures = try st.SelectionTextures([2]f32).init();
     errdefer selection_textures.deinit();
-
-    // const path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/terrain/terrain.slang" });
-    // defer path.deinit();
-
-    // const resolved_shader_path = try path.resolve_path(alloc);
-    // alloc.free(resolved_shader_path);
-
-    // const slang_shader_file = try std.fs.openFileAbsolute(resolved_shader_path, .{ .mode = .read_only });
-    // defer slang_shader_file.close();
-
-    // const slang_shader = try alloc.alloc(u8, try slang_shader_file.getEndPos());
-    // defer alloc.free(slang_shader);
-
-    // _ = try slang_shader_file.readAll(slang_shader);
-
-    const shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{
-        .shader_data = @embedFile("terrain.slang"),
-        .shader_entry_points = &.{
-            "vs_main",
-            "ps_main",
-        }
-    });
-    defer alloc.free(shader_spirv);
-
-    const shader_module = try gf.ShaderModule.init(.{ .spirv_data = shader_spirv });
-    defer shader_module.deinit();
-
-    const vertex_input = try gf.VertexInput.init(.{
-        .bindings = &.{
-            //.{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
-        },
-        .attributes = &.{
-            //.{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-            // .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-            // .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
-            // .{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-            //.{ .name = "TEXCOORD0",     .location = 1, .binding = 0, .offset = 48, .format = .F32x2, },
-        },
-    });
-    defer vertex_input.deinit();
 
     const images_descriptor_layout = try gf.DescriptorLayout.init(.{
         .bindings = &.{
@@ -256,8 +222,105 @@ pub fn init() !Self {
     });
     errdefer render_pass.deinit();
 
-    const pipeline = try gf.GraphicsPipeline.init(.{
+    const framebuffer = try gf.FrameBuffer.init(.{
         .render_pass = render_pass,
+        .attachments = &.{
+            .SwapchainHDR,
+            .SwapchainDepth,
+            .{ .View = selection_textures.view, },
+        },
+    });
+    errdefer framebuffer.deinit();
+
+    const sampler = try gf.Sampler.init(.{
+        .border_mode = .BorderColour,
+        .border_colour = zm.f32x4s(0.0),
+        .filter_min_mag = .Linear,
+        .filter_mip = .Linear,
+        .min_lod = 0.0,
+        .max_lod = 7.0,
+    });
+    errdefer sampler.deinit();
+
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    defer path.deinit();
+
+    const path_resolved = try path.resolve_path(alloc);
+    defer alloc.free(path_resolved);
+
+    var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
+    errdefer shader_file_watcher.deinit();
+
+    var self = Self {
+        .clipmap_mesh = clipmap_mesh,
+
+        .selection_textures = selection_textures,
+        .render_pass = render_pass,
+        .pipeline = undefined,
+        .shader_file_watcher = shader_file_watcher,
+        .framebuffer = framebuffer,
+        .sampler = sampler,
+
+        .images_descriptor_layout = images_descriptor_layout,
+        .images_descriptor_pool = images_descriptor_pool,
+        .images_descriptor_sets = images_descriptor_sets,
+
+        .lights_buffer = lights_buffer,
+        .lights_descriptor_layout = lights_descriptor_layout,
+        .lights_descriptor_pool = lights_descriptor_pool,
+        .lights_descriptor_set = lights_descritptor_set,
+    };
+
+    self.pipeline = try self.create_pipeline();
+    errdefer self.pipeline.deinit();
+
+    return self;
+}
+
+fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
+    const alloc = eng.get().general_allocator;
+
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    defer path.deinit();
+
+    const path_resolved = try path.resolve_path(alloc);
+    defer alloc.free(path_resolved);
+
+    const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });
+    defer shader_file.close();
+
+    const shader_slang = try alloc.alloc(u8, try shader_file.getEndPos());
+    defer alloc.free(shader_slang);
+
+    _ = try shader_file.readAll(shader_slang);
+
+    const shader_spirv = try eng.get().gfx.shader_manager.generate_spirv(alloc, .{
+        .shader_data = shader_slang,
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_main",
+        },
+        .preprocessor_macros = &.{
+            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{ CLIPMAP_QUAD_COUNT }) },
+        }
+    });
+    defer alloc.free(shader_spirv);
+
+    const shader_module = try gf.ShaderModule.init(.{ .spirv_data = shader_spirv });
+    defer shader_module.deinit();
+
+    const vertex_input = try gf.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+        },
+        .attributes = &.{
+            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+        },
+    });
+    defer vertex_input.deinit();
+
+    const pipeline = try gf.GraphicsPipeline.init(.{
+        .render_pass = self.render_pass,
         .subpass_index = 0,
         .vertex_shader = .{
             .module = &shader_module,
@@ -279,53 +342,13 @@ pub fn init() !Self {
         .topology = .TriangleList,
         .rasterization_fill_mode = .Fill,
         .descriptor_set_layouts = &.{
-            lights_descriptor_layout,
-            images_descriptor_layout,
+            self.lights_descriptor_layout,
+            self.images_descriptor_layout,
         },
     });
     errdefer pipeline.deinit();
 
-    const framebuffer = try gf.FrameBuffer.init(.{
-        .render_pass = render_pass,
-        .attachments = &.{
-            .SwapchainHDR,
-            .SwapchainDepth,
-            .{ .View = selection_textures.view, },
-        },
-    });
-    errdefer framebuffer.deinit();
-
-    const sampler = try gf.Sampler.init(.{
-        .border_mode = .BorderColour,
-        .border_colour = zm.f32x4s(0.0),
-        .filter_min_mag = .Linear,
-        .filter_mip = .Linear,
-    });
-    errdefer sampler.deinit();
-
-    const terrain_path = try pt.Path.init(eng.get().general_allocator, .{ .ExeRelative = "../../src/terrain/terrain.hlsl" });
-    defer terrain_path.deinit();
-
-    const terrain_path_abs = try terrain_path.resolve_path(alloc);
-    defer alloc.free(terrain_path_abs);
-
-    return Self {
-        .model = plane_model,
-        .selection_textures = selection_textures,
-        .render_pass = render_pass,
-        .pipeline = pipeline,
-        .framebuffer = framebuffer,
-        .sampler = sampler,
-
-        .images_descriptor_layout = images_descriptor_layout,
-        .images_descriptor_pool = images_descriptor_pool,
-        .images_descriptor_sets = images_descriptor_sets,
-
-        .lights_buffer = lights_buffer,
-        .lights_descriptor_layout = lights_descriptor_layout,
-        .lights_descriptor_pool = lights_descriptor_pool,
-        .lights_descriptor_set = lights_descritptor_set,
-    };
+    return pipeline;
 }
 
 /// Render the terrain using the camera buffer
@@ -337,6 +360,17 @@ pub fn render(
     transform: Transform,
     standard_renderer: *StandardRenderer,
 ) void {
+    if (self.shader_file_watcher.was_modified_since_last_check()) blk: {
+        std.log.info("Recreating terrain shader pipeline", .{});
+
+        const new_pipeline = self.create_pipeline() catch |err| {
+            std.log.err("Unable to recreate terrain shader pipeline: {}", .{err});
+            break :blk;
+        };
+        self.pipeline.deinit();
+        self.pipeline = new_pipeline;
+    }
+
     if (self.current_frame != gf.GfxState.get().current_frame_index()) {
         self.current_frame = gf.GfxState.get().current_frame_index();
         self.current_terrain_index = 0;
@@ -436,24 +470,17 @@ pub fn render(
     cmd.cmd_bind_vertex_buffers(.{
         .buffers = &.{
             gf.VertexBufferInput {
-                .buffer = self.model.vertices_buffer,
+                .buffer = self.clipmap_mesh.vertices_buffer,
             },
         }
     });
 
     cmd.cmd_bind_index_buffer(.{
         .index_format = .U32,
-        .buffer = self.model.indices_buffer,
-        .offset = @intCast(self.model.meshes[0].indices_offset * @sizeOf(u32)),
+        .buffer = self.clipmap_mesh.indices_buffer,
     });
-    //const grids_to_fill_space: usize = @intFromFloat(camera.far_field * 2.0 / grid_size);
-    //const grids_to_fill_space: usize = 64;
 
-    // TODO render tiles based on camera position and viewing direction
-    // TODO draw instanced
-    // TODO tesellation
-
-    const push_constant_data = PushConstantData {
+    var push_constant_data = PushConstantData {
         .view_projection_matrix = zm.mul(
             camera.transform.generate_view_matrix(),
             camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
@@ -470,71 +497,239 @@ pub fn render(
 
         .terrain_grid_length = 2048,// @as(f32, @floatFromInt(HeightFieldModelSize)),
 
-        .modify_cells = zm.f32x4(
-            terrain.dbg_modify_cells[0][0], 
-            terrain.dbg_modify_cells[0][1], 
-            terrain.dbg_modify_cells[1][0], 
-            terrain.dbg_modify_cells[1][1]),
-        .modify_center = terrain.dbg_modify_center,
-        .modify_radius = terrain.modify_radius,
-        .modify_strength = 1.0,
+        .clipmap_level = 1.0,
+
+        // .modify_cells = zm.f32x4(
+        //     terrain.dbg_modify_cells[0][0], 
+        //     terrain.dbg_modify_cells[0][1], 
+        //     terrain.dbg_modify_cells[1][0], 
+        //     terrain.dbg_modify_cells[1][1]),
+        // .modify_center = terrain.dbg_modify_center,
+        // .modify_radius = terrain.modify_radius,
+        // .modify_strength = 1.0,
     };
 
+    // draw center grid
     cmd.cmd_push_constants(.{
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw(.{
-        .vertex_count = @as(u32, @intFromFloat(push_constant_data.terrain_grid_length * push_constant_data.terrain_grid_length)) * 6,
+    cmd.cmd_draw_indexed(.{
+        .index_count = self.clipmap_mesh.full_ring_indices_count,
     });
 
-    // cmd.cmd_draw_indexed(.{
-    //     .index_count = @intCast(self.model.meshes[0].index_count),
-    //     .instance_count = 64 * 64,
-    // });
+    const CLIPMAP_LEVELS = 4;
 
-    // for (0..grids_to_fill_space) |rx| {
-    //     const x: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[0])) + @as(i32, @intCast(rx)) - @as(i32, @intCast(grids_to_fill_space / 2));
-    //     for (0..grids_to_fill_space) |ry| {
-    //         const y: i32 = @as(i32, @intFromFloat(grid_origin_at_camera_pos[2])) + @as(i32, @intCast(ry)) - @as(i32, @intCast(grids_to_fill_space / 2));
-    //
-    //         const push_constant_data = PushConstantData {
-    //             .view_projection_matrix = zm.mul(
-    //                 camera.transform.generate_view_matrix(),
-    //                 camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
-    //             ),
-    //
-    //             .origin = transform.position,
-    //
-    //             .map_height_scale = terrain.map_height_scale,
-    //             .map_length_m = terrain.map_length_m,
-    //
-    //             .terrain_grid_position = [2]i32{@intCast(x), @intCast(y)},
-    //             .terrain_grid_length = @as(f32, @floatFromInt(HeightFieldModelSize)),
-    //             .terrain_density_m = terrain.vertex_density_m,
-    //
-    //             .modify_cells = zm.f32x4(
-    //                 terrain.dbg_modify_cells[0][0], 
-    //                 terrain.dbg_modify_cells[0][1], 
-    //                 terrain.dbg_modify_cells[1][0], 
-    //                 terrain.dbg_modify_cells[1][1]),
-    //             .modify_center = terrain.dbg_modify_center,
-    //             .modify_radius = terrain.modify_radius,
-    //             .modify_strength = 1.0,
-    //         };
-    //
-    //         cmd.cmd_push_constants(.{
-    //             .graphics_pipeline = self.pipeline,
-    //             .shader_stages = .{ .Vertex = true, .Pixel = true, },
-    //             .offset = 0,
-    //             .data = std.mem.asBytes(&push_constant_data),
-    //         });
-    //
-    //         cmd.cmd_draw_indexed(.{
-    //             .index_count = @intCast(self.model.mesh_list[0].num_indices),
-    //         });
-    //     }
-    // }
+    for (0..CLIPMAP_LEVELS) |_| {
+        push_constant_data.clipmap_level += 1.0;
+
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constant_data),
+        });
+
+        cmd.cmd_draw_indexed(.{
+            .index_count = self.clipmap_mesh.outer_ring_indices_count,
+        });
+    }
 }
+
+// TODO improve skirt transition. Reduce quad section size by 1 and improve rounding in shader so that clipmap levels dont overlap.
+
+const ClipmapMesh = struct {
+    vertices_buffer: gf.Buffer.Ref,
+    indices_buffer: gf.Buffer.Ref,
+    outer_ring_indices_count: u32,
+    full_ring_indices_count: u32,
+
+    pub fn deinit(self: *const ClipmapMesh) void {
+        self.vertices_buffer.deinit();
+        self.indices_buffer.deinit();
+    }
+
+    pub fn init(alloc: std.mem.Allocator, side_length: u32) !ClipmapMesh {
+        const side_length_f32: f32 = @floatFromInt(side_length);
+        const quad_vertices_count = (side_length + 1) * (side_length + 1);
+        const quad_indices_count = side_length * side_length * 6;
+        
+        const skirt_segment_positions: [9][3]f32 = .{
+            .{ 0.0, 0.0, 0.0 },
+            .{ 1.0, 0.0, 0.0 },
+            .{ 0.0, 0.0, 1.0 },
+            
+            .{ 0.0, 0.0, 1.0 },
+            .{ 1.0, 0.0, 0.0 },
+            .{ 2.0, 0.0, 1.0 },
+
+            .{ 2.0, 0.0, 1.0 },
+            .{ 1.0, 0.0, 0.0 },
+            .{ 2.0, 0.0, 0.0 },
+        };
+
+        const quad_verts_a: [6][2]u32 = .{
+            .{ 0, 0 },
+            .{ 1, 0 },
+            .{ 0, 1 },
+            .{ 1, 0 },
+            .{ 1, 1 },
+            .{ 0, 1 },
+        };
+        const quad_verts_b: [6][2]u32 = .{
+            .{ 0, 0 },
+            .{ 1, 1 },
+            .{ 0, 1 },
+            .{ 1, 1 },
+            .{ 0, 0 },
+            .{ 1, 0 },
+        };
+
+        const num_skirt_segments_per_side = side_length / 2;
+        
+        const skirt_segment_vertices_count =
+            (9 * num_skirt_segments_per_side * 4)   // edge skirt segment for each side
+            + (6 * 4);                              // quad for each corner
+
+        const vertices = try alloc.alloc([3]f32, quad_vertices_count + skirt_segment_vertices_count);
+        defer alloc.free(vertices);
+        var vertices_list = std.ArrayList([3]f32).initBuffer(vertices);
+
+        const indices = try alloc.alloc(u32, quad_indices_count + skirt_segment_vertices_count);
+        defer alloc.free(indices);
+        var indices_list = std.ArrayList(u32).initBuffer(indices);
+
+        // Add skirt vertices
+
+        // top skirt
+        for (0..num_skirt_segments_per_side) |i| {
+            const base_position = [3]f32 { (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32, 0.0, 0.0 };
+            var it = std.mem.reverseIterator(&skirt_segment_positions);
+            while (it.next()) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] + p[0] / side_length_f32, base_position[1] + p[1], base_position[2] - p[2] / side_length_f32 });
+            }
+        }
+
+        // bottom skirt
+        for (0..num_skirt_segments_per_side) |i| {
+            const base_position = [3]f32 { (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32, 0.0, 1.0 };
+            for (skirt_segment_positions) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] + p[0] / side_length_f32, base_position[1] + p[1], base_position[2] + p[2] / side_length_f32 });
+            }
+        }
+
+        // left skirt
+        for (0..num_skirt_segments_per_side) |i| {
+            const base_position = [3]f32 { 0.0, 0.0, (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32 };
+            for (skirt_segment_positions) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] - p[2] / side_length_f32, base_position[1] + p[1], base_position[2] + p[0] / side_length_f32 });
+            }
+        }
+
+        // right skirt
+        for (0..num_skirt_segments_per_side) |i| {
+            const base_position = [3]f32 { 1.0, 0.0, (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32 };
+            var it = std.mem.reverseIterator(&skirt_segment_positions);
+            while (it.next()) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] + p[2] / side_length_f32, base_position[1] + p[1], base_position[2] + p[0] / side_length_f32 });
+            }
+        }
+
+        // top right quad
+        {
+            const base_position = [3]f32 { 1.0, 0.0, 0.0 };
+            var it = std.mem.reverseIterator(&quad_verts_a);
+            while (it.next()) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] + @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] - @as(f32, @floatFromInt(p[1])) / side_length_f32 });
+            }
+        }
+
+        // bottom right quad
+        {
+            const base_position = [3]f32 { 1.0, 0.0, 1.0 };
+            for (quad_verts_a) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] + @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] + @as(f32, @floatFromInt(p[1])) / side_length_f32 });
+            }
+        }
+
+        // top left quad
+        {
+            const base_position = [3]f32 { 0.0, 0.0, 0.0 };
+            for (quad_verts_a) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] - @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] - @as(f32, @floatFromInt(p[1])) / side_length_f32 });
+            }
+        }
+
+        // bottom left quad
+        {
+            const base_position = [3]f32 { 0.0, 0.0, 1.0 };
+            var it = std.mem.reverseIterator(&quad_verts_a);
+            while (it.next()) |p| {
+                try vertices_list.appendBounded([3]f32 { base_position[0] - @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] + @as(f32, @floatFromInt(p[1])) / side_length_f32 });
+            }
+        }
+
+        const quad_base_vertex = vertices_list.items.len;
+
+        for (0..skirt_segment_vertices_count) |i| {
+            try indices_list.appendBounded(@intCast(i));
+        }
+
+        const quad_base_index = indices_list.items.len;
+
+        for (0..(side_length + 1)) |i| {
+            for (0..(side_length + 1)) |j| {
+                vertices[quad_base_vertex + (i * (side_length + 1)) + j] = [3]f32 { @as(f32, @floatFromInt(i)) / side_length_f32, 0.0, @as(f32, @floatFromInt(j)) / side_length_f32 };
+            }
+        }
+
+        const SIDE_LENGTH_ON_4 = side_length / 4;
+
+        for (0..side_length) |i| {
+            for (0..side_length) |j| {
+                if (i >= SIDE_LENGTH_ON_4 and i < (3 * SIDE_LENGTH_ON_4) and j >= SIDE_LENGTH_ON_4 and j < (3 * SIDE_LENGTH_ON_4)) {
+                    continue;
+                }
+                for (0..6) |vti| {
+                    const quad_verts = (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                    const base_index: u32 = @intCast(quad_base_index + (i * (side_length + 1)) + j);
+                    try indices_list.appendBounded(base_index + (quad_verts[0] * (side_length + 1)) + quad_verts[1]);
+                }
+            }
+        }
+
+        const outer_ring_indices_count: u32 = @intCast(indices_list.items.len);
+
+        for (SIDE_LENGTH_ON_4 .. (3 * SIDE_LENGTH_ON_4)) |i| {
+            for (SIDE_LENGTH_ON_4 .. (3 * SIDE_LENGTH_ON_4)) |j| {
+                for (0..6) |vti| {
+                    const quad_verts = (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                    const base_index: u32 = @intCast(quad_base_index + (i * (side_length + 1)) + j);
+                    try indices_list.appendBounded(base_index + (quad_verts[0] * (side_length + 1)) + quad_verts[1]);
+                }
+            }
+        }
+
+        const vertices_buffer = try gf.Buffer.init_with_data(
+            std.mem.sliceAsBytes(vertices),
+            .{ .VertexBuffer = true, },
+            .{}
+        );
+        errdefer vertices_buffer.deinit();
+
+        const indices_buffer = try gf.Buffer.init_with_data(
+            std.mem.sliceAsBytes(indices),
+            .{ .IndexBuffer = true, },
+            .{}
+        );
+        errdefer indices_buffer.deinit();
+
+        return ClipmapMesh {
+            .vertices_buffer = vertices_buffer,
+            .indices_buffer = indices_buffer,
+            .outer_ring_indices_count = outer_ring_indices_count,
+            .full_ring_indices_count = quad_indices_count + skirt_segment_vertices_count,
+        };
+    }
+};
