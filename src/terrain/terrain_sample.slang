@@ -11,6 +11,7 @@ SamplerState sampler : register(s0);
 [[vk::binding(2, 0)]]
 RWStructuredBuffer<float> output_samples : register(u0);
 
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void cs_sample(uint3 dtid : SV_DispatchThreadID)
 {

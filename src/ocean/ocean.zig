@@ -1,0 +1,907 @@
+const std = @import("std");
+const eng = @import("engine");
+const gfx = eng.gfx;
+const zm = eng.zmath;
+const FileWatcher = eng.assets.FileWatcher;
+const StandardRenderer = @import("../render.zig");
+
+const ClipmapMesh = @import("../terrain/clipmap.zig");
+
+const Self = @This();
+
+const N = 512;
+const fN: comptime_float = @floatFromInt(N);
+const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
+
+const ShaderPath = "../../src/ocean/ocean_render.slang";
+const CLIPMAP_QUAD_COUNT = 256;
+
+const SpectrumPushConstantData = extern struct {
+    L: f32,
+    time: f32,
+};
+
+const RenderPushConstantData = extern struct {
+    foo: f32,
+};
+
+clipmap_mesh: ClipmapMesh,
+
+h0_tilde_image: gfx.Image.Ref,
+h0_tilde_view: gfx.ImageView.Ref,
+
+height_and_slope_image: gfx.Image.Ref,
+height_and_slope_views: [2]gfx.ImageView.Ref,
+
+displacement_image: gfx.Image.Ref,
+displacement_views: [2]gfx.ImageView.Ref,
+
+fft_processing_hs_image: gfx.Image.Ref,
+fft_processing_hs_views: [2]gfx.ImageView.Ref,
+
+fft_processing_d_image: gfx.Image.Ref,
+fft_processing_d_views: [2]gfx.ImageView.Ref,
+
+fft_descriptor_layout: gfx.DescriptorLayout.Ref,
+fft_descriptor_pool: gfx.DescriptorPool.Ref,
+
+fft_descriptor_sets_hs: [2]gfx.DescriptorSet.Ref,
+fft_descriptor_sets_d: [2]gfx.DescriptorSet.Ref,
+
+fft_horizontal_pipeline: gfx.ComputePipeline.Ref,
+fft_vertical_pipeline: gfx.ComputePipeline.Ref,
+
+spectrum_descriptor_layout: gfx.DescriptorLayout.Ref,
+spectrum_descriptor_pool: gfx.DescriptorPool.Ref,
+spectrum_descriptor_set: gfx.DescriptorSet.Ref,
+
+spectrum_pipeline: gfx.ComputePipeline.Ref,
+
+render_pipeline: gfx.GraphicsPipeline.Ref,
+
+pub fn deinit(self: *const Self) void {
+    self.clipmap_mesh.deinit();
+
+    self.h0_tilde_view.deinit();
+    self.h0_tilde_image.deinit();
+
+    self.height_and_slope_views[0].deinit();
+    self.height_and_slope_views[1].deinit();
+    self.height_and_slope_image.deinit();
+
+    self.displacement_views[0].deinit();
+    self.displacement_views[1].deinit();
+    self.displacement_image.deinit();
+
+    self.fft_processing_hs_views[0].deinit();
+    self.fft_processing_hs_views[1].deinit();
+    self.fft_processing_hs_image.deinit();
+
+    self.fft_processing_d_views[0].deinit();
+    self.fft_processing_d_views[1].deinit();
+    self.fft_processing_d_image.deinit();
+
+    self.fft_horizontal_pipeline.deinit();
+    self.fft_vertical_pipeline.deinit();
+
+    self.fft_descriptor_sets_hs[0].deinit();
+    self.fft_descriptor_sets_hs[1].deinit();
+
+    self.fft_descriptor_sets_d[0].deinit();
+    self.fft_descriptor_sets_d[1].deinit();
+
+    self.fft_descriptor_pool.deinit();
+    self.fft_descriptor_layout.deinit();
+
+    self.spectrum_pipeline.deinit();
+
+    self.spectrum_descriptor_set.deinit();
+    self.spectrum_descriptor_pool.deinit();
+    self.spectrum_descriptor_layout.deinit();
+
+    self.render_pipeline.deinit();
+}
+
+pub fn init() !Self {
+    const alloc = eng.get().general_allocator;
+
+    const clipmap_mesh = try ClipmapMesh.init(alloc, Self.CLIPMAP_QUAD_COUNT);
+    errdefer clipmap_mesh.deinit();
+
+    // h0 tilde
+    const h0_tilde_buffer = try generate_h0tilde_cpu(alloc, N, 1000.0);
+    defer alloc.free(h0_tilde_buffer);
+
+    const h0_tilde_image = try gfx.Image.init(
+        .{
+            .format = .Rg32_Float,
+            .width = N,
+            .height = N,
+            .dst_layout = .ShaderReadOnlyOptimal,
+            .usage_flags = .{ .ShaderResource = true, },
+            .access_flags = .{},
+        },
+        std.mem.sliceAsBytes(&h0_tilde_buffer)
+    );
+    errdefer h0_tilde_image.deinit();
+
+    const h0_tilde_image_view = try gfx.ImageView.init(.{
+        .image = h0_tilde_image,
+        .view_type = .ImageView2D,
+    });
+    errdefer h0_tilde_image_view.deinit();
+
+    // spectrum images
+    const height_and_slope_image, const height_and_slope_views = try init_fft_rw_image_and_view(N);
+    errdefer height_and_slope_image.deinit();
+    errdefer height_and_slope_views[0].deinit();
+    errdefer height_and_slope_views[1].deinit();
+
+    const displacement_image, const displacement_views = try init_fft_rw_image_and_view(N);
+    errdefer displacement_image.deinit();
+    errdefer displacement_views[0].deinit();
+    errdefer displacement_views[1].deinit();
+
+    // fft processing images
+    const fft_processing_hs_image, const fft_processing_hs_views = try init_fft_rw_image_and_view(N);
+    errdefer fft_processing_hs_image.deinit();
+    errdefer fft_processing_hs_views[0].deinit();
+    errdefer fft_processing_hs_views[1].deinit();
+
+    const fft_processing_d_image, const fft_processing_d_views = try init_fft_rw_image_and_view(N);
+    errdefer fft_processing_d_image.deinit();
+    errdefer fft_processing_d_views[0].deinit();
+    errdefer fft_processing_d_views[1].deinit();
+
+    // fft compute descriptors
+    const fft_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 2,
+                .binding_type = .StorageImage,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 3,
+                .binding_type = .StorageImage,
+            },
+        },
+    });
+    errdefer fft_descriptor_layout.deinit();
+
+    const fft_descriptor_pool = try gfx.DescriptorPool.init(.{ .strategy = .{ .Layout = fft_descriptor_layout }, .max_sets = 4, });
+    errdefer fft_descriptor_pool.deinit();
+
+    const fft_descriptor_sets_height_and_slope: [2]gfx.DescriptorSet = undefined;
+
+    fft_descriptor_sets_height_and_slope[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_height_and_slope[0].deinit();
+
+    fft_descriptor_sets_height_and_slope[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_height_and_slope[1].deinit();
+
+    try (try fft_descriptor_sets_height_and_slope[0].get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = height_and_slope_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = height_and_slope_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_hs_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_hs_views[1] } },
+        },
+    });
+
+    try (try fft_descriptor_sets_height_and_slope[1].get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = fft_processing_hs_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = fft_processing_hs_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = height_and_slope_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = height_and_slope_views[1] } },
+        },
+    });
+
+    const fft_descriptor_sets_displacement: [2]gfx.DescriptorSet = undefined;
+
+    fft_descriptor_sets_displacement[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_displacement[0].deinit();
+
+    fft_descriptor_sets_displacement[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_displacement[1].deinit();
+
+    try (try fft_descriptor_sets_displacement[0].get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = displacement_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = displacement_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_d_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_d_views[1] } },
+        },
+    });
+
+    try (try fft_descriptor_sets_displacement[1].get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = fft_processing_d_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = fft_processing_d_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = displacement_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = displacement_views[1] } },
+        },
+    });
+
+    // fft compute pipelines
+    const fft_horizontal_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("fftslm.slang"),
+        .shader_entry_points = &.{
+            "ButterflySLM",
+        },
+        .preprocessor_macros = &.{
+            .{ "TRANSFORM_INVERSE", "1" },
+            .{ "BUTTERFLY_COUNT", std.fmt.comptimePrint("{d}", .{std.math.log2(Self.N)}) },
+            .{ "LENGTH", std.fmt.comptimePrint("{d}", .{Self.N}) },
+            .{ "ROWPASS", "1" },
+        },
+    });
+    defer alloc.free(fft_horizontal_spirv);
+
+    const fft_horizontal_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = fft_horizontal_spirv,
+    });
+    defer fft_horizontal_shader_module.deinit();
+
+    const fft_vertical_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("fftslm.slang"),
+        .shader_entry_points = &.{
+            "ButterflySLM",
+        },
+        .preprocessor_macros = &.{
+            .{ "TRANSFORM_INVERSE", "1" },
+            .{ "BUTTERFLY_COUNT", std.fmt.comptimePrint("{d}", .{std.math.log2(Self.N)}) },
+            .{ "LENGTH", std.fmt.comptimePrint("{d}", .{Self.N}) },
+            .{ "COLPASS", "1" },
+        },
+    });
+    defer alloc.free(fft_vertical_spirv);
+
+    const fft_vertical_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = fft_vertical_spirv,
+    });
+    defer fft_vertical_shader_module.deinit();
+
+    const fft_horizontal_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = fft_horizontal_shader_module,
+            .entry_point = "ButterflySLM",
+        },
+        .descriptor_set_layouts = &.{
+            fft_descriptor_layout,
+        },
+    });
+    errdefer fft_horizontal_pipeline.deinit();
+
+    const fft_vertical_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = fft_vertical_shader_module,
+            .entry_point = "ButterflySLM",
+        },
+        .descriptor_set_layouts = &.{
+            fft_descriptor_layout,
+        },
+    });
+    errdefer fft_vertical_pipeline.deinit();
+
+    // spectrum descritpors
+    const spectrum_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .StorageImage,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 2,
+                .binding_type = .StorageImage,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 3,
+                .binding_type = .StorageImage,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 4,
+                .binding_type = .StorageImage,
+            },
+        },
+    });
+    errdefer spectrum_descriptor_layout.deinit();
+
+    const spectrum_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = spectrum_descriptor_layout },
+        .max_sets = 1,
+    });
+    errdefer spectrum_descriptor_pool.deinit();
+
+    const spectrum_descriptor_set = try (try spectrum_descriptor_pool.get()).allocate_set(.{ .layout = spectrum_descriptor_layout });
+    errdefer spectrum_descriptor_set.deinit();
+
+    try (try spectrum_descriptor_set.get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_view }, },
+            .{ .binding = 1, .data = .{ .ImageView = height_and_slope_views[0] }, },
+            .{ .binding = 2, .data = .{ .ImageView = height_and_slope_views[1] }, },
+            .{ .binding = 3, .data = .{ .ImageView = displacement_views[0] }, },
+            .{ .binding = 4, .data = .{ .ImageView = displacement_views[1] }, },
+        },
+    });
+
+    // spectrum pipeline
+    const spectrum_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("ocean_spectrum.slang"),
+        .shader_entry_points = &.{
+            "cs_main",
+        },
+        .preprocessor_macros = &.{
+            .{ "TEX_SIZE", std.fmt.comptimePrint("{d}", .{Self.N}) },
+        },
+    });
+    defer alloc.free(spectrum_spirv);
+
+    const spectrum_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = spectrum_spirv,
+    });
+    defer spectrum_shader_module.deinit();
+
+    const spectrum_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = spectrum_shader_module,
+            .entry_point = "cs_main",
+        },
+        .descriptor_set_layouts = &.{
+            spectrum_descriptor_layout,
+        },
+    });
+    errdefer spectrum_pipeline.deinit();
+
+    // render descriptors
+    const images_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 1,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 2,
+                .binding_type = .Sampler,
+            },
+        },
+    });
+    errdefer images_descriptor_layout.deinit();
+
+    const images_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .max_sets = 1,
+        .strategy = .{ .Layout = images_descriptor_layout, },
+    });
+    errdefer images_descriptor_pool.deinit();
+
+    const images_descriptor_set = try (try images_descriptor_pool.get()).allocate_set(.{ .layout = images_descriptor_layout });
+    errdefer images_descriptor_set.deinit();
+
+    const sampler = try gfx.Sampler.init(.{
+        .filter_min_mag = .Linear,
+        .filter_mip = .Linear,
+    });
+    errdefer sampler.deinit();
+
+    try (try images_descriptor_set.get()).update(.{
+        .writes = &.{
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .ImageView = height_and_slope_views[0] },
+            },
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 1,
+                .data = .{ .ImageView = displacement_views[0] },
+            },
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 2,
+                .data = .{ .Sampler = sampler },
+            },
+        },
+    });
+
+    const lights_buffer = try gfx.Buffer.init(
+        @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer lights_buffer.deinit();
+
+    const lights_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Pixel = true, },
+                .binding = 0,
+                .binding_type = .UniformBuffer,
+            }
+        },
+    });
+    errdefer lights_descriptor_layout.deinit();
+
+    const lights_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .max_sets = 1,
+        .strategy = .{ .Layout = lights_descriptor_layout, },
+    });
+    errdefer lights_descriptor_pool.deinit();
+
+    const lights_descritptor_set = try (try lights_descriptor_pool.get()).allocate_set(.{
+        .layout = lights_descriptor_layout,
+    });
+    errdefer lights_descritptor_set.deinit();
+
+    try (try lights_descritptor_set.get()).update(.{
+        .writes = &.{
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 0,
+                .data = .{ .UniformBuffer = .{
+                    .buffer = lights_buffer,
+                } },
+            },
+        },
+    });
+
+    // render render pass
+    const attachments = &[_]gfx.AttachmentInfo {
+        gfx.AttachmentInfo {
+            .name = "colour",
+            .format = gfx.GfxState.hdr_format,
+            .initial_layout = .ColorAttachmentOptimal,
+            .final_layout = .ColorAttachmentOptimal,
+            .blend_type = .Simple,
+        },
+        gfx.AttachmentInfo {
+            .name = "depth",
+            .format = gfx.GfxState.depth_format,
+            .initial_layout = .DepthStencilAttachmentOptimal,
+            .final_layout = .DepthStencilAttachmentOptimal,
+            .blend_type = .None,
+        },
+    };
+
+    const render_pass = try gfx.RenderPass.init(.{
+        .attachments = attachments,
+        .subpasses = &.{
+            gfx.SubpassInfo {
+                .attachments = &.{ "colour" },
+                .depth_attachment = "depth",
+            },
+        },
+        .dependencies = &.{
+            gfx.SubpassDependencyInfo {
+                .src_subpass = null,
+                .dst_subpass = 0,
+                .src_access_mask = .{},
+                .src_stage_mask = .{ .color_attachment_output = true, },
+                .dst_access_mask = .{ .color_attachment_write = true, },
+                .dst_stage_mask = .{ .color_attachment_output = true, },
+            },
+        },
+    });
+    errdefer render_pass.deinit();
+
+    const framebuffer = try gfx.FrameBuffer.init(.{
+        .render_pass = render_pass,
+        .attachments = &.{
+            .SwapchainHDR,
+            .SwapchainDepth,
+        },
+    });
+    errdefer framebuffer.deinit();
+
+    // render shader file watcher
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    defer path.deinit();
+
+    const path_resolved = try path.resolve_path(alloc);
+    defer alloc.free(path_resolved);
+
+    var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
+    errdefer shader_file_watcher.deinit();
+
+    var self = Self {
+        .clipmap_mesh = clipmap_mesh,
+
+        .h0_tilde_image = h0_tilde_image,
+        .h0_tilde_view = h0_tilde_image_view,
+
+        .height_and_slope_image = height_and_slope_image,
+        .height_and_slope_views = height_and_slope_views,
+        
+        .displacement_image = displacement_image,
+        .displacement_views = displacement_views,
+
+        .fft_processing_hs_image = fft_processing_hs_image,
+        .fft_processing_hs_views = fft_processing_hs_views,
+
+        .fft_processing_d_image = fft_processing_d_image,
+        .fft_processing_d_views = fft_processing_d_views,
+
+        .fft_descriptor_layout = fft_descriptor_layout,
+        .fft_descriptor_pool = fft_descriptor_pool,
+
+        .fft_descriptor_sets_hs = fft_descriptor_sets_height_and_slope,
+        .fft_descriptor_sets_d = fft_descriptor_sets_displacement,
+
+        .fft_horizontal_pipeline = fft_horizontal_pipeline,
+        .fft_vertical_pipeline = fft_vertical_pipeline,
+
+        .spectrum_descriptor_layout = spectrum_descriptor_layout,
+        .spectrum_descriptor_pool = spectrum_descriptor_pool,
+        .spectrum_descriptor_set = spectrum_descriptor_set,
+
+        .spectrum_pipeline = spectrum_pipeline,
+    };
+    try self.create_pipeline();
+
+    return self;
+}
+
+fn init_fft_rw_image_and_view(comptime side_length: u32) !struct { gfx.Image.Ref, [2]gfx.ImageView.Ref } {
+    const image = try gfx.Image.init(
+        .{
+            .format = .Rgb32_Float,
+            .width = side_length,
+            .height = side_length,
+            .array_length = 2,
+            .dst_layout = .TransferDstOptimal,
+            .usage_flags = .{ .StorageResource = true, },
+            .access_flags = .{ .GpuWrite = true, },
+        },
+        null
+    );
+    errdefer image.deinit();
+
+    const view_r = try gfx.ImageView.init(.{ 
+        .image = image, 
+        .array_layers = .{ 
+            .base_array_layer = 0,
+            .array_layer_count = 1,
+        },
+        .view_type = .ImageView2D
+    });
+    errdefer view_r.deinit();
+
+    const view_i = try gfx.ImageView.init(.{ 
+        .image = image, 
+        .array_layers = .{ 
+            .base_array_layer = 1,
+            .array_layer_count = 1,
+        },
+        .view_type = .ImageView2D
+    });
+    errdefer view_i.deinit();
+
+    return .{ image, .{ view_r, view_i } };
+}
+
+fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
+    const alloc = eng.get().general_allocator;
+
+    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    defer path.deinit();
+
+    const path_resolved = try path.resolve_path(alloc);
+    defer alloc.free(path_resolved);
+
+    const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });
+    defer shader_file.close();
+
+    const shader_slang = try alloc.alloc(u8, try shader_file.getEndPos());
+    defer alloc.free(shader_slang);
+
+    _ = try shader_file.readAll(shader_slang);
+
+    const shader_spirv = try eng.get().gfx.shader_manager.generate_spirv(alloc, .{
+        .shader_data = shader_slang,
+        .shader_entry_points = &.{
+            "vs_main",
+            "ps_main",
+        },
+        .preprocessor_macros = &.{
+            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{ Self.CLIPMAP_QUAD_COUNT }) },
+        }
+    });
+    defer alloc.free(shader_spirv);
+
+    const shader_module = try gfx.ShaderModule.init(.{ .spirv_data = shader_spirv });
+    defer shader_module.deinit();
+
+    const vertex_input = try gfx.VertexInput.init(.{
+        .bindings = &.{
+            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+        },
+        .attributes = &.{
+            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+        },
+    });
+    defer vertex_input.deinit();
+
+    const pipeline = try gfx.GraphicsPipeline.init(.{
+        .render_pass = self.render_pass,
+        .subpass_index = 0,
+        .vertex_shader = .{
+            .module = &shader_module,
+            .entry_point = "vs_main",
+        },
+        .vertex_input = &vertex_input,
+        .pixel_shader = .{
+            .module = &shader_module,
+            .entry_point = "ps_main",
+        },
+        .depth_test = .{ .write = true, },
+        .push_constants = &.{
+            gfx.PushConstantLayoutInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .size = @sizeOf(RenderPushConstantData),
+            },
+        },
+        .topology = .TriangleList,
+        .rasterization_fill_mode = .Fill,
+        .descriptor_set_layouts = &.{
+            self.lights_descriptor_layout,
+            self.images_descriptor_layout,
+        },
+    });
+    errdefer pipeline.deinit();
+
+    return pipeline;
+}
+
+pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
+    // transition spectrum images from shader reading to compute destination
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.height_and_slope_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.displacement_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+        },
+        .src_stage = .{ .vertex_shader = true, .fragment_shader = true, },
+        .dst_stage = .{ .compute_shader = true, },
+    });
+
+    // dispatch spectrum image generation
+    cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.spectrum_descriptor_set,
+        },
+    });
+    const spectrum_push_constant_data = SpectrumPushConstantData {
+        .L = fN,
+        .time = @floatCast(eng.get().time.time_since_start_of_app()),
+    };
+    cmd.cmd_push_constants(.{
+        .shader_stages = .{ .Compute = true, },
+        .data = std.mem.asBytes(&spectrum_push_constant_data),
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+
+    // transition images to perform first stage of FFTs on height/slope and displacement images
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.height_and_slope_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.fft_processing_hs_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.displacement_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.fft_processing_d_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .compute_shader = true, },
+    });
+
+    // dispatch horizontal stage FFTs
+    cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.fft_descriptor_sets_hs[0],
+        },
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = 1, .group_count_z = 1, });
+
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.fft_descriptor_sets_d[0],
+        },
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = 1, .group_count_z = 1, });
+    
+    // transition images to perform second stage of FFTs on height/slope and displacement images
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.height_and_slope_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.fft_processing_hs_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.displacement_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.fft_processing_d_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .compute_shader = true, },
+    });
+
+    // dispatch vertical stage FFTs
+    cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.fft_descriptor_sets_hs[1],
+        },
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = 1, .group_count_z = 1, });
+
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.fft_descriptor_sets_d[1],
+        },
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = 1, .group_count_z = 1, });
+
+    // finally transition height/slope and displacement images ready for shader reading
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.height_and_slope_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.displacement_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
+    });
+}
+
+pub fn render(self: *Self, cmd: *gfx.CommandBuffer) void {
+    _ = self;
+    _ = cmd;
+    // TODO
+}
+
+fn generate_h0tilde_cpu(alloc: std.mem.Allocator, image_side_length: usize, spectrum_length_m: f32) ![][2]f32 {
+    const h0_tilde_buffer = try alloc.alloc([2]f32, image_side_length * image_side_length);
+    errdefer alloc.free(h0_tilde_buffer);
+
+    const default_prng = std.Random.DefaultPrng.init(@truncate(std.time.nanoTimestamp()));
+    const rand = default_prng.random();
+
+    for (0..Self.N) |i| {
+        for (0..Self.N) |j| {
+            const n = alias(@intCast(i), image_side_length);// @as(isize, @intCast(i)) - @divTrunc(Self.N, 2);
+            const m = alias(@intCast(j), image_side_length);// @as(isize, @intCast(j)) - @divTrunc(Self.N, 2);
+
+            const k = calc_k(@floatFromInt(n), @floatFromInt(m), spectrum_length_m, spectrum_length_m);
+            const h0_tilde_t = h0_tilde(&rand, 0.3000, zm.f32x4(16.0, 0.0, 0.0, 0.0), k);
+
+            h0_tilde_buffer[i * Self.N + j][0] = h0_tilde_t[0];
+            h0_tilde_buffer[i * Self.N + j][1] = h0_tilde_t[1];
+        }
+    }
+
+    return h0_tilde_buffer;
+}
+
+inline fn alias(x: isize, N_: isize) isize {
+    if (x > @divTrunc(N_, 2)) {
+        return x - N_;
+    } else {
+        return x;
+    }
+}
+
+fn calc_k(n: f32, m: f32, Lx: f32, Lz: f32) zm.F32x4 {
+    const kx = 2.0 * std.math.pi * n / Lx;
+    const kz = 2.0 * std.math.pi * m / Lz;
+    return zm.f32x4(kx, kz, 0.0, 0.0);
+}
+
+fn h0_tilde(rand: *std.Random, amplitude: f32, wind: zm.F32x4, k: zm.F32x4) zm.F32x4 {
+    const phillips_k = phillips(amplitude, wind, k);
+    const gaussian_random = zm.f32x4(rand.floatNorm(f32), rand.floatNorm(f32), 0.0, 0.0);
+    return gaussian_random * zm.f32x4s(std.math.sqrt(phillips_k / 2.0));
+}
+
+fn phillips(amplitude: f32, wind_speed: zm.F32x4, k: zm.F32x4) f32 {
+    const w = wind_speed;
+
+    const v = zm.length2(w)[0];
+    const L_ = (v * v) / 9.81;
+    const k_length = zm.length2(k)[0];
+    if (k_length < 0.0001) { return 0.0; }
+    const cosine_factor = std.math.pow(f32, @abs(zm.dot2(zm.normalize2(k), zm.normalize2(w))[0]), 2);
+    const l = Self.PLANE_SIDE_LENGTH / (Self.fN * 2.0); // suppress waves below half the smallest facet size
+    const suppress_small_waves = @exp(-1.0 * (k_length * k_length) * (l * l));
+    return (amplitude / (std.math.pow(f32, k_length, 4))) * @exp(-1.0 / std.math.pow(f32, (k_length * L_), 2)) * cosine_factor * suppress_small_waves;
+}
