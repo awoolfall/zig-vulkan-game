@@ -20,6 +20,7 @@ const FontEnum = eng.ui.FontEnum;
 
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
+const Ocean = @import("ocean/ocean.zig");
 const EditMode = @import("edit_mode.zig");
 
 const gitrev = eng.gitrev;
@@ -39,6 +40,7 @@ player_attack_particle_system: eng.particles.ParticleSystem,
 
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
+ocean: Ocean,
 particles_renderer: eng.particles_renderer.ParticleRenderer,
 
 edit_mode: EditMode,
@@ -64,6 +66,7 @@ pub fn deinit(self: *Self) void {
 
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
+    self.ocean.deinit();
     self.particles_renderer.deinit();
     self.edit_mode.deinit();
 
@@ -81,9 +84,9 @@ pub fn init() !Self {
     const asset_pack_id = try engine.asset_manager.add_asset_pack(asset_pack);
     try engine.asset_manager.load_asset_pack(asset_pack_id);
 
-    // asset_pack.save_to_file(engine.general_allocator, "zig-out") catch |err| {
-    //     std.log.err("Unable to save asset pack: {}", .{ err });
-    // };
+    asset_pack.save_to_file(engine.general_allocator, "zig-out") catch |err| {
+        std.log.err("Unable to save asset pack: {}", .{ err });
+    };
     
     // Print model animation names
     //
@@ -164,11 +167,26 @@ pub fn init() !Self {
         try uber_cmd_semaphores_list.appendBounded(try gfx.Semaphore.init(.{}));
     }
 
+    var standard_renderer = try StandardRenderer.init();
+    errdefer standard_renderer.deinit();
+
+    var terrain_renderer = try TerrainRenderer.init();
+    errdefer terrain_renderer.deinit();
+
+    var ocean = try Ocean.init();
+    errdefer ocean.deinit();
+
+    var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
+    errdefer particles_renderer.deinit();
+
+    var edit_mode = try EditMode.init();
+    errdefer edit_mode.deinit();
+
     return Self {
         .camera = eng.camera.Camera {
             .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine.gfx.swapchain_aspect()),
             .near_field = 0.3,
-            .far_field = 1000.0,
+            .far_field = 10000.0,
             .move_speed = 10.0,
             .mouse_sensitivity = 0.001,
             .max_orbit_distance = 10.0,
@@ -183,10 +201,11 @@ pub fn init() !Self {
 
         .player_attack_particle_system = player_attack_particle_system,
 
-        .standard_renderer = try StandardRenderer.init(),
-        .terrain_renderer = try TerrainRenderer.init(),
-        .particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator),
-        .edit_mode = try EditMode.init(),
+        .standard_renderer = standard_renderer,
+        .terrain_renderer = terrain_renderer,
+        .ocean = ocean,
+        .particles_renderer = particles_renderer,
+        .edit_mode = edit_mode,
 
         .command_pool = command_pool,
         .command_buffers = command_buffers,
@@ -672,6 +691,7 @@ fn update(self: *Self) !void {
     ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
+    defer self.standard_renderer.clear();
 
     // render terrains
     var entity_iter = engine.entities.list.iterator();
@@ -686,7 +706,9 @@ fn update(self: *Self) !void {
             );
         }
     }
-    self.standard_renderer.clear();
+
+    self.ocean.update_images(cmd);
+    self.ocean.render(&self.standard_renderer, render_camera, cmd);
 
     self.particles_renderer.push_particle_system(&self.player_attack_particle_system) catch |err| {
         std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{

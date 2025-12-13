@@ -510,7 +510,7 @@ pub fn render(
         // .modify_strength = 1.0,
     };
 
-    // draw center grid
+    // draw center level
     cmd.cmd_push_constants(.{
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
@@ -521,6 +521,7 @@ pub fn render(
         .index_count = self.clipmap_mesh.full_ring_indices_count,
     });
 
+    // draw clipmap levels
     const CLIPMAP_LEVELS = 4;
 
     for (0..CLIPMAP_LEVELS) |_| {

@@ -51,7 +51,7 @@ pub fn init() !Self {
         .editor_camera = Camera {
             .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
-            .far_field = 1000.0,
+            .far_field = 10000.0,
             .move_speed = 10.0,
             .mouse_sensitivity = 0.001,
             .max_orbit_distance = 10.0,

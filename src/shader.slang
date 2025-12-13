@@ -154,20 +154,12 @@ ps_out ps_main(vs_out input)
     output.colour.rgb = diffuse_colour.rgb * ambient_colour * ambient_intensity;
 
     float3 view_dir = normalize(camera_data.position.xyz - input.world_pos.xyz);
-    float roughness = 0.5;
+    float roughness = 0.8;
+    float reflectivity = 0.1;
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = ldata.lights[i];
-
-        float3 light_diffuse = calculate_light_diffuse(
-            light,
-            view_dir,
-            input.world_pos.xyz,
-            input.normal,
-            roughness
-        );
-
-        output.colour.rgb += light_diffuse * diffuse_colour.rgb;
+        output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_pos.xyz, input.normal, reflectivity, roughness);
     }
 
     if ((data.flags & IS_UNLIT_BIT) != 0) {

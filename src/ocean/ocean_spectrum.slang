@@ -8,16 +8,20 @@
 Texture2D<float2> h0_tilde : register(t0);
 
 [[vk::binding(1, 0)]]
-WTexture2D<float3> out_ocean_height_and_slope_r;
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> out_ocean_height_and_slope_r;
 
 [[vk::binding(2, 0)]]
-WTexture2D<float3> out_ocean_height_and_slope_i;
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> out_ocean_height_and_slope_i;
 
 [[vk::binding(3, 0)]]
-WTexture2D<float3> out_ocean_displacement_r;
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> out_ocean_displacement_r;
 
 [[vk::binding(4, 0)]]
-WTexture2D<float3> out_ocean_displacement_i;
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> out_ocean_displacement_i;
 
 struct PushConstants {
     float L;
@@ -98,8 +102,8 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     // dont want to do this for our spectrum. So we scale the IFFT input images by TEX_SIZE squared.
 
     const float tex_size2 = TEX_SIZE * TEX_SIZE;
-    out_ocean_height_and_slope_r.Store(uuv, float3(h_tilde_c.x, slope_x.x, slope_z.x) * tex_size2 / push_constant.L);
-    out_ocean_height_and_slope_i.Store(uuv, float3(h_tilde_c.y, slope_x.y, slope_z.y) * tex_size2 / push_constant.L);
-    out_ocean_displacement_r.Store(uuv, float3(displacement_x.x, displacement_z.x, 0.0) * tex_size2 / push_constant.L);
-    out_ocean_displacement_i.Store(uuv, float3(displacement_x.y, displacement_z.y, 0.0) * tex_size2 / push_constant.L);
+    out_ocean_height_and_slope_r.Store(uuv, float4(h_tilde_c.x, slope_x.x, slope_z.x, 0.0) * tex_size2 / push_constant.L);
+    out_ocean_height_and_slope_i.Store(uuv, float4(h_tilde_c.y, slope_x.y, slope_z.y, 0.0) * tex_size2 / push_constant.L);
+    out_ocean_displacement_r.Store(uuv, float4(displacement_x.x, displacement_z.x, 0.0, 0.0) * tex_size2 / push_constant.L);
+    out_ocean_displacement_i.Store(uuv, float4(displacement_x.y, displacement_z.y, 0.0, 0.0) * tex_size2 / push_constant.L);
 }

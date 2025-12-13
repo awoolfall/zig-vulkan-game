@@ -30,13 +30,22 @@
 #define LENGTH 8
 #endif
 
-Texture2D<float3> TextureSourceR  : register(t0);
-Texture2D<float3> TextureSourceI  : register(t1);
+[[vk::binding(0, 0)]]
+Texture2D<float4> TextureSourceR : register(t0);
 
-RWTexture2D<float3> TextureTargetR  : register(u0);
-RWTexture2D<float3> TextureTargetI  : register(u1);
+[[vk::binding(1, 0)]]
+Texture2D<float4> TextureSourceI  : register(t1);
+
+[[vk::binding(2, 0)]]
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> TextureTargetR : register(u0);
+
+[[vk::binding(3, 0)]]
+[[vk::image_format("rgba32f")]]
+WTexture2D<float4> TextureTargetI  : register(u1);
 
 #ifdef BUTTERFLY_LUT
+[[vk::binding(4, 0)]]
 Texture2D<float4> TextureButterfly : register(t2);
 #endif
 
@@ -116,12 +125,12 @@ void ButterflySLM(uint3 position : SV_DispatchThreadID)
 #endif
 
 	// Load entire row or column into scratch array
-	pingPongArray[0][position.x].xyz = TextureSourceR[texturePos];
+	pingPongArray[0][position.x].xyz = TextureSourceR[texturePos].rgb;
 #if defined(ROWPASS) && !defined(TRANSFORM_INVERSE)
 	// don't load values from the imaginary texture when loading the original texture
 	pingPongArray[1][position.x].xyz = 0;
 #else
-	pingPongArray[1][position.x].xyz = TextureSourceI[texturePos];
+	pingPongArray[1][position.x].xyz = TextureSourceI[texturePos].rgb;
 #endif
 	
 	uint4 textureIndices = uint4(0, 1, 2, 3);
@@ -137,12 +146,17 @@ void ButterflySLM(uint3 position : SV_DispatchThreadID)
 	// Final butterfly will write directly to the target texture
 	GroupMemoryBarrierWithGroupSync();
 
+    float3 out_result_r;
+    float3 out_result_i;
+
 	// The final pass writes to the output UAV texture
 #if defined(COLPASS) && defined(TRANSFORM_INVERSE)
-	// last pass of the inverse transform. The imaginary value is no longer needed
-	ButterflyPassFinalNoI(BUTTERFLY_COUNT - 1, position.x, textureIndices.x, textureIndices.y, TextureTargetR[texturePos]);
+    // last pass of the inverse transform. The imaginary value is no longer needed
+    ButterflyPassFinalNoI(BUTTERFLY_COUNT - 1, position.x, textureIndices.x, textureIndices.y, out_result_r);
 #else
-	ButterflyPass(BUTTERFLY_COUNT - 1, position.x, textureIndices.x, textureIndices.y, TextureTargetR[texturePos], TextureTargetI[texturePos]);
+    ButterflyPass(BUTTERFLY_COUNT - 1, position.x, textureIndices.x, textureIndices.y, out_result_r, out_result_i);
 #endif
 
+    TextureTargetR.Store(texturePos, float4(out_result_r, 0.0));
+    TextureTargetI.Store(texturePos, float4(out_result_i, 0.0));
 }

@@ -99,6 +99,8 @@ vs_out vs_main(vs_in input)
     float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(output.tex_coord, 0.0), mip_level).r;
     output.world_position.y = height * push_constant.terrain_height_m * push_constant.terrain_height_scale;
 
+    output.world_position.y += push_constant.origin.y;
+
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
     float c = mip_level / 7.0;
@@ -137,8 +139,8 @@ ps_out ps_main(vs_out input)
     }
 
     ps_out output = (ps_out) 0;
-    output.colour = clamp(abs(float4(input.colour.rgb, 1.0) - 0.2), 0.0, 1.0);
-    output.colour = float4(1.0, 1.0, 1.0, 1.0) * 0.04;
+    //output.colour = clamp(abs(float4(input.colour.rgb, 1.0) - 0.2), 0.0, 1.0);
+    //output.colour = float4(1.0, 1.0, 1.0, 1.0) * 0.04;
 
     float3 view_dir = normalize(push_constant.camera_pos.xyz - input.world_position.xyz);
     float roughness = 0.9;
@@ -170,16 +172,7 @@ ps_out ps_main(vs_out input)
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = lights_data[0].lights[i];
-
-        float3 light_diffuse = calculate_light_diffuse(
-                light,
-                view_dir,
-                input.world_position.xyz,
-                normal,
-                roughness
-                );
-
-        output.colour.rgb += light_diffuse * diffuse_colour.rgb;
+        output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_position.xyz, normal, 0.0, 0.9);
     }
     //output.colour = float4(normal.rgb, 1.0);
 
@@ -194,10 +187,11 @@ ps_out ps_main(vs_out input)
     // }
 
     float fog_distance = (0.3 / input.position.w);
-    float fog_end = 100.0;
+    float fog_end = 300.0;
     float fog_begin = 10.0;
     float fog_amount = 1.0 - clamp((fog_end - fog_distance) / (fog_end - fog_begin), 0.0, 1.0);
-    output.colour = lerp(output.colour, float4(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0, 2.2) * 1/2.2, fog_amount);
+    float3 fog_colour = pow(float3(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0), 2.2);
+    output.colour = lerp(output.colour, float4(fog_colour, 1.0), fog_amount);
 
     output.tex_coord = input.tex_coord;
     //output.colour.rgb = input.colour.rgb;
