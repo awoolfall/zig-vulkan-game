@@ -11,14 +11,20 @@ const Self = @This();
 
 const N = 512;
 const fN: comptime_float = @floatFromInt(N);
-const MAP_LENGTH_M = 51.2;
+const MAP_LENGTH_M = fN / 2.0;
 const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 
 const ShaderPath = "../../src/ocean/ocean_render.slang";
 const CLIPMAP_QUAD_COUNT = 512;
 
+const H0PushConstantData = extern struct {
+    map_length_m: f32,
+    amplitude: f32,
+    wind: [2]f32,
+};
+
 const SpectrumPushConstantData = extern struct {
-    L: f32,
+    map_length_m: f32,
     time: f32,
 };
 
@@ -34,6 +40,9 @@ const RenderPushConstantData = extern struct {
 };
 
 clipmap_mesh: ClipmapMesh,
+
+gaussian_random_image: gfx.Image.Ref,
+gaussian_random_view: gfx.ImageView.Ref,
 
 h0_tilde_image: gfx.Image.Ref,
 h0_tilde_view: gfx.ImageView.Ref,
@@ -59,6 +68,12 @@ fft_descriptor_sets_d: [2]gfx.DescriptorSet.Ref,
 fft_horizontal_pipeline: gfx.ComputePipeline.Ref,
 fft_vertical_pipeline: gfx.ComputePipeline.Ref,
 
+h0_descriptor_layout: gfx.DescriptorLayout.Ref,
+h0_descriptor_pool: gfx.DescriptorPool.Ref,
+h0_descriptor_set: gfx.DescriptorSet.Ref,
+
+h0_pipeline: gfx.ComputePipeline.Ref,
+
 spectrum_descriptor_layout: gfx.DescriptorLayout.Ref,
 spectrum_descriptor_pool: gfx.DescriptorPool.Ref,
 spectrum_descriptor_set: gfx.DescriptorSet.Ref,
@@ -80,6 +95,9 @@ render_shader_file_watcher: FileWatcher,
 
 pub fn deinit(self: *Self) void {
     self.clipmap_mesh.deinit();
+
+    self.gaussian_random_view.deinit();
+    self.gaussian_random_image.deinit();
 
     self.h0_tilde_view.deinit();
     self.h0_tilde_image.deinit();
@@ -112,6 +130,12 @@ pub fn deinit(self: *Self) void {
     self.fft_descriptor_pool.deinit();
     self.fft_descriptor_layout.deinit();
 
+    self.h0_pipeline.deinit();
+
+    self.h0_descriptor_set.deinit();
+    self.h0_descriptor_pool.deinit();
+    self.h0_descriptor_layout.deinit();
+
     self.spectrum_pipeline.deinit();
 
     self.spectrum_descriptor_set.deinit();
@@ -138,11 +162,11 @@ pub fn init() !Self {
     const clipmap_mesh = try ClipmapMesh.init(alloc, Self.CLIPMAP_QUAD_COUNT);
     errdefer clipmap_mesh.deinit();
 
-    // h0 tilde
-    const h0_tilde_buffer = try generate_h0tilde_cpu(alloc, N, Self.MAP_LENGTH_M);
-    defer alloc.free(h0_tilde_buffer);
+    // gaussian random image
+    const random_buffer = try generate_gaussian_random_image_data(alloc, N);
+    defer alloc.free(random_buffer);
 
-    const h0_tilde_image = try gfx.Image.init(
+    const gaussian_random_image = try gfx.Image.init(
         .{
             .format = .Rg32_Float,
             .width = N,
@@ -151,7 +175,27 @@ pub fn init() !Self {
             .usage_flags = .{ .ShaderResource = true, },
             .access_flags = .{},
         },
-        std.mem.sliceAsBytes(h0_tilde_buffer[0..])
+        std.mem.sliceAsBytes(random_buffer[0..])
+    );
+    errdefer gaussian_random_image.deinit();
+
+    const gaussian_random_image_view = try gfx.ImageView.init(.{
+        .image = gaussian_random_image,
+        .view_type = .ImageView2D,
+    });
+    errdefer gaussian_random_image_view.deinit();
+
+    // h0 tilde
+    const h0_tilde_image = try gfx.Image.init(
+        .{
+            .format = .Rg32_Float,
+            .width = N,
+            .height = N,
+            .dst_layout = .ShaderReadOnlyOptimal,
+            .usage_flags = .{ .ShaderResource = true, .StorageResource = true, },
+            .access_flags = .{ .GpuWrite = true, },
+        },
+        null
     );
     errdefer h0_tilde_image.deinit();
 
@@ -160,6 +204,74 @@ pub fn init() !Self {
         .view_type = .ImageView2D,
     });
     errdefer h0_tilde_image_view.deinit();
+
+    // h0 descritpors
+    const h0_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .StorageImage,
+            },
+        },
+    });
+    errdefer h0_descriptor_layout.deinit();
+
+    const h0_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = h0_descriptor_layout },
+        .max_sets = 1,
+    });
+    errdefer h0_descriptor_pool.deinit();
+
+    const h0_descriptor_set = try (try h0_descriptor_pool.get()).allocate_set(.{ .layout = h0_descriptor_layout });
+    errdefer h0_descriptor_set.deinit();
+
+    try (try h0_descriptor_set.get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = gaussian_random_image_view }, },
+            .{ .binding = 1, .data = .{ .StorageImage = h0_tilde_image_view }, },
+        },
+    });
+
+    // h0 pipeline
+    const h0_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("ocean_h0.slang"),
+        .shader_entry_points = &.{
+            "cs_main",
+        },
+        .preprocessor_macros = &.{
+            .{ "TEX_SIZE", std.fmt.comptimePrint("{d}", .{Self.N}) },
+        },
+    });
+    defer alloc.free(h0_spirv);
+
+    const h0_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = h0_spirv,
+    });
+    defer h0_shader_module.deinit();
+
+    const h0_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = &h0_shader_module,
+            .entry_point = "cs_main",
+        },
+        .descriptor_set_layouts = &.{
+            h0_descriptor_layout,
+        },
+        .push_constants = &.{
+            gfx.PushConstantLayoutInfo {
+                .shader_stages = .{ .Compute = true },
+                .offset = 0,
+                .size = @sizeOf(H0PushConstantData),
+            }
+        }
+    });
+    errdefer h0_pipeline.deinit();
 
     // spectrum images
     const height_and_slope_image, const height_and_slope_views = try init_fft_rw_image_and_view(N);
@@ -546,6 +658,9 @@ pub fn init() !Self {
     var self = Self {
         .clipmap_mesh = clipmap_mesh,
 
+        .gaussian_random_image = gaussian_random_image,
+        .gaussian_random_view = gaussian_random_image_view,
+
         .h0_tilde_image = h0_tilde_image,
         .h0_tilde_view = h0_tilde_image_view,
 
@@ -570,6 +685,12 @@ pub fn init() !Self {
         .fft_horizontal_pipeline = fft_horizontal_pipeline,
         .fft_vertical_pipeline = fft_vertical_pipeline,
 
+        .h0_descriptor_layout = h0_descriptor_layout,
+        .h0_descriptor_pool = h0_descriptor_pool,
+        .h0_descriptor_set = h0_descriptor_set,
+
+        .h0_pipeline = h0_pipeline,
+
         .spectrum_descriptor_layout = spectrum_descriptor_layout,
         .spectrum_descriptor_pool = spectrum_descriptor_pool,
         .spectrum_descriptor_set = spectrum_descriptor_set,
@@ -592,6 +713,29 @@ pub fn init() !Self {
 
     self.render_pipeline = try self.create_pipeline();
     errdefer self.render_pipeline.deinit();
+
+    // fill initial h0 image
+    {
+        var pool = try gfx.CommandPool.init(.{ .queue_family = .Compute });
+        defer pool.deinit();
+
+        var cmd = try (try pool.get()).allocate_command_buffer(.{});
+        defer cmd.deinit();
+
+        try cmd.cmd_begin(.{ .one_time_submit = true, });
+        self.recreate_h0_image(&cmd, 0.15, .{ 15.0, 0.0 });
+        try cmd.cmd_end();
+
+        var fence = try gfx.Fence.init(.{});
+        defer fence.deinit();
+
+        try gfx.GfxState.get().submit_command_buffer(.{
+            .command_buffers = &.{ &cmd },
+            .fence = fence,
+        });
+
+        try fence.wait();
+    }
 
     return self;
 }
@@ -707,6 +851,57 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     return pipeline;
 }
 
+pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, amplitude: f32, wind: [2]f32) void {
+    // transition h0 from shader reading to compute destination
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.h0_tilde_image,
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .shader_write = true, },
+            },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .compute_shader = true, },
+    });
+
+    // dispatch h0 image generation
+    cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.h0_descriptor_set,
+        },
+    });
+    const h0_push_constant_data = H0PushConstantData {
+        .map_length_m = Self.MAP_LENGTH_M,
+        .amplitude = amplitude,
+        .wind = wind,
+    };
+    cmd.cmd_push_constants(.{
+        .offset = 0,
+        .shader_stages = .{ .Compute = true, },
+        .data = @ptrCast(&h0_push_constant_data),
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+
+    // transition h0 to shader reading from compute destination
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = self.h0_tilde_image,
+                .old_layout = .General,
+                .new_layout = .ShaderReadOnlyOptimal,
+                .src_access_mask = .{ .shader_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+            },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .compute_shader = true, },
+    });
+}
+
 pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     // transition spectrum images from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
@@ -738,7 +933,7 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         },
     });
     const spectrum_push_constant_data = SpectrumPushConstantData {
-        .L = fN,
+        .map_length_m = Self.MAP_LENGTH_M,
         .time = @floatCast(eng.get().time.time_since_start_of_app()),
     };
     cmd.cmd_push_constants(.{
@@ -975,58 +1170,19 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
     }
 }
 
-fn generate_h0tilde_cpu(alloc: std.mem.Allocator, image_side_length: usize, spectrum_length_m: f32) ![][2]f32 {
-    const h0_tilde_buffer = try alloc.alloc([2]f32, image_side_length * image_side_length);
-    errdefer alloc.free(h0_tilde_buffer);
+fn generate_gaussian_random_image_data(alloc: std.mem.Allocator, comptime image_side_length: comptime_int) ![][2]f32 {
+    const buffer = try alloc.alloc([2]f32, image_side_length * image_side_length);
+    errdefer alloc.free(buffer);
 
     var default_prng = std.Random.DefaultPrng.init(@truncate(@as(u128, @intCast(std.time.nanoTimestamp()))));
     var rand = default_prng.random();
 
     for (0..image_side_length) |i| {
         for (0..image_side_length) |j| {
-            const n = alias(@intCast(i), @intCast(image_side_length));// @as(isize, @intCast(i)) - @divTrunc(Self.N, 2);
-            const m = alias(@intCast(j), @intCast(image_side_length));// @as(isize, @intCast(j)) - @divTrunc(Self.N, 2);
-
-            const k = calc_k(@floatFromInt(n), @floatFromInt(m), spectrum_length_m, spectrum_length_m);
-            const h0_tilde_t = h0_tilde(&rand, 0.15, zm.f32x4(31.0, 0.0, 0.0, 0.0), k);
-
-            h0_tilde_buffer[i * image_side_length + j][0] = h0_tilde_t[0];
-            h0_tilde_buffer[i * image_side_length + j][1] = h0_tilde_t[1];
+            buffer[i * image_side_length + j][0] = rand.floatNorm(f32);
+            buffer[i * image_side_length + j][1] = rand.floatNorm(f32);
         }
     }
 
-    return h0_tilde_buffer;
-}
-
-inline fn alias(x: isize, N_: isize) isize {
-    if (x > @divTrunc(N_, 2)) {
-        return x - N_;
-    } else {
-        return x;
-    }
-}
-
-fn calc_k(n: f32, m: f32, Lx: f32, Lz: f32) zm.F32x4 {
-    const kx = 2.0 * std.math.pi * n / Lx;
-    const kz = 2.0 * std.math.pi * m / Lz;
-    return zm.f32x4(kx, kz, 0.0, 0.0);
-}
-
-fn h0_tilde(rand: *std.Random, amplitude: f32, wind: zm.F32x4, k: zm.F32x4) zm.F32x4 {
-    const phillips_k = phillips(amplitude, wind, k);
-    const gaussian_random = zm.f32x4(rand.floatNorm(f32), rand.floatNorm(f32), 0.0, 0.0);
-    return gaussian_random * zm.f32x4s(std.math.sqrt(phillips_k / 2.0));
-}
-
-fn phillips(amplitude: f32, wind_speed: zm.F32x4, k: zm.F32x4) f32 {
-    const w = wind_speed;
-
-    const v = zm.length2(w)[0];
-    const L_ = (v * v) / 9.81;
-    const k_length = zm.length2(k)[0];
-    if (k_length < 0.0001) { return 0.0; }
-    const cosine_factor = std.math.pow(f32, @abs(zm.dot2(zm.normalize2(k), zm.normalize2(w))[0]), 2);
-    const l = Self.MAP_LENGTH_M / (Self.fN * 2.0); // suppress waves below half the smallest facet size
-    const suppress_small_waves = @exp(-1.0 * (k_length * k_length) * (l * l));
-    return (amplitude / (std.math.pow(f32, k_length, 4))) * @exp(-1.0 / std.math.pow(f32, (k_length * L_), 2)) * cosine_factor * suppress_small_waves;
+    return buffer;
 }
