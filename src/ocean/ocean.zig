@@ -28,6 +28,10 @@ const SpectrumPushConstantData = extern struct {
     time: f32,
 };
 
+const JacobianPushConstantData = extern struct {
+    map_length_m: f32,
+};
+
 const RenderPushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
     camera_position: zm.F32x4,
@@ -47,14 +51,14 @@ gaussian_random_view: gfx.ImageView.Ref,
 h0_tilde_image: gfx.Image.Ref,
 h0_tilde_view: gfx.ImageView.Ref,
 
-height_and_slope_image: gfx.Image.Ref,
-height_and_slope_views: [2]gfx.ImageView.Ref,
-
 displacement_image: gfx.Image.Ref,
 displacement_views: [2]gfx.ImageView.Ref,
 
-fft_processing_hs_image: gfx.Image.Ref,
-fft_processing_hs_views: [2]gfx.ImageView.Ref,
+slope_jacobian_image: gfx.Image.Ref,
+slope_jacobian_views: [2]gfx.ImageView.Ref,
+
+fft_processing_sj_image: gfx.Image.Ref,
+fft_processing_sj_views: [2]gfx.ImageView.Ref,
 
 fft_processing_d_image: gfx.Image.Ref,
 fft_processing_d_views: [2]gfx.ImageView.Ref,
@@ -80,6 +84,12 @@ spectrum_descriptor_set: gfx.DescriptorSet.Ref,
 
 spectrum_pipeline: gfx.ComputePipeline.Ref,
 
+jacobian_descriptor_layout: gfx.DescriptorLayout.Ref,
+jacobian_descriptor_pool: gfx.DescriptorPool.Ref,
+jacobian_descriptor_set: gfx.DescriptorSet.Ref,
+
+jacobian_pipeline: gfx.ComputePipeline.Ref,
+
 render_lights_buffer: gfx.Buffer.Ref,
 
 render_descriptor_layout: gfx.DescriptorLayout.Ref,
@@ -102,17 +112,17 @@ pub fn deinit(self: *Self) void {
     self.h0_tilde_view.deinit();
     self.h0_tilde_image.deinit();
 
-    self.height_and_slope_views[0].deinit();
-    self.height_and_slope_views[1].deinit();
-    self.height_and_slope_image.deinit();
+    self.slope_jacobian_views[0].deinit();
+    self.slope_jacobian_views[1].deinit();
+    self.slope_jacobian_image.deinit();
 
     self.displacement_views[0].deinit();
     self.displacement_views[1].deinit();
     self.displacement_image.deinit();
 
-    self.fft_processing_hs_views[0].deinit();
-    self.fft_processing_hs_views[1].deinit();
-    self.fft_processing_hs_image.deinit();
+    self.fft_processing_sj_views[0].deinit();
+    self.fft_processing_sj_views[1].deinit();
+    self.fft_processing_sj_image.deinit();
 
     self.fft_processing_d_views[0].deinit();
     self.fft_processing_d_views[1].deinit();
@@ -141,7 +151,13 @@ pub fn deinit(self: *Self) void {
     self.spectrum_descriptor_set.deinit();
     self.spectrum_descriptor_pool.deinit();
     self.spectrum_descriptor_layout.deinit();
-    
+
+    self.jacobian_pipeline.deinit();
+
+    self.jacobian_descriptor_set.deinit();
+    self.jacobian_descriptor_pool.deinit();
+    self.jacobian_descriptor_layout.deinit();
+        
     self.render_descriptor_set.deinit();
     self.render_descriptor_pool.deinit();
     self.render_descriptor_layout.deinit();
@@ -274,21 +290,21 @@ pub fn init() !Self {
     errdefer h0_pipeline.deinit();
 
     // spectrum images
-    const height_and_slope_image, const height_and_slope_views = try init_fft_rw_image_and_view(N);
-    errdefer height_and_slope_image.deinit();
-    errdefer height_and_slope_views[0].deinit();
-    errdefer height_and_slope_views[1].deinit();
-
     const displacement_image, const displacement_views = try init_fft_rw_image_and_view(N);
     errdefer displacement_image.deinit();
     errdefer displacement_views[0].deinit();
     errdefer displacement_views[1].deinit();
 
+    const slope_jacobian_image, const slope_jacobian_views = try init_fft_rw_image_and_view(N);
+    errdefer slope_jacobian_image.deinit();
+    errdefer slope_jacobian_views[0].deinit();
+    errdefer slope_jacobian_views[1].deinit();
+
     // fft processing images
-    const fft_processing_hs_image, const fft_processing_hs_views = try init_fft_rw_image_and_view(N);
-    errdefer fft_processing_hs_image.deinit();
-    errdefer fft_processing_hs_views[0].deinit();
-    errdefer fft_processing_hs_views[1].deinit();
+    const fft_processing_sj_image, const fft_processing_sj_views = try init_fft_rw_image_and_view(N);
+    errdefer fft_processing_sj_image.deinit();
+    errdefer fft_processing_sj_views[0].deinit();
+    errdefer fft_processing_sj_views[1].deinit();
 
     const fft_processing_d_image, const fft_processing_d_views = try init_fft_rw_image_and_view(N);
     errdefer fft_processing_d_image.deinit();
@@ -325,29 +341,29 @@ pub fn init() !Self {
     const fft_descriptor_pool = try gfx.DescriptorPool.init(.{ .strategy = .{ .Layout = fft_descriptor_layout }, .max_sets = 4, });
     errdefer fft_descriptor_pool.deinit();
 
-    var fft_descriptor_sets_height_and_slope: [2]gfx.DescriptorSet.Ref = undefined;
+    var fft_descriptor_sets_slope_jacobian: [2]gfx.DescriptorSet.Ref = undefined;
 
-    fft_descriptor_sets_height_and_slope[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_height_and_slope[0].deinit();
+    fft_descriptor_sets_slope_jacobian[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_slope_jacobian[0].deinit();
 
-    fft_descriptor_sets_height_and_slope[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_height_and_slope[1].deinit();
+    fft_descriptor_sets_slope_jacobian[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+    errdefer fft_descriptor_sets_slope_jacobian[1].deinit();
 
-    try (try fft_descriptor_sets_height_and_slope[0].get()).update(.{
+    try (try fft_descriptor_sets_slope_jacobian[0].get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = height_and_slope_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = height_and_slope_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_hs_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_hs_views[1] } },
+            .{ .binding = 0, .data = .{ .ImageView = slope_jacobian_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = slope_jacobian_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_sj_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_sj_views[1] } },
         },
     });
 
-    try (try fft_descriptor_sets_height_and_slope[1].get()).update(.{
+    try (try fft_descriptor_sets_slope_jacobian[1].get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = fft_processing_hs_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = fft_processing_hs_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = height_and_slope_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = height_and_slope_views[1] } },
+            .{ .binding = 0, .data = .{ .ImageView = fft_processing_sj_views[0] } },
+            .{ .binding = 1, .data = .{ .ImageView = fft_processing_sj_views[1] } },
+            .{ .binding = 2, .data = .{ .StorageImage = slope_jacobian_views[0] } },
+            .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views[1] } },
         },
     });
 
@@ -482,10 +498,10 @@ pub fn init() !Self {
     try (try spectrum_descriptor_set.get()).update(.{
         .writes = &.{
             .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_view }, },
-            .{ .binding = 1, .data = .{ .StorageImage = height_and_slope_views[0] }, },
-            .{ .binding = 2, .data = .{ .StorageImage = height_and_slope_views[1] }, },
-            .{ .binding = 3, .data = .{ .StorageImage = displacement_views[0] }, },
-            .{ .binding = 4, .data = .{ .StorageImage = displacement_views[1] }, },
+            .{ .binding = 1, .data = .{ .StorageImage = displacement_views[0] }, },
+            .{ .binding = 2, .data = .{ .StorageImage = displacement_views[1] }, },
+            .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views[0] }, },
+            .{ .binding = 4, .data = .{ .StorageImage = slope_jacobian_views[1] }, },
         },
     });
 
@@ -524,6 +540,74 @@ pub fn init() !Self {
     });
     errdefer spectrum_pipeline.deinit();
 
+    // jacobian descritpors
+    const jacobian_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .StorageImage,
+            },
+        },
+    });
+    errdefer jacobian_descriptor_layout.deinit();
+
+    const jacobian_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = jacobian_descriptor_layout },
+        .max_sets = 1,
+    });
+    errdefer spectrum_descriptor_pool.deinit();
+
+    const jacobian_descriptor_set = try (try jacobian_descriptor_pool.get()).allocate_set(.{ .layout = jacobian_descriptor_layout });
+    errdefer jacobian_descriptor_set.deinit();
+
+    try (try jacobian_descriptor_set.get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .ImageView = displacement_views[0] }, },
+            .{ .binding = 1, .data = .{ .StorageImage = slope_jacobian_views[0] }, },
+        },
+    });
+
+    // jacobian pipeline
+    const jacobian_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("ocean_jacobian.slang"),
+        .shader_entry_points = &.{
+            "cs_main",
+        },
+        .preprocessor_macros = &.{
+            .{ "TEX_SIZE", std.fmt.comptimePrint("{d}", .{Self.N}) },
+        },
+    });
+    defer alloc.free(jacobian_spirv);
+
+    const jacobian_shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = jacobian_spirv,
+    });
+    defer jacobian_shader_module.deinit();
+
+    const jacobian_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = &jacobian_shader_module,
+            .entry_point = "cs_main",
+        },
+        .descriptor_set_layouts = &.{
+            jacobian_descriptor_layout,
+        },
+        .push_constants = &.{
+            gfx.PushConstantLayoutInfo {
+                .shader_stages = .{ .Compute = true },
+                .offset = 0,
+                .size = @sizeOf(JacobianPushConstantData),
+            }
+        }
+    });
+    errdefer jacobian_pipeline.deinit();
+
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
@@ -533,12 +617,12 @@ pub fn init() !Self {
                 .binding_type = .UniformBuffer,
             },
             gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Vertex = true, },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
             gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Pixel = true, },
                 .binding = 2,
                 .binding_type = .ImageView,
             },
@@ -584,11 +668,11 @@ pub fn init() !Self {
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 1,
-                .data = .{ .ImageView = height_and_slope_views[0] },
+                .data = .{ .ImageView = displacement_views[0] },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 2,
-                .data = .{ .ImageView = displacement_views[0] },
+                .data = .{ .ImageView = slope_jacobian_views[0] },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 3,
@@ -664,14 +748,14 @@ pub fn init() !Self {
         .h0_tilde_image = h0_tilde_image,
         .h0_tilde_view = h0_tilde_image_view,
 
-        .height_and_slope_image = height_and_slope_image,
-        .height_and_slope_views = height_and_slope_views,
+        .slope_jacobian_image = slope_jacobian_image,
+        .slope_jacobian_views = slope_jacobian_views,
         
         .displacement_image = displacement_image,
         .displacement_views = displacement_views,
 
-        .fft_processing_hs_image = fft_processing_hs_image,
-        .fft_processing_hs_views = fft_processing_hs_views,
+        .fft_processing_sj_image = fft_processing_sj_image,
+        .fft_processing_sj_views = fft_processing_sj_views,
 
         .fft_processing_d_image = fft_processing_d_image,
         .fft_processing_d_views = fft_processing_d_views,
@@ -679,7 +763,7 @@ pub fn init() !Self {
         .fft_descriptor_layout = fft_descriptor_layout,
         .fft_descriptor_pool = fft_descriptor_pool,
 
-        .fft_descriptor_sets_hs = fft_descriptor_sets_height_and_slope,
+        .fft_descriptor_sets_hs = fft_descriptor_sets_slope_jacobian,
         .fft_descriptor_sets_d = fft_descriptor_sets_displacement,
 
         .fft_horizontal_pipeline = fft_horizontal_pipeline,
@@ -696,6 +780,12 @@ pub fn init() !Self {
         .spectrum_descriptor_set = spectrum_descriptor_set,
 
         .spectrum_pipeline = spectrum_pipeline,
+
+        .jacobian_descriptor_layout = jacobian_descriptor_layout,
+        .jacobian_descriptor_pool = jacobian_descriptor_pool,
+        .jacobian_descriptor_set = jacobian_descriptor_set,
+
+        .jacobian_pipeline = jacobian_pipeline,
 
         .render_descriptor_layout = render_descriptor_layout,
         .render_descriptor_pool = render_descriptor_pool,
@@ -907,14 +997,14 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.height_and_slope_image,
+                .image = self.displacement_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
                 .src_access_mask = .{ .shader_read = true, },
                 .dst_access_mask = .{ .shader_write = true, },
             },
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.displacement_image,
+                .image = self.slope_jacobian_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
                 .src_access_mask = .{ .shader_read = true, },
@@ -947,14 +1037,14 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.height_and_slope_image,
+                .image = self.slope_jacobian_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .shader_write = true, },
                 .dst_access_mask = .{ .shader_read = true, },
             },
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.fft_processing_hs_image,
+                .image = self.fft_processing_sj_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
                 .src_access_mask = .{ .shader_read = true, },
@@ -999,14 +1089,14 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.height_and_slope_image,
+                .image = self.slope_jacobian_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
                 .src_access_mask = .{ .shader_read = true, },
                 .dst_access_mask = .{ .shader_write = true, },
             },
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.fft_processing_hs_image,
+                .image = self.fft_processing_sj_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .shader_write = true, },
@@ -1047,18 +1137,43 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     });
     cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
 
-    // finally transition height/slope and displacement images ready for shader reading
+    // transition displacement image ready for shader reading
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.height_and_slope_image,
+                .image = self.displacement_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .shader_write = true, },
                 .dst_access_mask = .{ .shader_read = true, },
             },
+        },
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
+    });
+
+    // dispatch jacobian image generation
+    cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{
+        .descriptor_sets = &.{
+            self.jacobian_descriptor_set,
+        },
+    });
+    const jacobian_push_constant_data = JacobianPushConstantData {
+        .map_length_m = Self.MAP_LENGTH_M,
+    };
+    cmd.cmd_push_constants(.{
+        .shader_stages = .{ .Compute = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&jacobian_push_constant_data),
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+
+    // finally transition slope_jacobian image ready for shader reading
+    cmd.cmd_pipeline_barrier(.{
+        .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.displacement_image,
+                .image = self.slope_jacobian_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .shader_write = true, },

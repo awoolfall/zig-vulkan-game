@@ -37,10 +37,10 @@ struct LightsData
 ConstantBuffer<LightsData[16 * 16]> lights_data : register(b0);
 
 [[vk::binding(1, 0)]]
-Texture2D heightmap_slope_texture;
+Texture2D displacement_texture;
 
 [[vk::binding(2, 0)]]
-Texture2D displacement_texture;
+Texture2D slope_jacobian_texture;
 
 [[vk::binding(3, 0)]]
 SamplerState diffuse_sampler;
@@ -82,15 +82,14 @@ vs_out vs_main(vs_in input)
 
     const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
 
-    float height = heightmap_slope_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).r;
-    output.world_position.y = -5.0 + height * push_constant.map_height_scale;
-
-    float2 displacement = displacement_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).rg;
-    output.world_position.xz -= displacement;
+    float3 displacement = displacement_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).xyz;
+    
+    output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale;
+    output.world_position.xz -= displacement.xz;
 
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
-    float cc = height;
+    float cc = displacement.y;
     output.colour.rgb = float3(cc, cc, cc);
 
     return output;
@@ -105,72 +104,44 @@ struct ps_out
 ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out) 0;
-    output.colour = clamp(abs(float4(input.colour.rgb, 1.0) - 0.2), 0.0, 1.0);
-    output.colour = float4(1.0, 1.0, 1.0, 1.0) * 0.01;
 
     float3 view_dir = normalize(push_constant.camera_pos.xyz - input.world_position.xyz);
     float roughness = 0.0;
 
     const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
 
-    float3 normal = float3(0.0, 1.0, 0.0);
-    normal.xz = -heightmap_slope_texture.Sample(diffuse_sampler, input.tex_coord).gb;
+    float3 slope_jacobian = slope_jacobian_texture.Sample(diffuse_sampler, input.tex_coord).xyz;
+
+    float3 normal = float3(-slope_jacobian.x, 1.0, -slope_jacobian.z);
     normal = normalize(normal);
 
-    float4 deep_colour = float4(pow(float3(46.0 / 255.0, 157.0 / 255.0, 209.0 / 255.0), 2.2), 1.0);
-    float4 shallow_colour = float4(pow(float3(88.0 / 255.0, 176.0 / 255.0, 218.0 / 255.0), 2.2), 0.8);
-
-    float4 diffuse_colour = float4(0.05, 0.412, 0.58, 1.0);// lerp(deep_colour, shallow_colour, smoothstep(0.0, 4.0, input.colour.r));// float4(0.1, 0.1, 1.0, 1.0);// float4(saturate((input.colour.rgb + 1.0) / 2.0), 1.0);
-
-    //output.colour = float4(normal.rgb, 1.0);
-
-    // output.colour = float4(input.tex_coord, 0.0, 1.0);
-
-    //output.colour.rgb = normal;
-
-    // Foam Jacobian-based convergence mask
-    const float texel = 1.0 / push_constant.spectrum_image_size;
-    //const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size; // metres per texel
-
-    float2 D = displacement_texture.Sample(diffuse_sampler, input.tex_coord).rg; // horizontal displacement in metres
-    float2 Dpx = displacement_texture.Sample(diffuse_sampler, input.tex_coord + float2(texel, 0)).rg;
-    float2 Dmx = displacement_texture.Sample(diffuse_sampler, input.tex_coord - float2(texel, 0)).rg;
-    float2 Dpy = displacement_texture.Sample(diffuse_sampler, input.tex_coord + float2(0, texel)).rg;
-    float2 Dmy = displacement_texture.Sample(diffuse_sampler, input.tex_coord - float2(0, texel)).rg;
-
-    float dx_x = (-Dpx.x + Dmx.x) / (2.0 * facet_size);
-    float dx_z = (-Dpy.x + Dmy.x) / (2.0 * facet_size);
-    float dz_x = (-Dpx.y + Dmx.y) / (2.0 * facet_size);
-    float dz_z = (-Dpy.y + Dmy.y) / (2.0 * facet_size);
-
-    float detJ = (1.0 + dx_x) * (1.0 + dz_z) - dx_z * dz_x;
+    float detJ = slope_jacobian.y;
     float conv = max(0.0, 1.0 - detJ); // positive when compressed/converging
 
-    // Height mask to bias foam to crests
-    float height = heightmap_slope_texture.Sample(diffuse_sampler, input.tex_coord).r;
-
-    // Tunable parameters (can be promoted to push constants later)
+    // Tunable parameters (maybe can be promoted to push constants later)
     const float foam_th0 = 0.25;
     const float foam_th1 = 0.7;
-    const float height_th0 = 0.0;
-    const float height_th1 = 1.0;
     const float foam_strength = 1.5;
 
     float foam_conv = smoothstep(foam_th0, foam_th1, conv);
-    float foam_height = smoothstep(height_th0, height_th1, height);
-    float foam_mask = foam_conv;// * foam_height;
+    float foam_mask = foam_conv;
 
     // Blend white foam additively into the lit colour
+    float4 diffuse_colour = float4(0.05, 0.412, 0.58, 1.0);
     diffuse_colour.rgb = saturate(diffuse_colour.rgb + foam_mask * foam_strength);
 
     float roughnesss = lerp(0.2, 0.8, foam_mask);
 
     // apply lights
+    const float3 ambient_colour = float3(1.0, 1.0, 1.0) * 0.01;
+    output.colour.rgb = ambient_colour;
+    
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = lights_data[0].lights[i];
         output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_position.xyz, normal, 0.5, roughnesss);
     }
 
+    // apply fog
     float fog_distance = (0.3 / input.position.w);
     float fog_end = 300.0;
     float fog_begin = 10.0;
