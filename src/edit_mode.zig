@@ -10,6 +10,7 @@ const pe = @import("particle_editor.zig");
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
+const Ocean = @import("ocean/ocean.zig");
 
 const zm = eng.zmath;
 const sr = eng.serialize;
@@ -32,6 +33,8 @@ render_only_selected_entity: bool = false,
 
 file_dropdown_open: bool = false,
 edit_dropdown_open: bool = false,
+
+edit_ocean_params_open: bool = false,
 
 loaded_scene_name: ?[]u8 = null,
 
@@ -68,7 +71,7 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
     self.loaded_scene_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
 }
 
-pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer) !void {
+pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
     if (!eng.get().imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
 
@@ -150,6 +153,10 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
     const imui = &eng.get().imui;
 
     self.entity_editor_ui(.{self.selected_entity, @src()});
+
+    if (self.edit_ocean_params_open) {
+        ocean_edit_ui(self, imui, ocean, .{@src()});
+    }
 
     try self.top_bar_ui(.{@src()});
 
@@ -303,6 +310,11 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity();
+                }
+
+                const edit_ocean_button = Imui.widgets.badge.create(imui, "Edit Ocean Parameters", key ++ .{@src()});
+                if (edit_ocean_button.clicked) {
+                    self.edit_ocean_params_open = true;
                 }
             }
         }
@@ -948,6 +960,87 @@ fn physics_shape_editor_ui(
     }
 
     imui.pop_layout(); // sl
+}
+
+fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
+    const background_box = imui.push_floating_layout(.Y, 100.0, 100.0, key ++ .{@src()});
+    defer imui.pop_layout();
+
+    const ocean_editor_background_position, _ = imui.get_widget_data([2]f32, background_box) catch unreachable;
+    imui.set_floating_layout_position(background_box, ocean_editor_background_position[0], ocean_editor_background_position[1]);
+
+    if (imui.get_widget(background_box)) |background_widget| {
+        set_background_widget_layout(background_widget);
+    }
+    if (imui.generate_widget_signals(background_box).dragged) {
+        ocean_editor_background_position[0] += eng.get().input.mouse_delta[0];
+        ocean_editor_background_position[1] += eng.get().input.mouse_delta[1];
+    }
+
+    {
+        const title_layout = imui.push_layout(.X, key ++ .{@src()});
+        defer imui.pop_layout();
+        if (imui.get_widget(title_layout)) |tw| {
+            tw.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0 };
+        }
+
+        {
+            const label_layout = imui.push_layout(.X, key ++ .{@src()});
+            defer imui.pop_layout();
+            if (imui.get_widget(label_layout)) |lw| {
+                lw.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+            }
+
+            _ = Imui.widgets.label.create(imui, "Ocean Settings");
+        }
+
+        const close_badge = Imui.widgets.badge.create(imui, "close", key ++ .{@src()});
+        if (close_badge.clicked) {
+            self.edit_ocean_params_open = false;
+        }
+        if (imui.get_widget(close_badge.id.box)) |cw| {
+            cw.semantic_size[0].shrinkable = false;
+        }
+    }
+
+    var ocean_settings = ocean.current_settings;
+
+    {
+        const form_layout = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+        if (imui.get_widget(form_layout)) |fw| {
+            fw.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0 };
+            fw.children_gap = 5.0;
+        }
+
+        create_form_number_slider("amplitude:", &ocean_settings.amplitude, key ++ .{@src()});
+        create_form_number_slider("wind_x:", &ocean_settings.wind[0], key ++ .{@src()});
+        create_form_number_slider("wind_z:", &ocean_settings.wind[1], key ++ .{@src()});
+    }
+
+    if (!std.mem.eql(u8, @ptrCast(&ocean_settings), @ptrCast(&ocean.current_settings))) (blk: {
+        var pool = gfx.CommandPool.init(.{ .queue_family = .Compute }) catch |err| break :blk err;
+        defer pool.deinit();
+
+        var cmd = (pool.get() catch |err| break :blk err).allocate_command_buffer(.{}) catch |err| break :blk err;
+        defer cmd.deinit();
+
+        cmd.cmd_begin(.{ .one_time_submit = true, }) catch |err| break :blk err;
+        ocean.recreate_h0_image(&cmd, ocean_settings);
+        cmd.cmd_end() catch |err| break :blk err;
+
+        var fence = gfx.Fence.init(.{}) catch |err| break :blk err;
+        defer fence.deinit();
+
+        gfx.GfxState.get().submit_command_buffer(.{
+            .command_buffers = &.{ &cmd },
+            .fence = fence,
+        }) catch |err| break :blk err;
+
+        fence.wait() catch |err| break :blk err;
+    }) catch |err| {
+        std.log.warn("Unable to update ocean parameters: {}", .{err});
+    };
 }
 
 fn create_form_number_slider(

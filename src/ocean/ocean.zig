@@ -54,6 +54,13 @@ const ShallowSpot = extern struct {
     _pad: [2]f32 = .{0.0, 0.0},
 };
 
+pub const OceanSettings = struct {
+    amplitude: f32,
+    wind: [2]f32,
+};
+
+current_settings: OceanSettings,
+
 clipmap_mesh: ClipmapMesh,
 
 gaussian_random_image: gfx.Image.Ref,
@@ -778,6 +785,8 @@ pub fn init() !Self {
     errdefer shader_file_watcher.deinit();
 
     var self = Self {
+        .current_settings = undefined,
+        
         .clipmap_mesh = clipmap_mesh,
 
         .gaussian_random_image = gaussian_random_image,
@@ -854,7 +863,7 @@ pub fn init() !Self {
         defer cmd.deinit();
 
         try cmd.cmd_begin(.{ .one_time_submit = true, });
-        self.recreate_h0_image(&cmd, 0.15, .{ 15.0, 0.0 });
+        self.recreate_h0_image(&cmd, .{ .amplitude = 0.15, .wind = .{ 15.0, 0.0 } });
         try cmd.cmd_end();
 
         var fence = try gfx.Fence.init(.{});
@@ -982,7 +991,7 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     return pipeline;
 }
 
-pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, amplitude: f32, wind: [2]f32) void {
+pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSettings) void {
     // transition h0 from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
@@ -1007,8 +1016,8 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, amplitude: f32, w
     });
     const h0_push_constant_data = H0PushConstantData {
         .map_length_m = Self.MAP_LENGTH_M,
-        .amplitude = amplitude,
-        .wind = wind,
+        .amplitude = settings.amplitude,
+        .wind = settings.wind,
     };
     cmd.cmd_push_constants(.{
         .offset = 0,
@@ -1031,6 +1040,8 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, amplitude: f32, w
         .src_stage = .{ .compute_shader = true, },
         .dst_stage = .{ .compute_shader = true, },
     });
+
+    self.current_settings = settings;
 }
 
 pub fn push_shallow_spot(self: *Self, shallow_spot: ShallowSpot) void {
