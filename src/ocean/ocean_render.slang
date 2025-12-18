@@ -8,6 +8,10 @@
 #define CLIPMAP_QUAD_COUNT 128
 #endif
 
+#ifndef MAX_SHALLOW_SPOTS
+#define MAX_SHALLOW_SPOTS 4
+#endif
+
 struct PushConstants
 {
     float4x4 view_projection_matrix;
@@ -36,13 +40,26 @@ struct LightsData
 [[vk::binding(0, 0)]]
 ConstantBuffer<LightsData[16 * 16]> lights_data : register(b0);
 
+struct ShallowSpot
+{
+    float2 point_0;
+    float2 point_1;
+    float inner_distance;
+    float outer_distance;
+
+    float2 __pad0;
+};
+
 [[vk::binding(1, 0)]]
-Texture2D displacement_texture;
+ConstantBuffer<ShallowSpot[MAX_SHALLOW_SPOTS]> shallow_spots : register(b1);
 
 [[vk::binding(2, 0)]]
-Texture2D slope_jacobian_texture;
+Texture2D displacement_texture;
 
 [[vk::binding(3, 0)]]
+Texture2D slope_jacobian_texture;
+
+[[vk::binding(4, 0)]]
 SamplerState diffuse_sampler;
 
 struct vs_out
@@ -53,6 +70,19 @@ struct vs_out
     float2 tex_coord : TEXCOORD0;
     float2 grid_position : TEXCOORD1;
 };
+
+float distance_to_line(float2 pt1, float2 pt2, float2 testPt)
+{
+    float2 ab = pt2 - pt1;
+    float2 ap = testPt - pt1;
+    float ab_len2 = dot(ab, ab);
+    if (ab_len2 <= 0.0) {
+        return length(ap); // degenerate segment
+    }
+    float t = clamp(dot(ap, ab) / ab_len2, 0.0, 1.0);
+    float2 closest = pt1 + ab * t;
+    return length(testPt - closest);
+}
 
 [shader("vertex")]
 vs_out vs_main(vs_in input)
@@ -78,18 +108,27 @@ vs_out vs_main(vs_in input)
         output.world_position.xz += round(push_constant.camera_pos.xz / quad_scale) * quad_scale;
     }
 
+    float mult_mask = 1.0;
+    inline for (int i = 0; i < shallow_spots.getCount(); i++) {
+        if (shallow_spots[i].outer_distance == shallow_spots[i].inner_distance) { continue; }
+        float dist = distance_to_line(shallow_spots[i].point_0, shallow_spots[i].point_1, output.world_position.xz);
+        float mult_mask_i = smoothstep(shallow_spots[i].inner_distance, shallow_spots[i].outer_distance, dist);
+
+        mult_mask = min(mult_mask, mult_mask_i);
+    }
+
     output.tex_coord = output.world_position.xz / push_constant.map_length_m;
 
     const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
 
     float3 displacement = displacement_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).xyz;
-    
-    output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale;
-    output.world_position.xz -= displacement.xz;
+
+    output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
+    output.world_position.xz -= displacement.xz * mult_mask;
 
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
-    float cc = displacement.y;
+    float cc = mult_mask;
     output.colour.rgb = float3(cc, cc, cc);
 
     return output;
@@ -111,6 +150,8 @@ ps_out ps_main(vs_out input)
     const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
 
     float3 slope_jacobian = slope_jacobian_texture.Sample(diffuse_sampler, input.tex_coord).xyz;
+    slope_jacobian.xz *= max(input.colour.r, 0.4);
+    slope_jacobian.y += (1.0 - input.colour.r);
 
     float3 normal = float3(-slope_jacobian.x, 1.0, -slope_jacobian.z);
     normal = normalize(normal);

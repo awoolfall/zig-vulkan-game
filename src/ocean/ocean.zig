@@ -17,6 +17,8 @@ const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 const ShaderPath = "../../src/ocean/ocean_render.slang";
 const CLIPMAP_QUAD_COUNT = 512;
 
+const MAX_SHALLOW_SPOTS = 4;
+
 const H0PushConstantData = extern struct {
     map_length_m: f32,
     amplitude: f32,
@@ -41,6 +43,15 @@ const RenderPushConstantData = extern struct {
     map_height_scale: f32,
 
     clipmap_level: f32,
+};
+
+const ShallowSpot = extern struct {
+    point_0: [2]f32 = .{0.0, 0.0},
+    point_1: [2]f32 = .{0.0, 0.0},
+    inner_distance: f32 = 0.0,
+    outer_distance: f32 = 0.0,
+
+    _pad: [2]f32 = .{0.0, 0.0},
 };
 
 clipmap_mesh: ClipmapMesh,
@@ -91,6 +102,9 @@ jacobian_descriptor_set: gfx.DescriptorSet.Ref,
 jacobian_pipeline: gfx.ComputePipeline.Ref,
 
 render_lights_buffer: gfx.Buffer.Ref,
+render_shallow_spots_buffer: gfx.Buffer.Ref,
+
+render_shallow_spots_list: std.ArrayList(ShallowSpot),
 
 render_descriptor_layout: gfx.DescriptorLayout.Ref,
 render_descriptor_pool: gfx.DescriptorPool.Ref,
@@ -163,6 +177,9 @@ pub fn deinit(self: *Self) void {
     self.render_descriptor_layout.deinit();
 
     self.render_lights_buffer.deinit();
+    self.render_shallow_spots_buffer.deinit();
+
+    self.render_shallow_spots_list.deinit(eng.get().general_allocator);
 
     self.render_pipeline.deinit();
     self.render_framebuffer.deinit();
@@ -619,16 +636,21 @@ pub fn init() !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Vertex = true, },
                 .binding = 1,
-                .binding_type = .ImageView,
+                .binding_type = .UniformBuffer,
             },
             gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+                .shader_stages = .{ .Vertex = true, },
                 .binding = 2,
                 .binding_type = .ImageView,
             },
             gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Pixel = true, },
                 .binding = 3,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .binding = 4,
                 .binding_type = .Sampler,
             },
         },
@@ -658,6 +680,13 @@ pub fn init() !Self {
     );
     errdefer lights_buffer.deinit();
 
+    const shallow_spots_buffer = try gfx.Buffer.init(
+        @sizeOf(ShallowSpot) * MAX_SHALLOW_SPOTS,
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer shallow_spots_buffer.deinit();
+
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
             gfx.DescriptorSetUpdateWriteInfo {
@@ -668,18 +697,27 @@ pub fn init() !Self {
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 1,
-                .data = .{ .ImageView = displacement_views[0] },
+                .data = .{ .UniformBuffer = .{
+                    .buffer = shallow_spots_buffer,
+                } },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 2,
-                .data = .{ .ImageView = slope_jacobian_views[0] },
+                .data = .{ .ImageView = displacement_views[0] },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 3,
+                .data = .{ .ImageView = slope_jacobian_views[0] },
+            },
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 4,
                 .data = .{ .Sampler = sampler },
             },
         },
     });
+
+    var shallow_spots_list = try std.ArrayList(ShallowSpot).initCapacity(eng.get().general_allocator, 32);
+    errdefer shallow_spots_list.deinit(eng.get().general_allocator);
 
     // render render pass
     const attachments = &[_]gfx.AttachmentInfo {
@@ -792,6 +830,9 @@ pub fn init() !Self {
         .render_descriptor_set = render_descriptor_set,
 
         .render_lights_buffer = lights_buffer,
+        .render_shallow_spots_buffer = shallow_spots_buffer,
+
+        .render_shallow_spots_list = shallow_spots_list,
         
         .render_render_pass = render_pass,
         .render_framebuffer = framebuffer,
@@ -990,6 +1031,26 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, amplitude: f32, w
         .src_stage = .{ .compute_shader = true, },
         .dst_stage = .{ .compute_shader = true, },
     });
+}
+
+pub fn push_shallow_spot(self: *Self, shallow_spot: ShallowSpot) void {
+    self.render_shallow_spots_list.append(eng.get().general_allocator, shallow_spot) catch |err| {
+        std.log.warn("Unable to add ocean shallow spot to list: {}", .{err});
+    };
+}
+
+fn shallow_spots_sort_function(reference_point: zm.F32x4, spot_0: ShallowSpot, spot_1: ShallowSpot) bool {
+    const spot_0_0 = zm.loadArr2(spot_0.point_0);
+    const spot_0_1 = zm.loadArr2(spot_0.point_1);
+    const spot_1_0 = zm.loadArr2(spot_1.point_0);
+    const spot_1_1 = zm.loadArr2(spot_1.point_1);
+    const spot_0_dist = @min(zm.length2(reference_point - spot_0_0)[0], zm.length2(reference_point - spot_0_1)[0]);
+    const spot_1_dist = @min(zm.length2(reference_point - spot_1_0)[0], zm.length2(reference_point - spot_1_1)[0]);
+    return spot_0_dist < spot_1_dist;
+}
+
+fn sort_shallow_spots(self: *Self, reference_point: [2]f32) void {
+    std.mem.sort(ShallowSpot, self.render_shallow_spots_list.items, zm.loadArr2(reference_point), shallow_spots_sort_function);
 }
 
 pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
@@ -1216,9 +1277,9 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         .index_format = .U32,
     });
 
-    blk: {
-        const lights_buffer = self.render_lights_buffer.get() catch break :blk;
-        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk;
+    (blk: {
+        const lights_buffer = self.render_lights_buffer.get() catch break :blk error.UnableToGetBuffer;
+        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(StandardRenderer.LightsStruct, 16 * 16);
@@ -1227,17 +1288,25 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         );
         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
         @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
-        // for (0..16) |i| {
-        //     for (0..16) |j| {
-        //         standard_renderer.sort_lights(
-        //             transform.position + (grid_origin_at_camera_pos + 
-        //             zm.f32x4(@as(f32, @floatFromInt(i)) - 8.0, 0.0, @as(f32, @floatFromInt(j)) - 8.0, 0.0)) * zm.f32x4s(grid_size)
-        //         );
-        //         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
-        //         @memcpy(data[i + (16 * j)].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
-        //     }
-        // }
-    }
+    }) catch |err| {
+        std.log.err("Could not update lights buffer for ocean render: {}", .{err});
+    };
+
+    (blk: {
+        const buffer = self.render_shallow_spots_buffer.get() catch break :blk error.UnableToGetBuffer;
+        const mapped_buffer = buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        defer mapped_buffer.unmap();
+
+        const data = mapped_buffer.data_array(ShallowSpot, 4);
+        @memset(data, .{});
+
+        self.sort_shallow_spots(.{ camera.transform.position[0], camera.transform.position[2]});
+        for (0..@min(self.render_shallow_spots_list.items.len, MAX_SHALLOW_SPOTS)) |i| {
+            data[i] = self.render_shallow_spots_list.items[i];
+        }
+    }) catch |err| {
+        std.log.err("Could not update shallow spots buffer for ocean render: {}", .{err});
+    };
 
     cmd.cmd_bind_descriptor_sets(.{
         .descriptor_sets = &.{
@@ -1283,6 +1352,9 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
             .index_count = self.clipmap_mesh.outer_ring_indices_count,
         });
     }
+
+    // clear shallow spots ready for next frame
+    self.render_shallow_spots_list.clearRetainingCapacity();
 }
 
 fn generate_gaussian_random_image_data(alloc: std.mem.Allocator, comptime image_side_length: comptime_int) ![][2]f32 {
