@@ -12,6 +12,10 @@
 #define MAX_LIGHTS 4
 #endif
 
+#ifndef BONE_BUFFER_SIZE
+#define BONE_BUFFER_SIZE 4
+#endif
+
 struct CameraData
 {
     float4x4 projection;
@@ -46,7 +50,7 @@ ConstantBuffer<LightsData[MAX_LIGHTS_DATA_PER_BUFFER]> lights_data : register(b2
 #ifdef SKELETAL_RENDERING
 struct BoneData
 {
-    float4x4 bone_matricies[1024];
+    float4x4 bone_matricies[BONE_BUFFER_SIZE];
 };
 
 [[vk::binding(0, 4)]]

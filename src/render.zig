@@ -7,6 +7,7 @@ const ms = eng.mesh;
 const gfx = eng.gfx;
 const path = eng.path;
 const cm = eng.camera;
+const sr = eng.serialize;
 const SelectionTextures = @import("selection_textures.zig");
 
 const CameraStruct = extern struct {
@@ -71,6 +72,37 @@ pub const Light = extern struct {
     umbra: f32 = std.math.degreesToRadians(20.0),
     delta_penumbra: f32 = std.math.degreesToRadians(0.5), // degrees smaller the penumbra is compared to the umbra
     light_type: LightType = .Directional,
+
+    fn serialize(self: *const Light, alloc: std.mem.Allocator) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("position", try sr.serialize_value(zm.F32x4, alloc, self.position));
+        try object.put("direction", try sr.serialize_value(zm.F32x4, alloc, self.direction));
+        try object.put("colour", try sr.serialize_value(zm.F32x4, alloc, self.colour));
+        try object.put("intensity", try sr.serialize_value(f32, alloc, self.intensity));
+        try object.put("umbra", try sr.serialize_value(f32, alloc, std.math.radiansToDegrees(self.umbra)));
+        try object.put("delta_penumbra", try sr.serialize_value(f32, alloc, std.math.radiansToDegrees(self.delta_penumbra)));
+        try object.put("light_type", try sr.serialize_value(LightType, alloc, self.light_type));
+
+        return std.json.Value { .object = object };
+    }
+
+    fn deserialize(value: std.json.Value) !Light {
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType };
+
+        var light = Light{};
+
+        if (object.get("position")) |v| blk: { light.position = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
+        if (object.get("direction")) |v| blk: { light.direction = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
+        if (object.get("colour")) |v| blk: { light.colour = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
+        if (object.get("intensity")) |v| blk: { light.intensity = sr.deserialize_value(f32, v) catch break :blk; }
+        if (object.get("umbra")) |v| blk: { light.umbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk); }
+        if (object.get("delta_penumbra")) |v| blk: { light.delta_penumbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk); }
+        if (object.get("light_type")) |v| blk: { light.light_type = sr.deserialize_value(LightType, v) catch break :blk; }
+
+        return light;
+    }
 };
 
 pub const MAX_LIGHTS: usize = 4;
@@ -569,6 +601,7 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
         .preprocessor_macros = &.{
             .{ "SKELETAL_RENDERING", "1" },
             .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+            .{ "BONE_BUFFER_SIZE", std.fmt.comptimePrint("{}", .{Self.MAX_BONES_PER_BUFFER}) },
         },
         .shader_entry_points = &.{
             "vs_main",

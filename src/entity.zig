@@ -5,19 +5,11 @@ const eng = @import("engine");
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
 
-pub const Descriptor = struct {
-    health_points: ?i32 = null,
-    anim_controller_desc: ?eng.animation.AnimController.Descriptor = null,
-    particle_system_settings: ?eng.particles.ParticleSystemSettings = null,
-    light: ?StandardRenderer.Light = null,
-    terrain: ?Terrain.Descriptor = null,
-};
-
-health_points: ?i32,
-anim_controller: ?eng.animation.AnimController,
-particle_system: ?eng.particles.ParticleSystem,
-light: ?StandardRenderer.Light,
-terrain: ?Terrain,
+health_points: ?i32 = null,
+anim_controller: ?eng.animation.AnimController = null,
+particle_system: ?eng.particles.ParticleSystem = null,
+light: ?StandardRenderer.Light = null,
+terrain: ?Terrain = null,
 
 pub fn deinit(self: *Self) void {
     if (self.anim_controller) |*anim_controller| {
@@ -31,41 +23,42 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn init(desc: Descriptor) !Self {
-    return Self {
-        .health_points = desc.health_points,
-        .anim_controller = if (desc.anim_controller_desc) |anim_desc| 
-            try eng.animation.AnimController.init(general_alloc(), anim_desc) 
-            else null,
-        .particle_system = if (desc.particle_system_settings) |ps| 
-            try eng.particles.ParticleSystem.init(general_alloc(), ps) 
-            else null,
-        .light = if (desc.light) |l| l else null,
-        .terrain = if (desc.terrain) |t| 
-            try Terrain.init(general_alloc(), t, .{}) 
-            else null,
-    };
+pub fn serialize(alloc: std.mem.Allocator, self: Self) !std.json.Value {
+    var object = std.json.ObjectMap.init(alloc);
+    errdefer object.deinit();
+
+    try object.put("health_points", try eng.serialize.serialize_value(?i32, alloc, self.health_points));
+    try object.put("anim_constroller", try eng.serialize.serialize_value(?eng.animation.AnimController, alloc, self.anim_controller));
+    try object.put("particle_system_settings", try eng.serialize.serialize_value(?eng.particles.ParticleSystemSettings, alloc, if (self.particle_system) |ps| ps.settings else null));
+    try object.put("light", try eng.serialize.serialize_value(?StandardRenderer.Light, alloc, self.light));
+    try object.put("terrain", try eng.serialize.serialize_value(?Terrain, alloc, self.terrain));
+
+    return std.json.Value { .object = object };
 }
 
-inline fn general_alloc() std.mem.Allocator {
-    return eng.get().general_allocator;
+pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
+    var self = Self {};
+    errdefer self.deinit();
+
+    const object: *const std.json.ObjectMap = switch (value) { .object => |obj| &obj, else => return error.InvalidType, };
+
+    if (object.get("health_points")) |v| blk: { self.health_points = eng.serialize.deserialize_value(?i32, alloc, v) catch break :blk; }
+
+    if (object.get("anim_controller")) |v| blk: { self.anim_controller = eng.serialize.deserialize_value(?eng.animation.AnimController, alloc, v) catch break :blk; }
+    errdefer if (self.anim_controller) |*a| { a.deinit(); };
+
+    var particle_system_settings: ?eng.particles.ParticleSystemSettings = null;
+    if (object.get("particle_system_settings")) |v| blk: { particle_system_settings = eng.serialize.deserialize_value(?eng.particles.ParticleSystemSettings, alloc, v) catch break :blk; }
+
+    if (particle_system_settings) |settings| {
+        self.particle_system = try eng.particles.ParticleSystem.init(alloc, settings);
+    }
+    errdefer if (self.particle_system) |*ps| { ps.deinit(); };
+
+    if (object.get("light")) |v| blk: { self.light = eng.serialize.deserialize_value(?StandardRenderer.Light, alloc, v) catch break :blk; }
+
+    if (object.get("terrain")) |v| blk: { self.terrain = eng.serialize.deserialize_value(?Terrain, alloc, v) catch break :blk; }
+    errdefer if (self.terrain) |*t| { t.deinit(); };
+
+    return self;
 }
-
-pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
-    const anim_desc = if (self.anim_controller) |ac| try ac.descriptor(alloc) else null;
-    errdefer if (anim_desc) |ad| alloc.free(ad);
-
-    const particle_system_settings = if (self.particle_system) |ps| ps.settings else null;
-
-    const terrain_desc = if (self.terrain) |t| try t.descriptor(alloc) else null;
-    errdefer if (terrain_desc) |td| alloc.free(td);
-
-    return Descriptor {
-        .health_points = self.health_points,
-        .anim_controller_desc = anim_desc,
-        .particle_system_settings = particle_system_settings,
-        .light = self.light,
-        .terrain = terrain_desc,
-    };
-}
-

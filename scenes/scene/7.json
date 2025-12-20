@@ -1,25 +1,24 @@
 {
-  "should_serialize": true,
   "serialize_id": 7,
   "name": "new entity",
   "transform": {
     "position": [
-      -9.97329330444336e0,
-      1.0231966018676758e1,
-      -2.1798418045043945e1,
-      1e0
+      -9.97329330444336,
+      10.231966018676758,
+      -21.798418045043945,
+      1
     ],
     "rotation": [
-      0e0,
-      0e0,
-      0e0,
-      1e0
+      0.40569937229156494,
+      0,
+      0,
+      0.9140064120292664
     ],
     "scale": [
-      1e0,
-      1e0,
-      1e0,
-      1e0
+      1,
+      1,
+      1,
+      1
     ]
   },
   "model": "default|cone",
@@ -31,22 +30,22 @@
         },
         "offset_transform": {
           "position": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "rotation": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "scale": [
-            1e0,
-            1e0,
-            1e0,
-            1e0
+            1,
+            1,
+            1,
+            1
           ]
         }
       },
@@ -56,9 +55,32 @@
   },
   "app": {
     "health_points": null,
-    "anim_controller_desc": null,
+    "anim_constroller": null,
     "particle_system_settings": null,
-    "light": null,
+    "light": {
+      "position": [
+        -9.97329330444336,
+        10.231966018676758,
+        -21.798418045043945,
+        1
+      ],
+      "direction": [
+        0,
+        0.7416236400604248,
+        -0.6708160638809204,
+        0
+      ],
+      "colour": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "intensity": 2.119999647140503,
+      "umbra": 0.3490658402442932,
+      "delta_penumbra": 0.008726646192371845,
+      "light_type": "Directional"
+    },
     "terrain": null
   }
 }

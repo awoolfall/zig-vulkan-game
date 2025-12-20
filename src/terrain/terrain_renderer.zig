@@ -35,11 +35,6 @@ const PushConstantData = extern struct {
     terrain_height_scale: f32,  // height scale of the heightmap
 
     clipmap_level: f32,
-
-    // modify_cells: zm.F32x4,
-    // modify_center: [2]f32 = [_]f32{0.0, 0.0},
-    // modify_radius: f32 = 0.0,
-    // modify_strength: f32 = 0.0,
 };
 
 const ImagesDescriptorSetData = struct {

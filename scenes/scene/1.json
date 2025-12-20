@@ -1,32 +1,33 @@
 {
-  "should_serialize": true,
   "serialize_id": 1,
   "name": "new entity",
   "transform": {
     "position": [
-      0e0,
-      0e0,
-      1e0,
-      1e0
+      0,
+      0,
+      1,
+      1
     ],
     "rotation": [
-      0e0,
-      0e0,
-      0e0,
-      1e0
+      0,
+      0,
+      0,
+      1
     ],
     "scale": [
-      1e0,
-      1e0,
-      1e0,
-      1e0
+      1,
+      1,
+      1,
+      1
     ]
   },
   "model": null,
-  "physics": null,
+  "physics": {
+    "None": {}
+  },
   "app": {
     "health_points": null,
-    "anim_controller_desc": null,
+    "anim_constroller": null,
     "particle_system_settings": null,
     "light": null,
     "terrain": null

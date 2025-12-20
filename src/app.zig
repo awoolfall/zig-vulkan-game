@@ -247,7 +247,7 @@ fn update(self: *Self) !void {
     var render_camera: *eng.camera.Camera = undefined;
     switch (self.current_mode) {
         .Edit => {
-            self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer) catch |err| {
+            self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer, &self.ocean) catch |err| {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
             render_camera = &self.edit_mode.editor_camera;
@@ -290,24 +290,25 @@ fn update(self: *Self) !void {
                         .character_padding = 0.02,
                     };
 
-                    self.character_idx = try engine.entities.new_entity(eng.Engine.EntityDescriptor {
-                        .name = "character entity",
-                        .should_serialize = false,
-                        .model = "default|character",
-                        .transform = Transform {
-                            .position = character_spawner_transform.position,
-                            .rotation = character_spawner_transform.rotation,
-                        },
-                        .physics = .{ .CharacterVirtual = .{
-                            .settings = character_virtual_settings,
-                            .create_character = true,
-                            .extended_update_settings = .{},
-                        } },
-                        .app = .{
-                            .health_points = 100,
-                            .anim_controller_desc = character_anim_description(),
-                        },
-                    });
+                    self.character_idx = try engine.entities.new_entity(.{});
+
+                    const character_entity = engine.entities.get(self.character_idx).?;
+                    try character_entity.set_name("character entity");
+                    character_entity.should_serialize = false;
+                    character_entity.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
+                    character_entity.transform = Transform {
+                        .position = character_spawner_transform.position,
+                        .rotation = character_spawner_transform.rotation,
+                    };
+                    character_entity.physics.settings = .{ .CharacterVirtual = .{
+                        .settings = character_virtual_settings,
+                        .create_character = true,
+                        .extended_update_settings = .{},
+                    } };
+                    try character_entity.physics.update_runtime_data(self.character_idx);
+                    character_entity.app.health_points = 100;
+                    character_entity.app.anim_controller = try anim.AnimController.init(eng.get().general_allocator);
+                    try setup_character_anim_controller(&character_entity.app.anim_controller.?);
                 }
             }
 
@@ -339,24 +340,25 @@ fn update(self: *Self) !void {
                         .character_padding = 0.02,
                     };
 
-                    self.opponent_idx = try engine.entities.new_entity(eng.Engine.EntityDescriptor {
-                        .name = "opponent entity",
-                        .should_serialize = false,
-                        .model = "default|character",
-                        .transform = Transform {
-                            .position = spawner_transform.position,
-                            .rotation = spawner_transform.rotation,
-                        },
-                        .physics = .{ .CharacterVirtual = .{
-                            .settings = character_virtual_settings,
-                            .create_character = true,
-                            .extended_update_settings = .{},
-                        } },
-                        .app = .{
-                            .health_points = 100,
-                            .anim_controller_desc = character_anim_description(),
-                        },
-                    });
+                    self.opponent_idx = try engine.entities.new_entity(.{});
+
+                    const character_entity = engine.entities.get(self.opponent_idx).?;
+                    try character_entity.set_name("opponent entity");
+                    character_entity.should_serialize = false;
+                    character_entity.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
+                    character_entity.transform = Transform {
+                        .position = spawner_transform.position,
+                        .rotation = spawner_transform.rotation,
+                    };
+                    character_entity.physics.settings = .{ .CharacterVirtual = .{
+                        .settings = character_virtual_settings,
+                        .create_character = true,
+                        .extended_update_settings = .{},
+                    } };
+                    try character_entity.physics.update_runtime_data(self.character_idx);
+                    character_entity.app.health_points = 100;
+                    character_entity.app.anim_controller = try anim.AnimController.init(eng.get().general_allocator);
+                    try setup_character_anim_controller(&character_entity.app.anim_controller.?);
                 }
             }
 
@@ -410,7 +412,7 @@ fn update(self: *Self) !void {
                     }
                 }
 
-                const character = character_entity.physics.?.CharacterVirtual.virtual;
+                const character = character_entity.physics.runtime_data.CharacterVirtual.virtual;
                 var character_velocity = zm.loadArr3(character.getLinearVelocity());
 
                 if (character_is_supported(character)) {
@@ -523,12 +525,12 @@ fn update(self: *Self) !void {
             var vel_buf: [128]u8 = [_]u8{0} ** 128;
             var vel_text: []u8 = vel_buf[0..0];
             if (engine.entities.get(self.character_idx)) |character_entity| {
-                const character = character_entity.physics.?.CharacterVirtual.virtual;
+                const character = character_entity.physics.runtime_data.CharacterVirtual.virtual;
                 const character_velocity = zm.loadArr3(character.getLinearVelocity());
                 vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}\nis supported: {}", .{
                     zm.length3(character_velocity)[0],
                     character_velocity,
-                    character_is_supported(character_entity.physics.?.CharacterVirtual.virtual),
+                    character_is_supported(character_entity.physics.runtime_data.CharacterVirtual.virtual),
                 }) catch unreachable;
 
                 {
@@ -555,7 +557,7 @@ fn update(self: *Self) !void {
                     desired_movement_direction += zm.normalize3(pos_diff);
                 }
 
-                const character_physics = opponent.physics.?.CharacterVirtual.virtual;
+                const character_physics = opponent.physics.runtime_data.CharacterVirtual.virtual;
 
                 if (zm.length3(desired_movement_direction)[0] != 0.0) {
                     desired_movement_direction = zm.normalize3(desired_movement_direction);
@@ -1002,7 +1004,7 @@ fn character_is_supported(chr: *zphy.CharacterVirtual) bool {
     return chr.getGroundState() == zphy.CharacterGroundState.on_ground;
 }
 
-fn character_anim_description() anim.AnimController.Descriptor {
+fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void {
     const engine = eng.get();
     
     const character_animation_idle_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
@@ -1014,7 +1016,7 @@ fn character_anim_description() anim.AnimController.Descriptor {
     const character_animation_attack_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
         catch unreachable;
 
-    var anim_nodes = [_]anim.Node{
+    const anim_nodes = [_]anim.Node{
         .{
             .node = .{ .Basic = .{
                 .animation = character_animation_idle_id,
@@ -1085,8 +1087,8 @@ fn character_anim_description() anim.AnimController.Descriptor {
         },
     };
 
-    return anim.AnimController.Descriptor {
-        .nodes = anim_nodes[0..],
-        .base_animation = character_animation_idle_id,
-    };
+    anim_controller.nodes.clearRetainingCapacity();
+    try anim_controller.nodes.appendSlice(eng.get().general_allocator, anim_nodes[0..]);
+
+    anim_controller.base_animation = character_animation_idle_id;
 }

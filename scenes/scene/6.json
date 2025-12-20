@@ -1,25 +1,24 @@
 {
-  "should_serialize": true,
   "serialize_id": 6,
   "name": "ramp",
   "transform": {
     "position": [
-      1.9816946029663086e1,
-      1.7657859325408936e0,
-      -6.779545307159424e0,
-      1e0
+      19.816946029663086,
+      1.7657859325408936,
+      -6.779545307159424,
+      1
     ],
     "rotation": [
-      -2.039659321308136e-1,
-      0e0,
-      0e0,
-      9.789782166481018e-1
+      -0.2039659321308136,
+      0,
+      0,
+      0.9789782166481018
     ],
     "scale": [
-      7.001399993896484e0,
-      5.871227979660034e-1,
-      1.0387809753417969e1,
-      1e0
+      7.001399993896484,
+      0.5871227979660034,
+      10.387809753417969,
+      1
     ]
   },
   "model": "default|cube",
@@ -28,29 +27,29 @@
       "settings": {
         "shape": {
           "Box": {
-            "width": 1e0,
-            "height": 1e0,
-            "depth": 1e0
+            "width": 1,
+            "height": 1,
+            "depth": 1
           }
         },
         "offset_transform": {
           "position": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "rotation": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "scale": [
-            1e0,
-            1e0,
-            1e0,
-            1e0
+            1,
+            1,
+            1,
+            1
           ]
         }
       },
@@ -60,7 +59,7 @@
   },
   "app": {
     "health_points": null,
-    "anim_controller_desc": null,
+    "anim_constroller": null,
     "particle_system_settings": null,
     "light": null,
     "terrain": null

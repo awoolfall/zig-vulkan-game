@@ -10,25 +10,14 @@ const Imui = eng.ui;
 const ph = eng.physics;
 const as = eng.assets;
 const path = eng.path;
+const sr = eng.serialize;
 const Transform = eng.Transform;
 
 const HeightFieldSize = 32;
 
-pub const Descriptor = struct {
-    heightmap_asset_id: ?as.ImageAssetId = null,
-    enable_physics: bool = true,
-
-    map_length_m: f32 = 1000.0,
-    map_length_scale: f32 = 1.0,
-
-    map_minimum_height: f32 = 0.0,
-    map_maximum_height: f32 = 100.0,
-    map_height_scale: f32 = 1.0,
-};
-
 alloc: std.mem.Allocator,
 
-heightmap_asset_id: ?as.ImageAssetId,
+heightmap_asset_id: ?as.ImageAssetId = null,
 heightmap: []f32,
 
 map_length_m: f32 = 1000.0,
@@ -61,7 +50,7 @@ pub fn deinit(self: *Self) void {
     self.alloc.free(self.heightmap);
 }
 
-pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !Self {
+pub fn init(alloc: std.mem.Allocator) !Self {
     const hmt_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
     
@@ -80,47 +69,50 @@ pub fn init(alloc: std.mem.Allocator, desc: Descriptor, transform: Transform) !S
 
     try compute_heightmap_samples(alloc, hmt.*, heightmap_data);
 
-    var self = Self {
+    return Self {
         .alloc = alloc,
 
-        .heightmap_asset_id = desc.heightmap_asset_id,
-
-        .map_length_m = desc.map_length_m,
-        .map_length_scale = desc.map_length_scale,
-
-        .map_minimum_height = desc.map_minimum_height,
-        .map_maximum_height = desc.map_maximum_height,
-        .map_height_scale = desc.map_height_scale,
-
         .heightmap_texture_view = heightmap_texture_view,
-
-
         .albedo_texture_view = albedo_view,
 
         .heightmap = heightmap_data,
         .physics_body_id = null,
     };
-    
-    if (desc.enable_physics) {
-        try self.generate_heightmap_physics(transform);
-    }
-
-    return self;
 }
 
-pub fn descriptor(self: *const Self, alloc: std.mem.Allocator) !Descriptor {
-    _ = alloc;
-    return Descriptor {
-        .heightmap_asset_id = self.heightmap_asset_id,
-        .enable_physics = (self.physics_body_id != null),
+pub fn serialize(alloc: std.mem.Allocator, self: Self) !std.json.Value {
+    var object = std.json.ObjectMap.init(alloc);
+    errdefer object.deinit();
 
-        .map_length_m = self.map_length_m,
-        .map_length_scale = self.map_length_scale,
+    // TODO serialize physics option. Or somehow use entity super struct physics for terrain physics
+    try object.put("version", try sr.serialize_value(u32, alloc, 1));
+    try object.put("heightmap_asset_id", try sr.serialize_value(?as.ImageAssetId, alloc, self.heightmap_asset_id));
+    try object.put("map_length_m", try sr.serialize_value(f32, alloc, self.map_length_m));
+    try object.put("map_length_scale", try sr.serialize_value(f32, alloc, self.map_length_scale));
+    try object.put("map_minimum_height", try sr.serialize_value(f32, alloc, self.map_minimum_height));
+    try object.put("map_maximum_height", try sr.serialize_value(f32, alloc, self.map_maximum_height));
+    try object.put("map_height_scale", try sr.serialize_value(f32, alloc, self.map_height_scale));
 
-        .map_minimum_height = self.map_minimum_height,
-        .map_maximum_height = self.map_maximum_height,
-        .map_height_scale = self.map_height_scale,
-    };
+    return std.json.Value { .object = object };
+}
+
+pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
+    var self = try Self.init(alloc);
+    errdefer self.deinit();
+
+    const object: *const std.json.ObjectMap = switch (value) { .object => |obj| &obj, else => return error.InvalidType, };
+
+    var version: u32 = 1;
+    if (object.get("version")) |v| blk: { version = sr.deserialize_value(u32, alloc, v) catch break :blk; }
+    
+    if (object.get("heightmap_asset_id")) |v| blk: { self.heightmap_asset_id = sr.deserialize_value(?as.ImageAssetId, alloc, v) catch break :blk; }
+    if (object.get("map_length_m")) |v| blk: { self.map_length_m = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+    if (object.get("map_length_scale")) |v| blk: { self.map_length_scale = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+    if (object.get("map_minimum_height")) |v| blk: { self.map_minimum_height = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+    if (object.get("map_maximum_height")) |v| blk: { self.map_maximum_height = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+    if (object.get("map_height_scale")) |v| blk: { self.map_height_scale = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+
+    return self;
 }
 
 fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, output_buffer: []f32) !void {

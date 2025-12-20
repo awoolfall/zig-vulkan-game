@@ -1,32 +1,33 @@
 {
-  "should_serialize": true,
   "serialize_id": 4,
   "name": "character-spawner",
   "transform": {
     "position": [
-      1.8935131072998047e1,
-      2.449751615524292e0,
-      -1.4585468292236328e1,
-      0e0
+      18.935131072998047,
+      2.449751615524292,
+      -14.585468292236328,
+      0
     ],
     "rotation": [
-      0e0,
-      0e0,
-      0e0,
-      1e0
+      0,
+      0,
+      0,
+      1
     ],
     "scale": [
-      1e0,
-      1e0,
-      1e0,
-      1e0
+      1,
+      1,
+      1,
+      1
     ]
   },
   "model": null,
-  "physics": null,
+  "physics": {
+    "None": {}
+  },
   "app": {
     "health_points": null,
-    "anim_controller_desc": null,
+    "anim_constroller": null,
     "particle_system_settings": null,
     "light": null,
     "terrain": null

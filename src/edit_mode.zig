@@ -309,7 +309,9 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
 
                 const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
                 if (duplicate_button.clicked) {
-                    self.duplicate_selected_entity();
+                    self.duplicate_selected_entity() catch |err| {
+                        std.log.err("Failed to duplicate entity: {}", .{err});
+                    };
                 }
 
                 const edit_ocean_button = Imui.widgets.badge.create(imui, "Edit Ocean Parameters", key ++ .{@src()});
@@ -332,34 +334,40 @@ pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) !void {
 }
 
 fn create_new_entity(self: *Self) void {
-    _ = eng.get().entities.new_entity(EntityDescriptor {
-        .name = "new entity",
-        .should_serialize = true,
-        .model = null,
-        .transform = Transform {
-            .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
-        },
-        }) catch |err| {
-        std.log.err("Failed to create entity: {}", .{err});
+    const entity_id = eng.get().entities.new_entity(.{}) catch |err| {
+        std.log.err("Unable to create new entity: {}", .{err});
+        return;
+    };
+
+    const entity = eng.get().entities.get(entity_id).?;
+    entity.set_name("new entity") catch |err| { std.log.warn("Unable to set entity name: {}", .{err}); };
+    entity.should_serialize = true;
+    entity.transform = .{
+        .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
     };
 }
 
-fn duplicate_selected_entity(self: *Self) void {
-    if (self.selected_entity) |selected_entity| {
-        var descriptor = eng.get().entities.get(selected_entity).?.descriptor(eng.get().frame_allocator) catch |err| {
-            std.log.err("Failed to create descriptor for entity: {}", .{err});
-            return;
+fn duplicate_selected_entity(self: *Self) !void {
+    if (self.selected_entity) |selected_entity_id| {
+        const selected_entity = eng.get().entities.get(selected_entity_id) orelse {
+            self.selected_entity = null;
+            return error.UnableToGetSelectedEntity;
         };
 
+        var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
+        defer arena.deinit();
+
+        const serialized_entity = try sr.serialize_value(eng.entity.EntitySuperStruct, arena.allocator(), selected_entity.*);
+
+        var entity_data = try sr.deserialize_value(eng.entity.EntitySuperStruct, eng.get().general_allocator, serialized_entity);
         // clear the serialize id so that it will be generated on the next save
-        descriptor.serialize_id = null;
+        entity_data.should_serialize = selected_entity.should_serialize;
+        entity_data.serialize_id = null;
 
-        const new_entity = eng.get().entities.new_entity(descriptor) catch |err| {
-            std.log.err("Failed to duplicate entity: {}", .{err});
-            return;
-        };
-        self.selected_entity = new_entity;
-        //std.log.info("duplicated entity: {}", .{eng.get().entities.get(new_entity).?});
+        const new_entity_id = try eng.get().entities.new_entity(entity_data);
+        errdefer eng.get().entities.remove_entity(new_entity_id) catch {};
+
+        self.selected_entity = new_entity_id;
     }
 }
 
@@ -410,7 +418,7 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
                 .Model => {
                     const asset_id = assets.ModelAssetId{ .pack_id = pack.unique_name_hash, .asset_id = p.key_ptr.* };
 
-                    const asset_identifier_string = try asset_id.serialize(alloc);
+                    const asset_identifier_string = try asset_id.to_string_identifier(alloc);
                     defer alloc.free(asset_identifier_string);
 
                     try model_names.append(alloc, try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
@@ -427,7 +435,7 @@ fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
 }
 
 const PhysicsData = struct {
-    desc: eng.entity.PhysicsOptionsDescriptor,
+    settings: eng.entity.PhysicsSettings,
 
     pub fn deinit(self: *PhysicsData, alloc: std.mem.Allocator) void {
         _ = self;
@@ -436,7 +444,7 @@ const PhysicsData = struct {
 
     pub fn init(alloc: std.mem.Allocator) !PhysicsData {
         _ = alloc;
-        return PhysicsData { .desc = .{ .Body = .{} } };
+        return PhysicsData { .settings = .{ .None = {} } };
     }
 
     pub fn clone(self: *PhysicsData, alloc: std.mem.Allocator) !PhysicsData {
@@ -553,8 +561,8 @@ fn entity_editor_ui(
                 };
             }
 
-            const model_text = if (entity.model) |mid| 
-                sr.serialize(assets.ModelAssetId, arena.allocator(), mid) catch unreachable else "None";
+            const model_text = if (entity.model) |mid| (mid.to_string_identifier(arena.allocator()) catch unreachable) else "None";
+
             model_combobox_data.selected_index = null;
             for (model_combobox_data.options.items, 0..) |option, i| {
                 if (std.mem.eql(u8, option, model_text)) {
@@ -566,7 +574,7 @@ fn entity_editor_ui(
         if (model_combobox.data_changed) {
             const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
             if (model_combobox_data.selected_index) |si| {
-                if (sr.deserialize(assets.ModelAssetId, arena.allocator(), model_combobox_data.options.items[si])) |model_id| {
+                if (assets.ModelAssetId.from_string_identifier(model_combobox_data.options.items[si])) |model_id| {
                     entity.model = model_id;
                 } else |_| { 
                     std.log.err("Failed to deserialize model id!", .{});
@@ -635,6 +643,12 @@ fn entity_editor_ui(
     if (physics_collapsible_open.*) physics_collapsible_blk: {
         const physics_button = Imui.widgets.badge.create(imui, "Set Physics", key ++ .{@src()});
         const data, _ = imui.get_widget_data(PhysicsData, physics_button.id.box) catch break :physics_collapsible_blk;
+
+        if (physics_button.clicked) {
+            entity.physics.update_runtime_data(self.selected_entity.?) catch |err| {
+                std.log.err("Unable to update selected entity physics: {}", .{err});
+            };
+        }
         
         const physics_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
         const physics_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, physics_combobox.id) catch |err| {
@@ -646,7 +660,7 @@ fn entity_editor_ui(
                 std.log.err("Failed to set default physics combobox text: {}", .{err});
                 unreachable;
             };
-            physics_combobox_data.can_be_default = true;
+            physics_combobox_data.can_be_default = false;
         
             // generate physics option names from enum
             const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
@@ -658,69 +672,57 @@ fn entity_editor_ui(
             }
         
             // set physics descriptor
-            if (entity.physics) |*ph| {
-                data.desc = ph.descriptor();
-                physics_combobox_data.selected_index = @intFromEnum(data.desc);
-            } else {
-                data.desc = eng.entity.PhysicsOptionsDescriptor { .Body = .{} };
-                physics_combobox_data.selected_index = null;
-            }
+            data.settings = entity.physics.settings;
+            physics_combobox_data.selected_index = @intFromEnum(data.settings);
         }
         if (physics_combobox.data_changed) {
             if (physics_combobox_data.selected_index) |si| {
                 switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
-                    .Body => data.desc = .{ .Body = .{} },
-                    .Character => data.desc = .{ .Character = .{} },
-                    .CharacterVirtual => data.desc = .{ .CharacterVirtual = .{} },
+                    .None => data.settings = .{ .None = {} },
+                    .Body => data.settings = .{ .Body = .{} },
+                    .Character => data.settings = .{ .Character = .{} },
+                    .CharacterVirtual => data.settings = .{ .CharacterVirtual = .{} },
                 }
             }
         }
-        if (physics_combobox_data.selected_index != null) {
-            const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
-            if (imui.get_widget(transform_layout)) |transform_layout_widget| {
-                transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
-                transform_layout_widget.semantic_size[0].value = 1.0;
-                transform_layout_widget.children_gap = 5;
-                transform_layout_widget.padding_px = .{
-                    .left = EntityEditorTabWidth,
-                };
-            }
-            defer imui.pop_layout();
-        
-            switch (data.desc) {
-                .Body => |*b| {
-                    physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
 
-                    {
-                        _ = imui.push_form_layout_item(key ++ .{@src()});
-                        defer imui.pop_layout();
-
-                        _ = Imui.widgets.label.create(imui, "is sensor:");
-                        _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "", key ++ .{@src()});
-                    }
-                    {
-                        _ = imui.push_form_layout_item(key ++ .{@src()});
-                        defer imui.pop_layout();
-                        
-                        _ = Imui.widgets.label.create(imui, "is static:");
-                        _ = Imui.widgets.checkbox.create(imui, &b.is_static, "", key ++ .{@src()});
-                    }
-                },
-                .Character => |_| {
-                    _ = Imui.widgets.label.create(imui, "is character");
-                },
-                .CharacterVirtual => |_| {
-                    _ = Imui.widgets.label.create(imui, "is virtual character");
-                },
-            }
+        const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
+        if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+            transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
+            transform_layout_widget.semantic_size[0].value = 1.0;
+            transform_layout_widget.children_gap = 5;
+            transform_layout_widget.padding_px = .{
+                .left = EntityEditorTabWidth,
+            };
         }
+        defer imui.pop_layout();
+    
+        switch (data.settings) {
+            .None => {},
+            .Body => |*b| {
+                physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
 
-        if (physics_button.clicked) {
-            if (physics_combobox_data.selected_index) |_| {
-                entity.set_physics(self.selected_entity.?, data.desc, &eng.get().physics) catch unreachable;
-            } else {
-                entity.remove_physics(&eng.get().physics);
-            }
+                {
+                    _ = imui.push_form_layout_item(key ++ .{@src()});
+                    defer imui.pop_layout();
+
+                    _ = Imui.widgets.label.create(imui, "is sensor:");
+                    _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "", key ++ .{@src()});
+                }
+                {
+                    _ = imui.push_form_layout_item(key ++ .{@src()});
+                    defer imui.pop_layout();
+                    
+                    _ = Imui.widgets.label.create(imui, "is static:");
+                    _ = Imui.widgets.checkbox.create(imui, &b.is_static, "", key ++ .{@src()});
+                }
+            },
+            .Character => |_| {
+                _ = Imui.widgets.label.create(imui, "is character");
+            },
+            .CharacterVirtual => |_| {
+                _ = Imui.widgets.label.create(imui, "is virtual character");
+            },
         }
     }
 
@@ -868,7 +870,7 @@ fn entity_editor_ui(
         const enable_terrain_checkbox = Imui.widgets.checkbox.create(imui, &enable_terrain_value, "Enable Terrain", key ++ .{@src()});
         if (enable_terrain_checkbox.clicked) {
             if (entity.app.terrain == null) {
-                entity.app.terrain = Terrain.init(eng.get().general_allocator, .{}, entity.transform) catch |err| {
+                entity.app.terrain = Terrain.init(eng.get().general_allocator) catch |err| {
                     std.log.err("Failed to create terrain: {}", .{err});
                     return;
                 };
@@ -1169,7 +1171,7 @@ fn create_scene_entities(scene_name: []const u8) !void {
             defer arena.allocator().free(ent_str);
 
             const ent_s = std.json.parseFromSliceLeaky(
-                sr.Serializable(eng.entity.EntityDescriptor),
+                std.json.Value,
                 arena.allocator(),
                 ent_str,
                 .{ .ignore_unknown_fields = true, }
@@ -1178,16 +1180,26 @@ fn create_scene_entities(scene_name: []const u8) !void {
                 continue;
             };
 
-            const ent = sr.deserialize(eng.entity.EntityDescriptor, arena.allocator(), ent_s) catch |err| {
+            var ent = sr.deserialize_value(eng.entity.EntitySuperStruct, eng.get().general_allocator, ent_s) catch |err| {
                 std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
                 continue;
             };
+            // all loaded entities will have this value set to true
+            ent.should_serialize = true;
 
-            const loaded_entity = eng.get().entities.new_entity(ent) catch |err| {
+            const new_entity_id = eng.get().entities.new_entity(ent) catch |err| {
                 std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
                 continue;
             };
-            std.log.info("Loaded entity: {}", .{eng.get().entities.get(loaded_entity).?});
+
+            const new_entity = eng.get().entities.get(new_entity_id).?;
+
+            // TODO maybe need a post-deserialize in entity super struct?
+            new_entity.physics.update_runtime_data(new_entity_id) catch |err| {
+                std.log.err("Unable to update entity physics: {}", .{err});
+            };
+
+            std.log.info("Loaded entity: {}", .{new_entity});
         }
     }
 }
@@ -1214,35 +1226,31 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
         largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
     }
 
-    var json_writer = std.io.Writer.Allocating.init(arena.allocator());
-    defer json_writer.deinit();
-
-    var json = std.json.Stringify{
-        .writer = &json_writer.writer,
-    };
-    json.options.whitespace = .indent_2;
-
     it.reset();
     while (it.next()) |entity| {
-        json_writer.clearRetainingCapacity();
-
-        if (!entity.should_serialize) continue;
         _ = arena.reset(.retain_capacity);
+
+        if (!entity.should_serialize) {
+            continue;
+        }
 
         entity.serialize_id = entity.serialize_id orelse blk: {
             largest_serialize_id += 1;
             break :blk largest_serialize_id;
         };
 
-        const entity_descriptor = entity.descriptor(arena.allocator()) catch |err| {
-            std.log.err("unable to produce descriptor for entity {}: {}\n", .{entity.serialize_id.?, err});
-            continue;
-        };
-
-        const entity_s = sr.serialize(eng.entity.EntityDescriptor, arena.allocator(), entity_descriptor) catch |err| {
+        const entity_s = sr.serialize_value(eng.entity.EntitySuperStruct, arena.allocator(), entity.*) catch |err| {
             std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
             continue;
         };
+
+        var json_writer = std.io.Writer.Allocating.init(arena.allocator());
+        defer json_writer.deinit();
+
+        var json = std.json.Stringify{
+            .writer = &json_writer.writer,
+        };
+        json.options.whitespace = .indent_2;
 
         json.write(entity_s) catch |err| {
             std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});

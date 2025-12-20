@@ -1,25 +1,24 @@
 {
-  "should_serialize": true,
   "serialize_id": 3,
   "name": "new entity",
   "transform": {
     "position": [
-      1.9706059247255325e-3,
-      -7.854960858821869e-5,
-      -2.724871039390564e-3,
-      1e0
+      0.0019706059247255325,
+      -0.00007854960858821869,
+      -0.002724871039390564,
+      1
     ],
     "rotation": [
-      0e0,
-      0e0,
-      0e0,
-      1e0
+      0,
+      0,
+      0,
+      1
     ],
     "scale": [
-      1.0002991485595703e2,
-      2.500007152557373e-1,
-      1.0000015258789062e2,
-      1e0
+      100.02991485595703,
+      0.2500007152557373,
+      100.00015258789062,
+      1
     ]
   },
   "model": "default|cube",
@@ -28,29 +27,29 @@
       "settings": {
         "shape": {
           "Box": {
-            "width": 1e0,
-            "height": 1e0,
-            "depth": 1e0
+            "width": 1,
+            "height": 1,
+            "depth": 1
           }
         },
         "offset_transform": {
           "position": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "rotation": [
-            0e0,
-            0e0,
-            0e0,
-            1e0
+            0,
+            0,
+            0,
+            1
           ],
           "scale": [
-            1e0,
-            1e0,
-            1e0,
-            1e0
+            1,
+            1,
+            1,
+            1
           ]
         }
       },
@@ -60,7 +59,7 @@
   },
   "app": {
     "health_points": null,
-    "anim_controller_desc": null,
+    "anim_constroller": null,
     "particle_system_settings": null,
     "light": null,
     "terrain": null
