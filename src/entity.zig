@@ -48,6 +48,7 @@ pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
     errdefer if (self.anim_controller) |*a| { a.deinit(); };
 
     var particle_system_settings: ?eng.particles.ParticleSystemSettings = null;
+    defer if (particle_system_settings) |*pss| pss.deinit(alloc);
     if (object.get("particle_system_settings")) |v| blk: { particle_system_settings = eng.serialize.deserialize_value(?eng.particles.ParticleSystemSettings, alloc, v) catch break :blk; }
 
     if (particle_system_settings) |settings| {

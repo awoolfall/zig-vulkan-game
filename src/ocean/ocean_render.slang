@@ -119,8 +119,6 @@ vs_out vs_main(vs_in input)
 
     output.tex_coord = output.world_position.xz / push_constant.map_length_m;
 
-    const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
-
     float3 displacement = displacement_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).xyz;
 
     output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
@@ -148,20 +146,25 @@ ps_out ps_main(vs_out input)
     float roughness = 0.0;
 
     const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
+    float height_to_horizontal = push_constant.map_height_scale / facet_size;
 
     float3 slope_jacobian = slope_jacobian_texture.Sample(diffuse_sampler, input.tex_coord).xyz;
     slope_jacobian.xz *= max(input.colour.r, 0.4);
     slope_jacobian.y += (1.0 - input.colour.r);
 
-    float3 normal = float3(-slope_jacobian.x, 1.0, -slope_jacobian.z);
+    // convert slope entries into world-space vertical gradient (dH/dx, dH/dz)
+    float dHdx = slope_jacobian.x * height_to_horizontal;
+    float dHdz = slope_jacobian.z * height_to_horizontal;
+
+    float3 normal = float3(-dHdx, 1.0, -dHdz);
     normal = normalize(normal);
 
     float detJ = slope_jacobian.y;
     float conv = max(0.0, 1.0 - detJ); // positive when compressed/converging
 
     // Tunable parameters (maybe can be promoted to push constants later)
-    const float foam_th0 = 0.25;
-    const float foam_th1 = 0.7;
+    const float foam_th0 = 0.2;
+    const float foam_th1 = 0.6;
     const float foam_strength = 1.5;
 
     float foam_conv = smoothstep(foam_th0, foam_th1, conv);

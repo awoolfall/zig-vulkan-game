@@ -1016,12 +1016,14 @@ fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void 
     const character_animation_attack_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
         catch unreachable;
 
+    const alloc = eng.get().general_allocator;
+
     const anim_nodes = [_]anim.Node{
         .{
             .node = .{ .Basic = .{
                 .animation = character_animation_idle_id,
             } },
-            .next = &[_]anim.NodeTransition{
+            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
                 anim.NodeTransition{
                     .node = 1,
                     .condition = anim.TransitionCondition{ .Float = .{
@@ -1040,7 +1042,7 @@ fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void 
                     .transition_duration = 0.1,
                     .transition_easing = es.Easing.OutLinear,
                 },
-            },
+            }),
         },
         .{
             .node = .{ .Blend1D = .{
@@ -1051,7 +1053,7 @@ fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void 
                 .right_value = 8.0,
                 .left_strength_variable = anim.AnimController.hash_variable("character walk speed norm"),
             } },
-            .next = &[_]anim.NodeTransition{
+            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
                 anim.NodeTransition{
                     .node = 0,
                     .condition = anim.TransitionCondition{ .Float = .{
@@ -1070,25 +1072,25 @@ fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void 
                     .transition_duration = 0.1,
                     .transition_easing = es.Easing.OutLinear,
                 },
-            },
+            }),
         },
         .{
             .node = .{ .Basic = .{
                 .animation = character_animation_attack_id,
             } },
-            .next = &[_]anim.NodeTransition{
+            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
                 anim.NodeTransition{
                     .node = 0,
                     .condition = anim.TransitionCondition.Always,
                     .transition_duration = 0.1,
                     .transition_easing = es.Easing.OutLinear,
                 },
-            },
+            }),
         },
     };
 
-    anim_controller.nodes.clearRetainingCapacity();
-    try anim_controller.nodes.appendSlice(eng.get().general_allocator, anim_nodes[0..]);
+    anim_controller.clear_nodes();
+    try anim_controller.nodes.appendSlice(alloc, anim_nodes[0..]);
 
     anim_controller.base_animation = character_animation_idle_id;
 }
