@@ -12,6 +12,10 @@
 #define MAX_SHALLOW_SPOTS 4
 #endif
 
+#ifndef NUM_OCEAN_LOD_LAYERS
+#define NUM_OCEAN_LOD_LAYERS 4
+#endif
+
 struct PushConstants
 {
     float4x4 view_projection_matrix;
@@ -54,10 +58,10 @@ struct ShallowSpot
 ConstantBuffer<ShallowSpot[MAX_SHALLOW_SPOTS]> shallow_spots : register(b1);
 
 [[vk::binding(2, 0)]]
-Texture2D displacement_texture;
+Texture2DArray displacement_textures;
 
 [[vk::binding(3, 0)]]
-Texture2D slope_jacobian_texture;
+Texture2DArray slope_jacobian_textures;
 
 [[vk::binding(4, 0)]]
 SamplerState diffuse_sampler;
@@ -82,6 +86,10 @@ float distance_to_line(float2 pt1, float2 pt2, float2 testPt)
     float t = clamp(dot(ap, ab) / ab_len2, 0.0, 1.0);
     float2 closest = pt1 + ab * t;
     return length(testPt - closest);
+}
+
+float calculate_layer_map_length(float layer_0_map_length, float layer) {
+    return layer_0_map_length / pow(2.0, layer);
 }
 
 [shader("vertex")]
@@ -119,7 +127,12 @@ vs_out vs_main(vs_in input)
 
     output.tex_coord = output.world_position.xz / push_constant.map_length_m;
 
-    float3 displacement = displacement_texture.SampleLevel(diffuse_sampler, output.tex_coord, 0.0).xyz;
+    float3 displacement = 0.0;
+    for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
+        float p = pow(2.0, i);
+        float2 uv = output.tex_coord * p;
+        displacement += (displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz / p);
+    }
 
     output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
     output.world_position.xz -= displacement.xz * mult_mask;
@@ -145,26 +158,33 @@ ps_out ps_main(vs_out input)
     float3 view_dir = normalize(push_constant.camera_pos.xyz - input.world_position.xyz);
     float roughness = 0.0;
 
-    const float facet_size = push_constant.map_length_m / push_constant.spectrum_image_size;
-    float height_to_horizontal = push_constant.map_height_scale / facet_size;
+    float3 normal = float3(0.0, 0.0, 0.0);
+    float jacobian = slope_jacobian_textures.Sample(diffuse_sampler, float3(input.tex_coord, 0.0)).y;
 
-    float3 slope_jacobian = slope_jacobian_texture.Sample(diffuse_sampler, input.tex_coord).xyz;
-    slope_jacobian.xz *= max(input.colour.r, 0.4);
-    slope_jacobian.y += (1.0 - input.colour.r);
+    for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
+        const float facet_size = calculate_layer_map_length(push_constant.map_length_m, i) / push_constant.spectrum_image_size;
+        float height_to_horizontal = push_constant.map_height_scale / facet_size;
+
+        float p = pow(2.0, i);
+        float2 uv = input.tex_coord * p;
+        float3 sj = slope_jacobian_textures.Sample(diffuse_sampler, float3(uv, i)).xyz;
+        float3 sjn = (float3(sj.x, 0.0, sj.z) / p) * height_to_horizontal;
+        normal.xyz += float3(sjn.x, 1.0, sjn.z);
+        jacobian += sj.y;
+    }
+    normal *= max(input.colour.r, 0.4);
+    jacobian /= NUM_OCEAN_LOD_LAYERS;
+    jacobian += (1.0 - input.colour.r);
 
     // convert slope entries into world-space vertical gradient (dH/dx, dH/dz)
-    float dHdx = slope_jacobian.x * height_to_horizontal;
-    float dHdz = slope_jacobian.z * height_to_horizontal;
-
-    float3 normal = float3(-dHdx, 1.0, -dHdz);
     normal = normalize(normal);
 
-    float detJ = slope_jacobian.y;
+    float detJ = jacobian;
     float conv = max(0.0, 1.0 - detJ); // positive when compressed/converging
 
     // Tunable parameters (maybe can be promoted to push constants later)
-    const float foam_th0 = 0.2;
-    const float foam_th1 = 0.6;
+    const float foam_th0 = 0.0;
+    const float foam_th1 = 0.2;
     const float foam_strength = 1.5;
 
     float foam_conv = smoothstep(foam_th0, foam_th1, conv);

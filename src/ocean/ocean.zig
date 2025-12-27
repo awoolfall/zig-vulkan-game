@@ -19,6 +19,8 @@ const CLIPMAP_QUAD_COUNT = 512;
 
 const MAX_SHALLOW_SPOTS = 4;
 
+const NUM_OCEAN_SPECTRUM_LODS = 4;
+
 const H0PushConstantData = extern struct {
     map_length_m: f32,
     amplitude: f32,
@@ -67,44 +69,44 @@ gaussian_random_image: gfx.Image.Ref,
 gaussian_random_view: gfx.ImageView.Ref,
 
 h0_tilde_image: gfx.Image.Ref,
-h0_tilde_view: gfx.ImageView.Ref,
+h0_tilde_view: [NUM_OCEAN_SPECTRUM_LODS]gfx.ImageView.Ref,
 
 displacement_image: gfx.Image.Ref,
-displacement_views: [2]gfx.ImageView.Ref,
+displacement_views: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.ImageView.Ref,
 
 slope_jacobian_image: gfx.Image.Ref,
-slope_jacobian_views: [2]gfx.ImageView.Ref,
+slope_jacobian_views: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.ImageView.Ref,
 
 fft_processing_sj_image: gfx.Image.Ref,
-fft_processing_sj_views: [2]gfx.ImageView.Ref,
+fft_processing_sj_views: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.ImageView.Ref,
 
 fft_processing_d_image: gfx.Image.Ref,
-fft_processing_d_views: [2]gfx.ImageView.Ref,
+fft_processing_d_views: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.ImageView.Ref,
 
 fft_descriptor_layout: gfx.DescriptorLayout.Ref,
 fft_descriptor_pool: gfx.DescriptorPool.Ref,
 
-fft_descriptor_sets_hs: [2]gfx.DescriptorSet.Ref,
-fft_descriptor_sets_d: [2]gfx.DescriptorSet.Ref,
+fft_descriptor_sets_hs: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.DescriptorSet.Ref,
+fft_descriptor_sets_d: [NUM_OCEAN_SPECTRUM_LODS][2]gfx.DescriptorSet.Ref,
 
 fft_horizontal_pipeline: gfx.ComputePipeline.Ref,
 fft_vertical_pipeline: gfx.ComputePipeline.Ref,
 
 h0_descriptor_layout: gfx.DescriptorLayout.Ref,
 h0_descriptor_pool: gfx.DescriptorPool.Ref,
-h0_descriptor_set: gfx.DescriptorSet.Ref,
+h0_descriptor_set: [NUM_OCEAN_SPECTRUM_LODS]gfx.DescriptorSet.Ref,
 
 h0_pipeline: gfx.ComputePipeline.Ref,
 
 spectrum_descriptor_layout: gfx.DescriptorLayout.Ref,
 spectrum_descriptor_pool: gfx.DescriptorPool.Ref,
-spectrum_descriptor_set: gfx.DescriptorSet.Ref,
+spectrum_descriptor_set: [NUM_OCEAN_SPECTRUM_LODS]gfx.DescriptorSet.Ref,
 
 spectrum_pipeline: gfx.ComputePipeline.Ref,
 
 jacobian_descriptor_layout: gfx.DescriptorLayout.Ref,
 jacobian_descriptor_pool: gfx.DescriptorPool.Ref,
-jacobian_descriptor_set: gfx.DescriptorSet.Ref,
+jacobian_descriptor_set: [NUM_OCEAN_SPECTRUM_LODS]gfx.DescriptorSet.Ref,
 
 jacobian_pipeline: gfx.ComputePipeline.Ref,
 
@@ -112,6 +114,9 @@ render_lights_buffer: gfx.Buffer.Ref,
 render_shallow_spots_buffer: gfx.Buffer.Ref,
 
 render_shallow_spots_list: std.ArrayList(ShallowSpot),
+
+render_displacement_view: gfx.ImageView.Ref,
+render_slope_jacobian_view: gfx.ImageView.Ref,
 
 render_descriptor_layout: gfx.DescriptorLayout.Ref,
 render_descriptor_pool: gfx.DescriptorPool.Ref,
@@ -124,58 +129,84 @@ render_pipeline: gfx.GraphicsPipeline.Ref,
 render_sampler: gfx.Sampler.Ref,
 render_shader_file_watcher: FileWatcher,
 
+time: f32 = 1000.0,
+time_scale: f32 = 1.0,
+
 pub fn deinit(self: *Self) void {
     self.clipmap_mesh.deinit();
+
+    self.render_displacement_view.deinit();
+    self.render_slope_jacobian_view.deinit();
 
     self.gaussian_random_view.deinit();
     self.gaussian_random_image.deinit();
 
-    self.h0_tilde_view.deinit();
+    for (self.h0_tilde_view) |view| {
+        view.deinit();
+    }
     self.h0_tilde_image.deinit();
 
-    self.slope_jacobian_views[0].deinit();
-    self.slope_jacobian_views[1].deinit();
+    for (self.slope_jacobian_views) |views| {
+        views[0].deinit();
+        views[1].deinit();
+    }
     self.slope_jacobian_image.deinit();
 
-    self.displacement_views[0].deinit();
-    self.displacement_views[1].deinit();
+    for (self.displacement_views) |views| {
+        views[0].deinit();
+        views[1].deinit();
+    }
     self.displacement_image.deinit();
 
-    self.fft_processing_sj_views[0].deinit();
-    self.fft_processing_sj_views[1].deinit();
+    for (self.fft_processing_sj_views) |views| {
+        views[0].deinit();
+        views[1].deinit();
+    }
     self.fft_processing_sj_image.deinit();
 
-    self.fft_processing_d_views[0].deinit();
-    self.fft_processing_d_views[1].deinit();
+    for (self.fft_processing_d_views) |views| {
+        views[0].deinit();
+        views[1].deinit();
+    }
     self.fft_processing_d_image.deinit();
 
     self.fft_horizontal_pipeline.deinit();
     self.fft_vertical_pipeline.deinit();
 
-    self.fft_descriptor_sets_hs[0].deinit();
-    self.fft_descriptor_sets_hs[1].deinit();
+    for (self.fft_descriptor_sets_hs) |sets| {
+        sets[0].deinit();
+        sets[1].deinit();
+    }
 
-    self.fft_descriptor_sets_d[0].deinit();
-    self.fft_descriptor_sets_d[1].deinit();
+    for (self.fft_descriptor_sets_d) |sets| {
+        sets[0].deinit();
+        sets[1].deinit();
+    }
 
     self.fft_descriptor_pool.deinit();
     self.fft_descriptor_layout.deinit();
 
     self.h0_pipeline.deinit();
 
-    self.h0_descriptor_set.deinit();
+    for (self.h0_descriptor_set) |set| {
+        set.deinit();
+    }
     self.h0_descriptor_pool.deinit();
     self.h0_descriptor_layout.deinit();
 
     self.spectrum_pipeline.deinit();
 
-    self.spectrum_descriptor_set.deinit();
+    for (self.spectrum_descriptor_set) |set| {
+        set.deinit();
+    }
     self.spectrum_descriptor_pool.deinit();
     self.spectrum_descriptor_layout.deinit();
 
     self.jacobian_pipeline.deinit();
 
-    self.jacobian_descriptor_set.deinit();
+    for (self.jacobian_descriptor_set) |set| {
+        set.deinit();
+    }
     self.jacobian_descriptor_pool.deinit();
     self.jacobian_descriptor_layout.deinit();
         
@@ -198,6 +229,11 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     const alloc = eng.get().general_allocator;
+    
+    var arena_alloc = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
+    defer arena_alloc.deinit();
+
+    const arena = arena_alloc.allocator();
 
     const clipmap_mesh = try ClipmapMesh.init(alloc, Self.CLIPMAP_QUAD_COUNT);
     errdefer clipmap_mesh.deinit();
@@ -231,6 +267,7 @@ pub fn init() !Self {
             .format = .Rg32_Float,
             .width = N,
             .height = N,
+            .array_length = NUM_OCEAN_SPECTRUM_LODS,
             .dst_layout = .ShaderReadOnlyOptimal,
             .usage_flags = .{ .ShaderResource = true, .StorageResource = true, },
             .access_flags = .{ .GpuWrite = true, },
@@ -239,11 +276,23 @@ pub fn init() !Self {
     );
     errdefer h0_tilde_image.deinit();
 
-    const h0_tilde_image_view = try gfx.ImageView.init(.{
-        .image = h0_tilde_image,
-        .view_type = .ImageView2D,
-    });
-    errdefer h0_tilde_image_view.deinit();
+    var h0_tilde_image_views = try std.ArrayList(gfx.ImageView.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    defer h0_tilde_image_views.deinit(arena);
+    errdefer for (h0_tilde_image_views.items) |view| { view.deinit(); };
+
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        const view = try gfx.ImageView.init(.{
+            .image = h0_tilde_image,
+            .view_type = .ImageView2D,
+            .array_layers = .{
+                .base_array_layer = @intCast(layer),
+                .array_layer_count = 1,
+            },
+        });
+        errdefer view.deinit();
+
+        try h0_tilde_image_views.append(arena, view);
+    }
 
     // h0 descritpors
     const h0_descriptor_layout = try gfx.DescriptorLayout.init(.{
@@ -264,19 +313,27 @@ pub fn init() !Self {
 
     const h0_descriptor_pool = try gfx.DescriptorPool.init(.{
         .strategy = .{ .Layout = h0_descriptor_layout },
-        .max_sets = 1,
+        .max_sets = NUM_OCEAN_SPECTRUM_LODS,
     });
     errdefer h0_descriptor_pool.deinit();
 
-    const h0_descriptor_set = try (try h0_descriptor_pool.get()).allocate_set(.{ .layout = h0_descriptor_layout });
-    errdefer h0_descriptor_set.deinit();
+    var h0_tilde_image_sets = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    defer h0_tilde_image_sets.deinit(arena);
+    errdefer for (h0_tilde_image_sets.items) |item| { item.deinit(); };
 
-    try (try h0_descriptor_set.get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = gaussian_random_image_view }, },
-            .{ .binding = 1, .data = .{ .StorageImage = h0_tilde_image_view }, },
-        },
-    });
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        const h0_descriptor_set = try (try h0_descriptor_pool.get()).allocate_set(.{ .layout = h0_descriptor_layout });
+        errdefer h0_descriptor_set.deinit();
+
+        try (try h0_descriptor_set.get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = gaussian_random_image_view }, },
+                .{ .binding = 1, .data = .{ .StorageImage = h0_tilde_image_views.items[layer] }, },
+            },
+        });
+
+        try h0_tilde_image_sets.append(arena, h0_descriptor_set);
+    }
 
     // h0 pipeline
     const h0_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
@@ -314,26 +371,26 @@ pub fn init() !Self {
     errdefer h0_pipeline.deinit();
 
     // spectrum images
-    const displacement_image, const displacement_views = try init_fft_rw_image_and_view(N);
+    const displacement_image, var displacement_views = try init_fft_rw_image_and_view(N, arena);
     errdefer displacement_image.deinit();
-    errdefer displacement_views[0].deinit();
-    errdefer displacement_views[1].deinit();
+    errdefer displacement_views.deinit(arena);
+    errdefer for (displacement_views.items) |item| { item[0].deinit(); item[1].deinit(); };
 
-    const slope_jacobian_image, const slope_jacobian_views = try init_fft_rw_image_and_view(N);
+    const slope_jacobian_image, var slope_jacobian_views = try init_fft_rw_image_and_view(N, arena);
     errdefer slope_jacobian_image.deinit();
-    errdefer slope_jacobian_views[0].deinit();
-    errdefer slope_jacobian_views[1].deinit();
+    errdefer slope_jacobian_views.deinit(arena);
+    errdefer for (slope_jacobian_views.items) |item| { item[0].deinit(); item[1].deinit(); };
 
     // fft processing images
-    const fft_processing_sj_image, const fft_processing_sj_views = try init_fft_rw_image_and_view(N);
+    const fft_processing_sj_image, var fft_processing_sj_views = try init_fft_rw_image_and_view(N, arena);
     errdefer fft_processing_sj_image.deinit();
-    errdefer fft_processing_sj_views[0].deinit();
-    errdefer fft_processing_sj_views[1].deinit();
+    errdefer fft_processing_sj_views.deinit(arena);
+    errdefer for (fft_processing_sj_views.items) |item| { item[0].deinit(); item[1].deinit(); };
 
-    const fft_processing_d_image, const fft_processing_d_views = try init_fft_rw_image_and_view(N);
+    const fft_processing_d_image, var fft_processing_d_views = try init_fft_rw_image_and_view(N, arena);
     errdefer fft_processing_d_image.deinit();
-    errdefer fft_processing_d_views[0].deinit();
-    errdefer fft_processing_d_views[1].deinit();
+    errdefer fft_processing_d_views.deinit(arena);
+    errdefer for (fft_processing_d_views.items) |item| { item[0].deinit(); item[1].deinit(); };
 
     // fft compute descriptors
     const fft_descriptor_layout = try gfx.DescriptorLayout.init(.{
@@ -362,60 +419,76 @@ pub fn init() !Self {
     });
     errdefer fft_descriptor_layout.deinit();
 
-    const fft_descriptor_pool = try gfx.DescriptorPool.init(.{ .strategy = .{ .Layout = fft_descriptor_layout }, .max_sets = 4, });
+    const fft_descriptor_pool = try gfx.DescriptorPool.init(.{ .strategy = .{ .Layout = fft_descriptor_layout }, .max_sets = 4 * NUM_OCEAN_SPECTRUM_LODS, });
     errdefer fft_descriptor_pool.deinit();
 
-    var fft_descriptor_sets_slope_jacobian: [2]gfx.DescriptorSet.Ref = undefined;
+    var fft_descriptor_sets_slope_jacobian_list = try std.ArrayList([2]gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    errdefer for (fft_descriptor_sets_slope_jacobian_list.items) |item| { item[0].deinit(); item[1].deinit(); };
+    defer fft_descriptor_sets_slope_jacobian_list.deinit(arena);
 
-    fft_descriptor_sets_slope_jacobian[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_slope_jacobian[0].deinit();
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        var fft_descriptor_sets_slope_jacobian: [2]gfx.DescriptorSet.Ref = undefined;
 
-    fft_descriptor_sets_slope_jacobian[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_slope_jacobian[1].deinit();
+        fft_descriptor_sets_slope_jacobian[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+        errdefer fft_descriptor_sets_slope_jacobian[0].deinit();
 
-    try (try fft_descriptor_sets_slope_jacobian[0].get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = slope_jacobian_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = slope_jacobian_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_sj_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_sj_views[1] } },
-        },
-    });
+        fft_descriptor_sets_slope_jacobian[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+        errdefer fft_descriptor_sets_slope_jacobian[1].deinit();
 
-    try (try fft_descriptor_sets_slope_jacobian[1].get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = fft_processing_sj_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = fft_processing_sj_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = slope_jacobian_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views[1] } },
-        },
-    });
+        try (try fft_descriptor_sets_slope_jacobian[0].get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = slope_jacobian_views.items[layer][0] } },
+                .{ .binding = 1, .data = .{ .ImageView = slope_jacobian_views.items[layer][1] } },
+                .{ .binding = 2, .data = .{ .StorageImage = fft_processing_sj_views.items[layer][0] } },
+                .{ .binding = 3, .data = .{ .StorageImage = fft_processing_sj_views.items[layer][1] } },
+            },
+        });
 
-    var fft_descriptor_sets_displacement: [2]gfx.DescriptorSet.Ref = undefined;
+        try (try fft_descriptor_sets_slope_jacobian[1].get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = fft_processing_sj_views.items[layer][0] } },
+                .{ .binding = 1, .data = .{ .ImageView = fft_processing_sj_views.items[layer][1] } },
+                .{ .binding = 2, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] } },
+                .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views.items[layer][1] } },
+            },
+        });
 
-    fft_descriptor_sets_displacement[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_displacement[0].deinit();
+        try fft_descriptor_sets_slope_jacobian_list.append(arena, fft_descriptor_sets_slope_jacobian);
+    }
 
-    fft_descriptor_sets_displacement[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
-    errdefer fft_descriptor_sets_displacement[1].deinit();
+    var fft_descriptor_sets_displacement_list = try std.ArrayList([2]gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    errdefer for (fft_descriptor_sets_displacement_list.items) |item| { item[0].deinit(); item[1].deinit(); };
+    defer fft_descriptor_sets_displacement_list.deinit(arena);
 
-    try (try fft_descriptor_sets_displacement[0].get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = displacement_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = displacement_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = fft_processing_d_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = fft_processing_d_views[1] } },
-        },
-    });
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        var fft_descriptor_sets_displacement: [2]gfx.DescriptorSet.Ref = undefined;
 
-    try (try fft_descriptor_sets_displacement[1].get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = fft_processing_d_views[0] } },
-            .{ .binding = 1, .data = .{ .ImageView = fft_processing_d_views[1] } },
-            .{ .binding = 2, .data = .{ .StorageImage = displacement_views[0] } },
-            .{ .binding = 3, .data = .{ .StorageImage = displacement_views[1] } },
-        },
-    });
+        fft_descriptor_sets_displacement[0] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+        errdefer fft_descriptor_sets_displacement[0].deinit();
+
+        fft_descriptor_sets_displacement[1] = try (try fft_descriptor_pool.get()).allocate_set(.{ .layout = fft_descriptor_layout });
+        errdefer fft_descriptor_sets_displacement[1].deinit();
+
+        try (try fft_descriptor_sets_displacement[0].get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = displacement_views.items[layer][0] } },
+                .{ .binding = 1, .data = .{ .ImageView = displacement_views.items[layer][1] } },
+                .{ .binding = 2, .data = .{ .StorageImage = fft_processing_d_views.items[layer][0] } },
+                .{ .binding = 3, .data = .{ .StorageImage = fft_processing_d_views.items[layer][1] } },
+            },
+        });
+
+        try (try fft_descriptor_sets_displacement[1].get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = fft_processing_d_views.items[layer][0] } },
+                .{ .binding = 1, .data = .{ .ImageView = fft_processing_d_views.items[layer][1] } },
+                .{ .binding = 2, .data = .{ .StorageImage = displacement_views.items[layer][0] } },
+                .{ .binding = 3, .data = .{ .StorageImage = displacement_views.items[layer][1] } },
+            },
+        });
+
+        try fft_descriptor_sets_displacement_list.append(arena, fft_descriptor_sets_displacement);
+    }
 
     // fft compute pipelines
     const fft_horizontal_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
@@ -478,7 +551,7 @@ pub fn init() !Self {
     });
     errdefer fft_vertical_pipeline.deinit();
 
-    // spectrum descritpors
+    // spectrum descriptors
     const spectrum_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
             gfx.DescriptorBindingInfo {
@@ -512,22 +585,30 @@ pub fn init() !Self {
 
     const spectrum_descriptor_pool = try gfx.DescriptorPool.init(.{
         .strategy = .{ .Layout = spectrum_descriptor_layout },
-        .max_sets = 1,
+        .max_sets = NUM_OCEAN_SPECTRUM_LODS,
     });
     errdefer spectrum_descriptor_pool.deinit();
 
-    const spectrum_descriptor_set = try (try spectrum_descriptor_pool.get()).allocate_set(.{ .layout = spectrum_descriptor_layout });
-    errdefer spectrum_descriptor_set.deinit();
+    var spectrum_descriptor_sets_list = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    defer spectrum_descriptor_sets_list.deinit(arena);
+    errdefer for (spectrum_descriptor_sets_list.items) |item| { item.deinit(); };
 
-    try (try spectrum_descriptor_set.get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_view }, },
-            .{ .binding = 1, .data = .{ .StorageImage = displacement_views[0] }, },
-            .{ .binding = 2, .data = .{ .StorageImage = displacement_views[1] }, },
-            .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views[0] }, },
-            .{ .binding = 4, .data = .{ .StorageImage = slope_jacobian_views[1] }, },
-        },
-    });
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        const spectrum_descriptor_set = try (try spectrum_descriptor_pool.get()).allocate_set(.{ .layout = spectrum_descriptor_layout });
+        errdefer spectrum_descriptor_set.deinit();
+
+        try (try spectrum_descriptor_set.get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_views.items[layer] }, },
+                .{ .binding = 1, .data = .{ .StorageImage = displacement_views.items[layer][0] }, },
+                .{ .binding = 2, .data = .{ .StorageImage = displacement_views.items[layer][1] }, },
+                .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] }, },
+                .{ .binding = 4, .data = .{ .StorageImage = slope_jacobian_views.items[layer][1] }, },
+            },
+        });
+        
+        try spectrum_descriptor_sets_list.append(arena, spectrum_descriptor_set);
+    }
 
     // spectrum pipeline
     const spectrum_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
@@ -583,19 +664,27 @@ pub fn init() !Self {
 
     const jacobian_descriptor_pool = try gfx.DescriptorPool.init(.{
         .strategy = .{ .Layout = jacobian_descriptor_layout },
-        .max_sets = 1,
+        .max_sets = NUM_OCEAN_SPECTRUM_LODS,
     });
     errdefer spectrum_descriptor_pool.deinit();
 
-    const jacobian_descriptor_set = try (try jacobian_descriptor_pool.get()).allocate_set(.{ .layout = jacobian_descriptor_layout });
-    errdefer jacobian_descriptor_set.deinit();
+    var jacobian_descriptor_sets_list = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
+    defer jacobian_descriptor_sets_list.deinit(arena);
+    errdefer for (jacobian_descriptor_sets_list.items) |item| { item.deinit(); };
 
-    try (try jacobian_descriptor_set.get()).update(.{
-        .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = displacement_views[0] }, },
-            .{ .binding = 1, .data = .{ .StorageImage = slope_jacobian_views[0] }, },
-        },
-    });
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        const jacobian_descriptor_set = try (try jacobian_descriptor_pool.get()).allocate_set(.{ .layout = jacobian_descriptor_layout });
+        errdefer jacobian_descriptor_set.deinit();
+
+        try (try jacobian_descriptor_set.get()).update(.{
+            .writes = &.{
+                .{ .binding = 0, .data = .{ .ImageView = displacement_views.items[layer][0] }, },
+                .{ .binding = 1, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] }, },
+            },
+        });
+
+        try jacobian_descriptor_sets_list.append(arena, jacobian_descriptor_set);
+    }
 
     // jacobian pipeline
     const jacobian_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
@@ -631,6 +720,48 @@ pub fn init() !Self {
         }
     });
     errdefer jacobian_pipeline.deinit();
+
+    // render resources
+    const sampler = try gfx.Sampler.init(.{
+        .filter_min_mag = .Linear,
+        .filter_mip = .Linear,
+        .border_mode = .Wrap,
+    });
+    errdefer sampler.deinit();
+
+    const lights_buffer = try gfx.Buffer.init(
+        @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer lights_buffer.deinit();
+
+    const shallow_spots_buffer = try gfx.Buffer.init(
+        @sizeOf(ShallowSpot) * MAX_SHALLOW_SPOTS,
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer shallow_spots_buffer.deinit();
+
+    const render_displacement_view = try gfx.ImageView.init(.{
+        .image = displacement_image,
+        .array_layers = .{
+            .base_array_layer = 0,
+            .array_layer_count = NUM_OCEAN_SPECTRUM_LODS,
+        },
+        .view_type = .ImageView2DArray,
+    });
+    errdefer render_displacement_view.deinit();
+
+    const render_slope_jacobian_view = try gfx.ImageView.init(.{
+        .image = slope_jacobian_image,
+        .array_layers = .{
+            .base_array_layer = 0,
+            .array_layer_count = NUM_OCEAN_SPECTRUM_LODS,
+        },
+        .view_type = .ImageView2DArray,
+    });
+    errdefer render_slope_jacobian_view.deinit();
 
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
@@ -673,27 +804,6 @@ pub fn init() !Self {
     const render_descriptor_set = try (try render_descriptor_pool.get()).allocate_set(.{ .layout = render_descriptor_layout });
     errdefer render_descriptor_set.deinit();
 
-    const sampler = try gfx.Sampler.init(.{
-        .filter_min_mag = .Linear,
-        .filter_mip = .Linear,
-        .border_mode = .Wrap,
-    });
-    errdefer sampler.deinit();
-
-    const lights_buffer = try gfx.Buffer.init(
-        @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-    );
-    errdefer lights_buffer.deinit();
-
-    const shallow_spots_buffer = try gfx.Buffer.init(
-        @sizeOf(ShallowSpot) * MAX_SHALLOW_SPOTS,
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
-    );
-    errdefer shallow_spots_buffer.deinit();
-
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
             gfx.DescriptorSetUpdateWriteInfo {
@@ -710,11 +820,11 @@ pub fn init() !Self {
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 2,
-                .data = .{ .ImageView = displacement_views[0] },
+                .data = .{ .ImageView = render_displacement_view },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 3,
-                .data = .{ .ImageView = slope_jacobian_views[0] },
+                .data = .{ .ImageView = render_slope_jacobian_view },
             },
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 4,
@@ -793,46 +903,49 @@ pub fn init() !Self {
         .gaussian_random_view = gaussian_random_image_view,
 
         .h0_tilde_image = h0_tilde_image,
-        .h0_tilde_view = h0_tilde_image_view,
+        .h0_tilde_view = h0_tilde_image_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .slope_jacobian_image = slope_jacobian_image,
-        .slope_jacobian_views = slope_jacobian_views,
+        .slope_jacobian_views = slope_jacobian_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
         
         .displacement_image = displacement_image,
-        .displacement_views = displacement_views,
+        .displacement_views = displacement_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .fft_processing_sj_image = fft_processing_sj_image,
-        .fft_processing_sj_views = fft_processing_sj_views,
+        .fft_processing_sj_views = fft_processing_sj_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .fft_processing_d_image = fft_processing_d_image,
-        .fft_processing_d_views = fft_processing_d_views,
+        .fft_processing_d_views = fft_processing_d_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .fft_descriptor_layout = fft_descriptor_layout,
         .fft_descriptor_pool = fft_descriptor_pool,
 
-        .fft_descriptor_sets_hs = fft_descriptor_sets_slope_jacobian,
-        .fft_descriptor_sets_d = fft_descriptor_sets_displacement,
+        .fft_descriptor_sets_hs = fft_descriptor_sets_slope_jacobian_list.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
+        .fft_descriptor_sets_d = fft_descriptor_sets_displacement_list.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .fft_horizontal_pipeline = fft_horizontal_pipeline,
         .fft_vertical_pipeline = fft_vertical_pipeline,
 
         .h0_descriptor_layout = h0_descriptor_layout,
         .h0_descriptor_pool = h0_descriptor_pool,
-        .h0_descriptor_set = h0_descriptor_set,
+        .h0_descriptor_set = h0_tilde_image_sets.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .h0_pipeline = h0_pipeline,
 
         .spectrum_descriptor_layout = spectrum_descriptor_layout,
         .spectrum_descriptor_pool = spectrum_descriptor_pool,
-        .spectrum_descriptor_set = spectrum_descriptor_set,
+        .spectrum_descriptor_set = spectrum_descriptor_sets_list.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .spectrum_pipeline = spectrum_pipeline,
 
         .jacobian_descriptor_layout = jacobian_descriptor_layout,
         .jacobian_descriptor_pool = jacobian_descriptor_pool,
-        .jacobian_descriptor_set = jacobian_descriptor_set,
+        .jacobian_descriptor_set = jacobian_descriptor_sets_list.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
         .jacobian_pipeline = jacobian_pipeline,
+
+        .render_displacement_view = render_displacement_view,
+        .render_slope_jacobian_view = render_slope_jacobian_view,
 
         .render_descriptor_layout = render_descriptor_layout,
         .render_descriptor_pool = render_descriptor_pool,
@@ -880,13 +993,13 @@ pub fn init() !Self {
     return self;
 }
 
-fn init_fft_rw_image_and_view(comptime side_length: u32) !struct { gfx.Image.Ref, [2]gfx.ImageView.Ref } {
+fn init_fft_rw_image_and_view(comptime side_length: u32, alloc: std.mem.Allocator) !struct { gfx.Image.Ref, std.ArrayList([2]gfx.ImageView.Ref) } {
     const image = try gfx.Image.init(
         .{
             .format = .Rgba32_Float,
             .width = side_length,
             .height = side_length,
-            .array_length = 2,
+            .array_length = NUM_OCEAN_SPECTRUM_LODS * 2,
             .dst_layout = .ShaderReadOnlyOptimal,
             .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
             .access_flags = .{ .GpuWrite = true, },
@@ -895,27 +1008,35 @@ fn init_fft_rw_image_and_view(comptime side_length: u32) !struct { gfx.Image.Ref
     );
     errdefer image.deinit();
 
-    const view_r = try gfx.ImageView.init(.{ 
-        .image = image, 
-        .array_layers = .{ 
-            .base_array_layer = 0,
-            .array_layer_count = 1,
-        },
-        .view_type = .ImageView2D
-    });
-    errdefer view_r.deinit();
+    var image_views_list = try std.ArrayList([2]gfx.ImageView.Ref).initCapacity(alloc, NUM_OCEAN_SPECTRUM_LODS);
+    errdefer image_views_list.deinit(alloc);
+    errdefer for (image_views_list.items) |item| { item[0].deinit(); item[1].deinit(); };
 
-    const view_i = try gfx.ImageView.init(.{ 
-        .image = image, 
-        .array_layers = .{ 
-            .base_array_layer = 1,
-            .array_layer_count = 1,
-        },
-        .view_type = .ImageView2D
-    });
-    errdefer view_i.deinit();
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        const view_r = try gfx.ImageView.init(.{ 
+            .image = image, 
+            .array_layers = .{ 
+                .base_array_layer = @intCast(layer),
+                .array_layer_count = 1,
+            },
+            .view_type = .ImageView2D
+        });
+        errdefer view_r.deinit();
 
-    return .{ image, .{ view_r, view_i } };
+        const view_i = try gfx.ImageView.init(.{ 
+            .image = image, 
+            .array_layers = .{ 
+                .base_array_layer = @intCast(NUM_OCEAN_SPECTRUM_LODS + layer),
+                .array_layer_count = 1,
+            },
+            .view_type = .ImageView2D
+        });
+        errdefer view_i.deinit();
+
+        try image_views_list.append(alloc, .{ view_r, view_i });
+    }
+
+    return .{ image, image_views_list };
 }
 
 fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
@@ -943,6 +1064,7 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
         },
         .preprocessor_macros = &.{
             .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{ Self.CLIPMAP_QUAD_COUNT }) },
+            .{ "NUM_OCEAN_LOD_LAYERS", std.fmt.comptimePrint("{}", .{ Self.NUM_OCEAN_SPECTRUM_LODS }) },
         }
     });
     defer alloc.free(shader_spirv);
@@ -1007,24 +1129,26 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSe
         .dst_stage = .{ .compute_shader = true, },
     });
 
-    // dispatch h0 image generation
-    cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.h0_descriptor_set,
-        },
-    });
-    const h0_push_constant_data = H0PushConstantData {
-        .map_length_m = Self.MAP_LENGTH_M,
-        .amplitude = settings.amplitude,
-        .wind = settings.wind,
-    };
-    cmd.cmd_push_constants(.{
-        .offset = 0,
-        .shader_stages = .{ .Compute = true, },
-        .data = @ptrCast(&h0_push_constant_data),
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        // dispatch h0 image generation
+        cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.h0_descriptor_set[layer],
+            },
+        });
+        const h0_push_constant_data = H0PushConstantData {
+            .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
+            .amplitude = settings.amplitude,
+            .wind = settings.wind,
+        };
+        cmd.cmd_push_constants(.{
+            .offset = 0,
+            .shader_stages = .{ .Compute = true, },
+            .data = @ptrCast(&h0_push_constant_data),
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    }
 
     // transition h0 to shader reading from compute destination
     cmd.cmd_pipeline_barrier(.{
@@ -1064,7 +1188,13 @@ fn sort_shallow_spots(self: *Self, reference_point: [2]f32) void {
     std.mem.sort(ShallowSpot, self.render_shallow_spots_list.items, zm.loadArr2(reference_point), shallow_spots_sort_function);
 }
 
+fn calculate_layer_map_length(layer_0_map_length: usize, layer: usize) usize {
+    return @divExact(layer_0_map_length, std.math.pow(usize, 2, layer));
+}
+
 pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
+    self.time += (eng.get().time.delta_time_f32() * self.time_scale);
+    
     // transition spectrum images from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
@@ -1087,23 +1217,25 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
-    // dispatch spectrum image generation
-    cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.spectrum_descriptor_set,
-        },
-    });
-    const spectrum_push_constant_data = SpectrumPushConstantData {
-        .map_length_m = Self.MAP_LENGTH_M,
-        .time = @floatCast(eng.get().time.time_since_start_of_app()),
-    };
-    cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Compute = true, },
-        .offset = 0,
-        .data = std.mem.asBytes(&spectrum_push_constant_data),
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        // dispatch spectrum image generation
+        cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.spectrum_descriptor_set[layer],
+            },
+        });
+        const spectrum_push_constant_data = SpectrumPushConstantData {
+            .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
+            .time = self.time,
+        };
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Compute = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&spectrum_push_constant_data),
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    }
 
     // transition images to perform first stage of FFTs on height/slope and displacement images
     cmd.cmd_pipeline_barrier(.{
@@ -1141,21 +1273,23 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
-    // dispatch horizontal stage FFTs
-    cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.fft_descriptor_sets_hs[0],
-        },
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+    for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        // dispatch horizontal stage FFTs
+        cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.fft_descriptor_sets_hs[layer][0],
+            },
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
 
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.fft_descriptor_sets_d[0],
-        },
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.fft_descriptor_sets_d[layer][0],
+            },
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+    }
     
     // transition images to perform second stage of FFTs on height/slope and displacement images
     cmd.cmd_pipeline_barrier(.{
@@ -1193,21 +1327,23 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
-    // dispatch vertical stage FFTs
-    cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.fft_descriptor_sets_hs[1],
-        },
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+    inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        // dispatch vertical stage FFTs
+        cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.fft_descriptor_sets_hs[layer][1],
+            },
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
 
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.fft_descriptor_sets_d[1],
-        },
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.fft_descriptor_sets_d[layer][1],
+            },
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+    }
 
     // transition displacement image ready for shader reading
     cmd.cmd_pipeline_barrier(.{
@@ -1224,22 +1360,24 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
     });
 
-    // dispatch jacobian image generation
-    cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{
-        .descriptor_sets = &.{
-            self.jacobian_descriptor_set,
-        },
-    });
-    const jacobian_push_constant_data = JacobianPushConstantData {
-        .map_length_m = Self.MAP_LENGTH_M,
-    };
-    cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Compute = true, },
-        .offset = 0,
-        .data = std.mem.asBytes(&jacobian_push_constant_data),
-    });
-    cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
+        // dispatch jacobian image generation
+        cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.jacobian_descriptor_set[layer],
+            },
+        });
+        const jacobian_push_constant_data = JacobianPushConstantData {
+            .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
+        };
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Compute = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&jacobian_push_constant_data),
+        });
+        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+    }
 
     // finally transition slope_jacobian image ready for shader reading
     cmd.cmd_pipeline_barrier(.{
