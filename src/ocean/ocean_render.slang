@@ -131,7 +131,7 @@ vs_out vs_main(vs_in input)
     for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
         float p = pow(2.0, i);
         float2 uv = output.tex_coord * p;
-        displacement += (displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz / p);
+        displacement += displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz;
     }
 
     output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
@@ -158,8 +158,9 @@ ps_out ps_main(vs_out input)
     float3 view_dir = normalize(push_constant.camera_pos.xyz - input.world_position.xyz);
     float roughness = 0.0;
 
+    // accumulate horizontal slope components across LODs, and average
     float3 normal = float3(0.0, 0.0, 0.0);
-    float jacobian = slope_jacobian_textures.Sample(diffuse_sampler, float3(input.tex_coord, 0.0)).y;
+    float jacobian = 0.0;
 
     for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
         const float facet_size = calculate_layer_map_length(push_constant.map_length_m, i) / push_constant.spectrum_image_size;
@@ -169,22 +170,27 @@ ps_out ps_main(vs_out input)
         float2 uv = input.tex_coord * p;
         float3 sj = slope_jacobian_textures.Sample(diffuse_sampler, float3(uv, i)).xyz;
         float3 sjn = (float3(sj.x, 0.0, sj.z) / p) * height_to_horizontal;
-        normal.xyz += float3(sjn.x, 1.0, sjn.z);
+        normal += float3(sjn.x, 0.0, sjn.z); // accumulate only X/Z slope
         jacobian += sj.y;
     }
-    normal *= max(input.colour.r, 0.4);
-    jacobian /= NUM_OCEAN_LOD_LAYERS;
-    jacobian += (1.0 - input.colour.r);
 
-    // convert slope entries into world-space vertical gradient (dH/dx, dH/dz)
-    normal = normalize(normal);
+    // average horizontal slope and add the vertical component once
+    normal /= float(NUM_OCEAN_LOD_LAYERS);
+    normal += float3(0.0, 1.0, 0.0);
+
+    // apply mask/strength then normalize
+    normal *= max(input.colour.r, 0.4);
+    normal = normalize(normal * float3(-1.0, 1.0, -1.0));
+
+    jacobian /= float(NUM_OCEAN_LOD_LAYERS);
+    jacobian += (1.0 - input.colour.r);
 
     float detJ = jacobian;
     float conv = max(0.0, 1.0 - detJ); // positive when compressed/converging
 
     // Tunable parameters (maybe can be promoted to push constants later)
-    const float foam_th0 = 0.0;
-    const float foam_th1 = 0.2;
+    const float foam_th0 = 0.125;
+    const float foam_th1 = 0.3;
     const float foam_strength = 1.5;
 
     float foam_conv = smoothstep(foam_th0, foam_th1, conv);

@@ -11,11 +11,11 @@ const Self = @This();
 
 const N = 512;
 const fN: comptime_float = @floatFromInt(N);
-const MAP_LENGTH_M = fN / 2.0;
+const MAP_LENGTH_M = 256;
 const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 
 const ShaderPath = "../../src/ocean/ocean_render.slang";
-const CLIPMAP_QUAD_COUNT = 512;
+const CLIPMAP_QUAD_COUNT = 1024;
 
 const MAX_SHALLOW_SPOTS = 4;
 
@@ -976,7 +976,7 @@ pub fn init() !Self {
         defer cmd.deinit();
 
         try cmd.cmd_begin(.{ .one_time_submit = true, });
-        self.recreate_h0_image(&cmd, .{ .amplitude = 0.15, .wind = .{ 15.0, 0.0 } });
+        self.recreate_h0_image(&cmd, .{ .amplitude = 0.1, .wind = .{ 15.0, 0.0 } });
         try cmd.cmd_end();
 
         var fence = try gfx.Fence.init(.{});
