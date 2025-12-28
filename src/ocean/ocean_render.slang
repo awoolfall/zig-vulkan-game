@@ -140,7 +140,7 @@ vs_out vs_main(vs_in input)
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
     float cc = mult_mask;
-    output.colour.rgb = float3(cc, cc, cc);
+    output.colour.rgb = float3(cc, displacement.y, cc);
 
     return output;
 }
@@ -189,7 +189,7 @@ ps_out ps_main(vs_out input)
     float conv = max(0.0, 1.0 - detJ); // positive when compressed/converging
 
     // Tunable parameters (maybe can be promoted to push constants later)
-    const float foam_th0 = 0.125;
+    const float foam_th0 = 0.1;
     const float foam_th1 = 0.3;
     const float foam_strength = 1.5;
 
@@ -210,6 +210,21 @@ ps_out ps_main(vs_out input)
         LightData light = lights_data[0].lights[i];
         output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_position.xyz, normal, 0.5, roughnesss);
     }
+
+    float k1 = 1.5;
+    float k2 = 0.5;
+    float k3 = 1.0;
+    float ambient_light = 0.1;
+
+    float dotsun = saturate(dot(lights_data[0].lights[0].direction.xyz, normal));
+    // output.colour.rgb = float3(dotsun, dotsun, dotsun);
+    float wave_height = smoothstep(-2.0, 2.0, input.colour.y); // max(input.colour.y + 1.0, 0.0);
+    // output.colour.rgb = pow(0.5 - 0.5 * dotsun, 3) * float3(wave_height, wave_height, wave_height);
+    float dotnormal = max(dot(view_dir, normal), 0.0);
+    dotnormal *= dotnormal;
+    // output.colour.rgb = float3(dotnormal, dotnormal, dotnormal);
+    float sunnormal = dot(lights_data[0].lights[0].direction.xyz, float3(0.0, 1.0, 0.0));
+    output.colour.rgb = output.colour.rgb + saturate(k1 * pow(0.5 - 0.5 * dotsun, 3) * wave_height + k2 * dotnormal) * k3 * (smoothstep(-0.2, 0.5, sunnormal) + ambient_light) * diffuse_colour.rgb;
 
     // apply fog
     float fog_distance = (0.3 / input.position.w);
