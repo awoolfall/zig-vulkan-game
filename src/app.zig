@@ -21,6 +21,7 @@ const FontEnum = eng.ui.FontEnum;
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
 const Ocean = @import("ocean/ocean.zig");
+const Clouds = @import("clouds/clouds.zig");
 const EditMode = @import("edit_mode.zig");
 
 const gitrev = eng.gitrev;
@@ -41,6 +42,7 @@ player_attack_particle_system: eng.particles.ParticleSystem,
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
 ocean: Ocean,
+clouds: Clouds,
 particles_renderer: eng.particles_renderer.ParticleRenderer,
 
 edit_mode: EditMode,
@@ -67,6 +69,7 @@ pub fn deinit(self: *Self) void {
     self.standard_renderer.deinit();
     self.terrain_renderer.deinit();
     self.ocean.deinit();
+    self.clouds.deinit();
     self.particles_renderer.deinit();
     self.edit_mode.deinit();
 
@@ -176,6 +179,9 @@ pub fn init() !Self {
     var ocean = try Ocean.init();
     errdefer ocean.deinit();
 
+    var clouds = try Clouds.init(eng.get().general_allocator);
+    errdefer clouds.deinit();
+
     var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
     errdefer particles_renderer.deinit();
 
@@ -204,6 +210,7 @@ pub fn init() !Self {
         .standard_renderer = standard_renderer,
         .terrain_renderer = terrain_renderer,
         .ocean = ocean,
+        .clouds = clouds,
         .particles_renderer = particles_renderer,
         .edit_mode = edit_mode,
 
@@ -724,6 +731,11 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render particle systems: {}", .{err});
     };
     self.particles_renderer.clear();
+
+    // render clouds
+    self.clouds.render(cmd, render_camera) catch |err| {
+        std.log.warn("Unable to render clouds: {}", .{err});
+    };
 
     // apply bloom
     engine.gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {

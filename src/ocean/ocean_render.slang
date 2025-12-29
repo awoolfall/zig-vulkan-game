@@ -211,8 +211,8 @@ ps_out ps_main(vs_out input)
         output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_position.xyz, normal, 0.5, roughnesss);
     }
 
-    float k1 = 1.5;
-    float k2 = 0.5;
+    float k1 = 1.0;
+    float k2 = 0.2;
     float k3 = 1.0;
     float ambient_light = 0.1;
 
