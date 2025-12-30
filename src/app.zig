@@ -192,7 +192,7 @@ pub fn init() !Self {
         .camera = eng.camera.Camera {
             .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine.gfx.swapchain_aspect()),
             .near_field = 0.3,
-            .far_field = 10000.0,
+            .far_field = 10_000.0,
             .move_speed = 10.0,
             .mouse_sensitivity = 0.001,
             .max_orbit_distance = 10.0,
@@ -733,7 +733,7 @@ fn update(self: *Self) !void {
     self.particles_renderer.clear();
 
     // render clouds
-    self.clouds.render(cmd, render_camera) catch |err| {
+    self.clouds.render(cmd, render_camera, &self.standard_renderer) catch |err| {
         std.log.warn("Unable to render clouds: {}", .{err});
     };
 

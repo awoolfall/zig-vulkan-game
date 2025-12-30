@@ -6,7 +6,7 @@
 
 struct PushConstants
 {
-    int hi;
+    int hi; // unused
 };
 
 [[vk::push_constant]]
@@ -51,10 +51,17 @@ struct ps_out
 [shader("pixel")]
 ps_out ps_main(vs_out input)
 {
-    ps_out output = (ps_out) 0;
+    ps_out output = (ps_out)0;
 
-    float occ = cloud_sample_image.Sample(diffuse_sampler, input.tex_coord).x;
-    output.colour = float4(1.0, 1.0, 1.0, occ);
+    float4 occ = cloud_sample_image.SampleLevel(diffuse_sampler, input.tex_coord, 0);
+
+    float3 hdr = occ.rgb;
+    float alpha = occ.a;
+
+    // Premultiply alpha
+    float3 premul = hdr * alpha;
+
+    output.colour = float4(premul, alpha);
 
     return output;
 }

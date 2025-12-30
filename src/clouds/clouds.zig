@@ -13,8 +13,8 @@ const RenderShaderPath = "../../src/clouds/cloud_render.slang";
 const CLOUD_DENSITY_IMAGE_SIZE: [2]u32 = .{ 256, 256 };
 
 const CloudDensityPushConstant = extern struct {
-    inv_view_projection_matrix: zm.Mat,
-    camera_position: [3]f32,
+    inv_view_matrix: zm.Mat,
+    inv_projection_matrix: zm.Mat,
 };
 
 const RenderPushConstant = extern struct {
@@ -88,6 +88,13 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .{ .CpuWrite = true, },
     );
     errdefer lights_buffer.deinit();
+    
+    const sampler = try gfx.Sampler.init(.{
+        .filter_min_mag = .Linear,
+        .filter_mip = .Linear,
+        .border_mode = .Mirror,
+    });
+    errdefer sampler.deinit();
 
     // compute descriptors
     const density_descriptor_layout = try gfx.DescriptorLayout.init(.{
@@ -100,6 +107,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Compute = true, },
                 .binding = 1,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 2,
                 .binding_type = .UniformBuffer,
             }
         },
@@ -118,17 +130,10 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     try (try spectrum_descriptor_set.get()).update(.{
         .writes = &.{
             .{ .binding = 0, .data = .{ .StorageImage = cloud_view }, },
-            .{ .binding = 1, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
+            .{ .binding = 1, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
+            .{ .binding = 2, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
         },
     });
-
-    // render resources
-    const sampler = try gfx.Sampler.init(.{
-        .filter_min_mag = .Linear,
-        .filter_mip = .Linear,
-        .border_mode = .Clamp,
-    });
-    errdefer sampler.deinit();
 
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
@@ -176,7 +181,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .format = gfx.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
-            .blend_type = .Simple,
+            .blend_type = .PremultipliedAlpha,
         },
         gfx.AttachmentInfo {
             .name = "depth",
@@ -391,7 +396,7 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     return pipeline;
 }
 
-pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera) !void {
+pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, standard_renderer: *StandardRenderer) !void {
     if (self.compute_shader_file_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_compute_pipeline() catch |err| {
             std.log.err("Unable to update cloud compute shader: {}", .{err});
@@ -411,9 +416,24 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         eng.get().gfx.flush();
     }
 
+    (blk: {
+        const lights_buffer = self.lights_buffer.get() catch break :blk error.UnableToGetBuffer;
+        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        defer mapped_buffer.unmap();
+
+        const data = mapped_buffer.data_array(StandardRenderer.LightsStruct, 1);
+        standard_renderer.sort_lights(
+            camera.transform.position
+        );
+        const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
+        @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
+    }) catch |err| {
+        std.log.err("Could not update lights buffer for cloud render: {}", .{err});
+    };
+
     const compute_push_constants = CloudDensityPushConstant {
-        .inv_view_projection_matrix = zm.inverse(zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()))),
-        .camera_position = zm.arr3Ptr(&camera.transform.position).*,
+        .inv_view_matrix = zm.inverse(camera.transform.generate_view_matrix()),
+        .inv_projection_matrix = zm.inverse(camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect())),
     };
 
     cmd.cmd_pipeline_barrier(.{
@@ -426,6 +446,19 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
                 .dst_access_mask = .{ .shader_write = true, },
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
+            },
+        }
+    });
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .late_fragment_tests = true, },
+        .dst_stage = .{ .compute_shader = true, },
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = eng.get().gfx.default.depth_image,
+                .src_access_mask = .{ .depth_stencil_attachment_write = true, },
+                .dst_access_mask = .{ .shader_read = true, },
+                .old_layout = .DepthStencilAttachmentOptimal,
+                .new_layout = .ShaderReadOnlyOptimal,
             },
         }
     });
@@ -445,6 +478,19 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
                 .dst_access_mask = .{ .shader_read = true, },
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
+            },
+        }
+    });
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .early_fragment_tests = true, },
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = eng.get().gfx.default.depth_image,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .depth_stencil_attachment_write = true, },
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .DepthStencilAttachmentOptimal,
             },
         }
     });
