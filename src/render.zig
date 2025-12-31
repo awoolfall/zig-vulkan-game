@@ -51,9 +51,8 @@ const InstanceStruct = extern struct {
     model_matrix: zm.Mat,
     entity_id: u32,
     flags: packed struct(u32) {
-        is_selected: bool,
         unlit: bool,
-        pad: u30 = 0,
+        pad: u31 = 0,
     },
     bone_start_idx: u32 = 0,
 };
@@ -898,7 +897,6 @@ pub fn render_cmd(
     self: *Self,
     data: struct {
         camera: *const cm.Camera,
-        selected_entity_idx: ?usize,
     },
     cmd: *gfx.CommandBuffer,
 ) !void {
@@ -1009,7 +1007,6 @@ pub fn render_cmd(
             .model_matrix = ro.transform,
             .entity_id = entity_id,
             .flags = .{
-                .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
                 .unlit = ro.material.unlit,
             },
             .bone_start_idx = 0,
@@ -1156,7 +1153,6 @@ pub fn render_cmd(
             .model_matrix = ro.transform,
             .entity_id = entity_id,
             .flags = .{
-                .is_selected = if (data.selected_entity_idx) |s| (entity_id == s) else false,
                 .unlit = ro.material.unlit,
             },
             .bone_start_idx = 0,

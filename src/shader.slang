@@ -33,8 +33,7 @@ struct InstanceData
     uint entity_id;
     uint flags;
 };
-#define IS_SELECTED_BIT 0x1
-#define IS_UNLIT_BIT 0x2
+#define IS_UNLIT_BIT 0x1
 
 [[vk::binding(0, 1)]]
 ConstantBuffer<InstanceData[MAX_OBJECTS_PER_INSTANCE_BUFFER]> instance_data : register(b1);
@@ -168,10 +167,6 @@ ps_out ps_main(vs_out input)
 
     if ((data.flags & IS_UNLIT_BIT) != 0) {
         output.colour = diffuse_colour;
-    }
-
-    if ((data.flags & IS_SELECTED_BIT) != 0) {
-        output.colour = lerp(output.colour, float4(0.1, 1.0, 0.2, 1.0), smoothstep(0.95, 0.99, sin(camera_data.time * 5.0 + (-input.world_pos.y) * 2.0)));
     }
 
     float fog_distance = (0.3 / input.position.w);

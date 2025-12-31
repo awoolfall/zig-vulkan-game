@@ -21,6 +21,7 @@ const Transform = eng.Transform;
 const Camera = eng.camera.Camera;
 const Imui = eng.ui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
+const SelectionOutlineRenderer = @import("edit_mode/selection_outline.zig");
 
 const EditorMode = enum {
     SceneEditor,
@@ -28,6 +29,8 @@ const EditorMode = enum {
 
 editor_camera: Camera,
 gizmo: Gizmo,
+selection_outline_renderer: SelectionOutlineRenderer,
+
 selected_entity: ?GenerationalIndex = null,
 render_only_selected_entity: bool = false,
 
@@ -45,11 +48,19 @@ pub fn deinit(self: *Self) void {
     self.load_scene_popup_data.deinit();
     self.set_loaded_scene_name(null) catch unreachable;
     self.gizmo.deinit();
+    self.selection_outline_renderer.deinit();
 }
 
-pub fn init() !Self {
+pub fn init(standard_renderer: *const StandardRenderer) !Self {
+    var gizmo = try Gizmo.init(eng.get().general_allocator);
+    errdefer gizmo.deinit();
+
+    var selection_outline_renderer = try SelectionOutlineRenderer.init(eng.get().general_allocator, standard_renderer.selection_textures.image);
+    errdefer selection_outline_renderer.deinit();
+
     return Self {
-        .gizmo = try Gizmo.init(eng.get().general_allocator),
+        .gizmo = gizmo,
+        .selection_outline_renderer = selection_outline_renderer,
         .load_scene_popup_data = try LoadScenePopup.init(),
         .editor_camera = Camera {
             .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
@@ -329,7 +340,10 @@ pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) !void {
             self.gizmo.render_cmd(cmd, &entity.transform, &self.editor_camera) catch |err| {
                 std.log.warn("Unable to render edit mode gizmo: {}", .{err});
             };
-        } 
+        }
+        self.selection_outline_renderer.render(cmd, @intCast(s.index)) catch |err| {
+            std.log.warn("Unable to render selection outline: {}", .{err});
+        };
     }
 }
 

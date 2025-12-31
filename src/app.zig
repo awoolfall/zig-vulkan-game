@@ -185,7 +185,7 @@ pub fn init() !Self {
     var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
     errdefer particles_renderer.deinit();
 
-    var edit_mode = try EditMode.init();
+    var edit_mode = try EditMode.init(&standard_renderer);
     errdefer edit_mode.deinit();
 
     return Self {
@@ -694,7 +694,6 @@ fn update(self: *Self) !void {
     self.standard_renderer.render_cmd(
         .{
             .camera = render_camera,
-            .selected_entity_idx = if (self.edit_mode.selected_entity) |i| i.index else null,
         },
         cmd
     ) catch |err| {
