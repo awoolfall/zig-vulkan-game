@@ -10,19 +10,18 @@ const FileWatcher = eng.assets.FileWatcher;
 const ComputeShaderPath = "../../src/clouds/cloud_compute.slang";
 const RenderShaderPath = "../../src/clouds/cloud_render.slang";
 
-const CLOUD_DENSITY_IMAGE_SIZE: [2]u32 = .{ 256, 256 };
+const CAMERA_LIGHTING_GRID_IMAGE_SIZE: [3]u32 = .{ 160, 88, 64 };
 
 const CloudDensityPushConstant = extern struct {
-    inv_view_matrix: zm.Mat,
-    inv_projection_matrix: zm.Mat,
+    inv_view_projection_matrix: zm.Mat,
 };
 
 const RenderPushConstant = extern struct {
-    hi: i32 = 1,
+    inv_view_projection_matrix: zm.Mat,
 };
 
-compute_image: gfx.Image.Ref,
-compute_view: gfx.ImageView.Ref,
+camera_lighting_grid_image: gfx.Image.Ref,
+camera_lighting_grid_view: gfx.ImageView.Ref,
 
 compute_shader_file_watcher: FileWatcher,
 render_shader_file_watcher: FileWatcher,
@@ -43,8 +42,8 @@ render_framebuffer: gfx.FrameBuffer.Ref,
 render_pipeline: gfx.GraphicsPipeline.Ref,
 
 pub fn deinit(self: *Self) void {
-    self.compute_image.deinit();
-    self.compute_view.deinit();
+    self.camera_lighting_grid_image.deinit();
+    self.camera_lighting_grid_view.deinit();
 
     self.lights_buffer.deinit();
     self.render_sampler.deinit();
@@ -67,19 +66,20 @@ pub fn deinit(self: *Self) void {
 
 pub fn init(alloc: std.mem.Allocator) !Self {
     // cloud density image
-    const cloud_image = try gfx.Image.init(.{
+    const camera_lighting_grid_image = try gfx.Image.init(.{
         .match_swapchain_extent = false,
-        .width = CLOUD_DENSITY_IMAGE_SIZE[0],
-        .height = CLOUD_DENSITY_IMAGE_SIZE[1],
+        .width = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0],
+        .height = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1],
+        .depth = CAMERA_LIGHTING_GRID_IMAGE_SIZE[2],
         .format = .Rgba32_Float,
         .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
         .access_flags = .{ .GpuWrite = true, },
         .dst_layout = .ShaderReadOnlyOptimal,
     }, null);
-    errdefer cloud_image.deinit();
+    errdefer camera_lighting_grid_image.deinit();
 
-    const cloud_view = try gfx.ImageView.init(.{ .image = cloud_image, .view_type = .ImageView2D });
-    errdefer cloud_view.deinit();
+    const camera_lighting_grid_view = try gfx.ImageView.init(.{ .image = camera_lighting_grid_image, .view_type = .ImageView3D });
+    errdefer camera_lighting_grid_view.deinit();
 
     // compute resources
     const lights_buffer = try gfx.Buffer.init(
@@ -129,7 +129,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     try (try spectrum_descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .StorageImage = cloud_view }, },
+            .{ .binding = 0, .data = .{ .StorageImage = camera_lighting_grid_view }, },
             .{ .binding = 1, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
             .{ .binding = 2, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
         },
@@ -151,6 +151,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Pixel = true, },
                 .binding = 2,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Pixel = true, },
+                .binding = 3,
                 .binding_type = .Sampler,
             },
         },
@@ -169,8 +174,9 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
             .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
-            .{ .binding = 1, .data = .{ .ImageView = cloud_view }, },
-            .{ .binding = 2, .data = .{ .Sampler = sampler }, },
+            .{ .binding = 1, .data = .{ .ImageView = camera_lighting_grid_view }, },
+            .{ .binding = 2, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
+            .{ .binding = 3, .data = .{ .Sampler = sampler }, },
         },
     });
 
@@ -183,13 +189,6 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .PremultipliedAlpha,
         },
-        gfx.AttachmentInfo {
-            .name = "depth",
-            .format = gfx.GfxState.depth_format,
-            .initial_layout = .DepthStencilAttachmentOptimal,
-            .final_layout = .DepthStencilAttachmentOptimal,
-            .blend_type = .None,
-        },
     };
 
     const render_pass = try gfx.RenderPass.init(.{
@@ -197,7 +196,6 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .subpasses = &.{
             gfx.SubpassInfo {
                 .attachments = &.{ "colour" },
-                .depth_attachment = "depth",
             },
         },
         .dependencies = &.{
@@ -217,7 +215,6 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .render_pass = render_pass,
         .attachments = &.{
             .SwapchainHDR,
-            .SwapchainDepth,
         },
     });
     errdefer framebuffer.deinit();
@@ -243,8 +240,8 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer render_shader_file_watcher.deinit();
 
     var self = Self {
-        .compute_image = cloud_image,
-        .compute_view = cloud_view,
+        .camera_lighting_grid_image = camera_lighting_grid_image,
+        .camera_lighting_grid_view = camera_lighting_grid_view,
 
         .lights_buffer = lights_buffer,
         .render_sampler = sampler,
@@ -294,8 +291,6 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
             "cs_main",
         },
         .preprocessor_macros = &.{
-            .{ "SAMPLE_GRID_SIZE_X", std.fmt.comptimePrint("{d}", .{CLOUD_DENSITY_IMAGE_SIZE[0]}) },
-            .{ "SAMPLE_GRID_SIZE_Y", std.fmt.comptimePrint("{d}", .{CLOUD_DENSITY_IMAGE_SIZE[1]}) },
         },
     });
     defer alloc.free(density_spirv);
@@ -432,8 +427,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
     };
 
     const compute_push_constants = CloudDensityPushConstant {
-        .inv_view_matrix = zm.inverse(camera.transform.generate_view_matrix()),
-        .inv_projection_matrix = zm.inverse(camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect())),
+        .inv_view_projection_matrix = zm.inverse(zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()))),
     };
 
     cmd.cmd_pipeline_barrier(.{
@@ -441,7 +435,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         .dst_stage = .{ .compute_shader = true, },
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.compute_image,
+                .image = self.camera_lighting_grid_image,
                 .src_access_mask = .{ .shader_read = true, },
                 .dst_access_mask = .{ .shader_write = true, },
                 .old_layout = .ShaderReadOnlyOptimal,
@@ -466,31 +460,18 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
     cmd.cmd_bind_compute_pipeline(self.compute_pipeline);
     cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.compute_descriptor_set } });
     cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true, } });
-    cmd.cmd_dispatch(.{ .group_count_x = CLOUD_DENSITY_IMAGE_SIZE[0], .group_count_y = CLOUD_DENSITY_IMAGE_SIZE[1], .group_count_z = 1, });
+    cmd.cmd_dispatch(.{ .group_count_x = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0], .group_count_y = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1], .group_count_z = CAMERA_LIGHTING_GRID_IMAGE_SIZE[2], });
 
     cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .compute_shader = true, },
         .dst_stage = .{ .fragment_shader = true, },
         .image_barriers = &.{
             gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.compute_image,
+                .image = self.camera_lighting_grid_image,
                 .src_access_mask = .{ .shader_write = true, },
                 .dst_access_mask = .{ .shader_read = true, },
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-            },
-        }
-    });
-    cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .early_fragment_tests = true, },
-        .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = eng.get().gfx.default.depth_image,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .depth_stencil_attachment_write = true, },
-                .old_layout = .ShaderReadOnlyOptimal,
-                .new_layout = .DepthStencilAttachmentOptimal,
             },
         }
     });
@@ -504,7 +485,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         defer cmd.cmd_end_render_pass();
 
         const render_push_constants = RenderPushConstant {
-            
+            .inv_view_projection_matrix = compute_push_constants.inv_view_projection_matrix,
         };
 
         cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
@@ -512,4 +493,18 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&render_push_constants), .offset = 0, .shader_stages = .{ .Pixel = true, } });
         cmd.cmd_draw(.{ .vertex_count = 6, });
     }
+
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .compute_shader = true, },
+        .dst_stage = .{ .early_fragment_tests = true, },
+        .image_barriers = &.{
+            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                .image = eng.get().gfx.default.depth_image,
+                .src_access_mask = .{ .shader_read = true, },
+                .dst_access_mask = .{ .depth_stencil_attachment_write = true, },
+                .old_layout = .ShaderReadOnlyOptimal,
+                .new_layout = .DepthStencilAttachmentOptimal,
+            },
+        }
+    });
 }

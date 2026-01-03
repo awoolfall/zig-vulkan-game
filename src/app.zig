@@ -629,7 +629,7 @@ fn update(self: *Self) !void {
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
     const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
         engine.time.get_fps(),
-        (engine.time.delta_time_f32() - engine.time.last_frame_wait_time_s) * std.time.ms_per_s,
+        (1.0 / engine.time.get_fps()) * std.time.ms_per_s,
         engine.time.last_frame_wait_time_s * std.time.ms_per_s,
         (engine.time.last_frame_wait_time_s / engine.time.last_frame_time_s) * 100.0
     }) catch unreachable;
