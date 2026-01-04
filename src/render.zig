@@ -58,9 +58,11 @@ const InstanceStruct = extern struct {
 };
 
 pub const LightType = enum (u32) {
-    Directional = 0,
-    Point = 1,
-    Spot = 2,
+    None = 0,
+    Sun = 1,
+    Directional = 2,
+    Point = 3,
+    Spot = 4,
 };
 
 pub const Light = extern struct {
@@ -70,7 +72,7 @@ pub const Light = extern struct {
     intensity: f32 = 0.0,
     umbra: f32 = std.math.degreesToRadians(20.0),
     delta_penumbra: f32 = std.math.degreesToRadians(0.5), // degrees smaller the penumbra is compared to the umbra
-    light_type: LightType = .Directional,
+    light_type: LightType = .None,
 
     fn serialize(self: *const Light, alloc: std.mem.Allocator) !std.json.Value {
         var object = std.json.ObjectMap.init(alloc);
@@ -1311,6 +1313,11 @@ pub fn render_cmd(
 }
 
 fn lights_sort_func(pos: zm.F32x4, a: Light, b: Light) bool {
+    if (a.light_type == .None) { return false; }
+    if (b.light_type == .None) { return true; }
+    if (a.light_type == .Sun) { return true; }
+    if (b.light_type == .Sun) { return false; }
+    
     const a_dist = zm.length3(a.position - pos)[0] - a.intensity;
     const b_dist = zm.length3(b.position - pos)[0] - b.intensity;
     return a_dist < b_dist;

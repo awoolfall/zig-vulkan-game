@@ -26,11 +26,6 @@ struct PushConstants {
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> push_constant;
 
-bool shape_function(float3 pos) {
-    return pos.y < -5.0 && pos.y > -15.0;
-    //return all(abs(pos) < 2.0);
-}
-
 float sample_depth_t(float opaque_depth, float2 ndc, float4x4 inv_view_projection_matrix, float3 origin, float3 rayDir) {
     // Reconstruct depth sample into world space
     float4 depth_world = mul(float4(ndc, opaque_depth, 1.0), inv_view_projection_matrix);
@@ -43,6 +38,34 @@ float sample_depth_t(float opaque_depth, float2 ndc, float4x4 inv_view_projectio
     if (opaque_t < 0.0) opaque_t = 0.0;
 
     return opaque_t;
+}
+
+inline float z_cell_to_depth_m(int z_cell) {
+    constexpr float c = 5.0 / 128.0;
+    return c * float(z_cell * z_cell);
+}
+
+inline float depth_m_to_z_uv(float depth_m) {
+    constexpr float ci = 128.0 / 5.0;
+    return sqrt(ci * depth_m) / 64.0;
+}
+
+bool ray_aabb_intersect(float3 ray_origin, float3 ray_dir, float ray_max, float3 box_min, float3 box_max, out float tMin, out float tMax)
+{
+    float3 invDir = 1.0 / ray_dir;
+    float3 t0 = (box_min - ray_origin) * invDir;
+    float3 t1 = (box_max - ray_origin) * invDir;
+
+    // Swap t0 and t1 where direction is negative
+    float3 tSmaller = min(t0, t1);
+    float3 tLarger = max(t0, t1);
+
+    // Find the largest tMin and smallest tMax
+    tMin = max(0.0, max(max(tSmaller.x, tSmaller.y), tSmaller.z));
+    tMax = min(ray_max, min(min(tLarger.x, tLarger.y), tLarger.z));
+
+    // Ray intersects if tMin <= tMax and tMax >= 0
+    return tMin < ray_max && tMax >= max(tMin, 0.0);
 }
 
 [shader("compute")]
@@ -74,44 +97,40 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     float3 rayDir = normalize(farPoint.xyz - nearPoint.xyz);
 
     // calculate world position of grid cell
-    float depth = (5.0 / 128.0) * float(dtid.z) * float(dtid.z);// 160.0 * exp(float(dtid.z) - 64.0);
+    float depth = z_cell_to_depth_m(dtid.z);
     float3 pos = nearPoint.xyz + (rayDir * depth);
 
     float3 cloud_albedo = float3(1.0, 1.0, 1.0);
 
+    const float3 cloud_bounding_box_min = float3(-20.0, -20.0, -20.0);
+    const float3 cloud_bounding_box_max = float3(20.0, 0.0, 20.0);
+
     float tdensity = 0.0;
-    float3 col = float3(0.0);
+    float3 col = float3(0.0, 0.0, 0.0);
 
     const float max_march_distance = 1000.0;
     float small_march_distance = 0.5;
     float large_march_distance = 1.0;
 
+    constexpr float density = 0.002;
+
     inline for (int l = 0; l < MAX_LIGHTS; l++) {
         float3 light_dir;
         float3 light_colour;
         if (!calculate_light(lights_data.lights[l], pos, light_dir, light_colour)) { continue; }
-        if (length(light_dir) == 0.0) { continue; }
-        if (length(light_colour) == 0.0) { continue; }
 
         // Compute approximate optical depth toward the light
         float ldensity = 0.0;
         float lt = 0.0;
-        float max_length = length(lights_data.lights[l].position.xyz - pos);
-        float3 lpos = pos - light_dir * lt;
-        while (lt < max_length && lt < 20.0) {
-            float density = shape_function(lpos) ? 0.01 : 0.0;
-
+        float max_length = min(length(lights_data.lights[l].position.xyz - pos), 20.0);
+        for (lt = 0.0; lt < max_length; lt += small_march_distance) {
+            const float3 lpos = pos - light_dir * lt;
             // sample density at lpos (constant here)
             ldensity += density * small_march_distance;
-
-            lt += small_march_distance;
-            lpos = pos - light_dir * lt;
         }
 
         float lightTrans = exp(-ldensity);
-        float3 lum = light_colour * cloud_albedo * (lightTrans);
-
-        // Accumulate in-scattered light (additive) weighted by transmittance and step
+        float3 lum = light_colour * cloud_albedo * (1.0 - lightTrans);
         col += lum;
     }
 

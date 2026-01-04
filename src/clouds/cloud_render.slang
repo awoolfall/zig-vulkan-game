@@ -14,7 +14,7 @@ ConstantBuffer<PushConstants> push_constant;
 
 struct LightsData
 {
-    LightData lights[MAX_LIGHTS];
+    LightData sun_light;
 };
 
 [[vk::binding(0, 0)]]
@@ -46,15 +46,44 @@ vs_out vs_main(uint vertId: SV_VertexID)
     return output;
 }
 
-bool shape_function(float3 pos) {
-    return pos.y < -5.0 && pos.y > -15.0;
-    //return all(abs(pos) < 2.0);
+inline float z_cell_to_depth_m(int z_cell) {
+    constexpr float c = 5.0 / 128.0;
+    return c * float(z_cell * z_cell);
+}
+
+inline float depth_m_to_z_uv(float depth_m) {
+    constexpr float ci = 128.0 / 5.0;
+    return sqrt(ci * depth_m) / 64.0;
 }
 
 float4 read_camera_lighting_grid(float2 uv, float world_depth) {
-    float3 cell = float3(uv, sqrt((128.0 * world_depth)/5.0) / 64.0);//(log(world_depth / 160.0) + 64.0) / 64.0);
+    //return float4(1.0, 1.0, 1.0, 1.0);
+    const float3 cell = float3(uv, depth_m_to_z_uv(world_depth));
     return camera_lighting_grid_image.SampleLevel(diffuse_sampler, cell, 0.0);
 }
+
+bool ray_aabb_intersect(float3 ray_origin, float3 ray_dir, float ray_max, float3 box_min, float3 box_max, out float tMin, out float tMax)
+{
+    float3 invDir = 1.0 / ray_dir;
+    float3 t0 = (box_min - ray_origin) * invDir;
+    float3 t1 = (box_max - ray_origin) * invDir;
+
+    // Swap t0 and t1 where direction is negative
+    float3 tSmaller = min(t0, t1);
+    float3 tLarger = max(t0, t1);
+
+    // Find the largest tMin and smallest tMax
+    tMin = max(0.0, max(max(tSmaller.x, tSmaller.y), tSmaller.z));
+    tMax = min(ray_max, min(min(tLarger.x, tLarger.y), tLarger.z));
+
+    // Ray intersects if tMin <= tMax and tMax >= 0
+    return tMin < ray_max && tMax >= max(tMin, 0.0);
+}
+
+enum RayMarchState {
+    SmallStep,
+    LargeStep,
+};
 
 struct ps_out
 {
@@ -65,30 +94,6 @@ struct ps_out
 ps_out ps_main(vs_out input)
 {
     ps_out output = (ps_out)0;
-
-    #if 0
-    float4 occ = cloud_sample_image.SampleLevel(diffuse_sampler, input.tex_coord, 0);
-
-    float3 hdr = float3(occ.rg, 0.0);
-    float depth_t = occ.b;
-    float alpha = occ.a;
-
-    uint2 depthDim;
-    depth_image.GetDimensions(depthDim.x, depthDim.y);
-
-    float d = depth_image.Load(uint3(uint2(input.tex_coord * float2(depthDim)), 0)).r;
-    //if (d > depth_t) { output.colour = float4(d, depth_t, 0.0, 1.0); return output; }
-
-    // Premultiply alpha
-    float3 premul = hdr * alpha;
-
-    float dd = depth_t - d;
-
-    output.colour = float4(premul, alpha);
-    #endif
-
-    uint3 camera_lighting_grid_dim;
-    camera_lighting_grid_image.GetDimensions(camera_lighting_grid_dim.x, camera_lighting_grid_dim.y, camera_lighting_grid_dim.z);
 
     // Calculate normalized device coordinates [-1, 1]
     float2 ndc = (input.tex_coord.xy * 2.0) - 1.0;
@@ -111,64 +116,120 @@ ps_out ps_main(vs_out input)
     float opaque_depth = depth_image.Load(uint3(uint2(input.tex_coord.xy * float2(depthDim)), 0)).r;
     float3 depth_world_pos = calculate_depth_frag_in_world_pos(opaque_depth, ndc, push_constant.inv_view_projection_matrix);
 
-    float max_march_distance = 160.0;
-    const float small_march_distance = 0.1;
-    const float large_march_distance = 1.0;
-
-    float tmarch_distance = large_march_distance;
-
     // Project the reconstructed depth point onto the world-space ray to get
     // the distance along the ray where the opaque geometry lies.
-    float opaque_t = length(depth_world_pos - origin);//, rayDir);
-    if (opaque_t < 0.0) opaque_t = 0.0;
-    //opaque_t = 1000.0;
+    const float opaque_t = max(0.0, length(depth_world_pos - origin));
 
-    max_march_distance = min(max_march_distance, opaque_t);
+    // assumes sun light is directional type
+    const float3 sun_light_colour = lights_data.sun_light.colour.rgb * lights_data.sun_light.intensity;
+    const float3 sun_light_dir = normalize(lights_data.sun_light.direction.xyz);
+
+    const float3 cloud_albedo = float3(1.0, 1.0, 1.0);
+
+    const float3 cloud_bounding_box_min = float3(-1000.0, -20.0, -1000.0);
+    const float3 cloud_bounding_box_max = float3(1000.0, 0.0, 1000.0);
+
+    float max_march_distance = min(1000.0, opaque_t);
+    const float max_march_distance_grid = min(max_march_distance, 160.0);
+    const int max_iterations_grid = min(64, int(floor(depth_m_to_z_uv(opaque_t) * 64.0)));
+
+    constexpr float small_march_distance = 0.5;
+    constexpr float large_march_distance = 0.1;
 
     float tdensity = 0.0;
     float3 col = float3(0.0, 0.0, 0.0);
 
-    float mt = large_march_distance;
-    float tt = mt;
-    while (tt < max_march_distance) {
-        mt = large_march_distance;
-        while (tt < max_march_distance) {
-            float3 pos = origin + rayDir * tt;
-            if (shape_function(pos)) break;
-            tt += mt;
-        }
+    const float density = 0.002;
 
-        float rt = tt;
-        tt -= mt;
+    float tt = 0.0;
 
-        mt = small_march_distance;
-        while (tt < max_march_distance) {
-            float3 pos = origin + rayDir * tt;
-            if (!shape_function(pos)) {
-                if (tt <= rt) {
-                    tt += mt;
-                    continue;
-                } else {
-                    break;
-                }
-            }
-            
-            float density = 0.01;
-            
-            // Advance optical depth along the ray
-            tdensity += density * mt;
-            //col += float3(1.0, 1.0, 1.0) * density;
-            //if (tt <= (Z_GRID_CELL_DISTANCE * camera_lighting_grid_dim.z)) {
-            col += (1.0 - exp(-tdensity)) * read_camera_lighting_grid(input.tex_coord, tt).rgb * mt;
-            //}
-            tt += mt;
-        }
+    RayMarchState raymarch_state = RayMarchState::LargeStep;
+
+    float aabb_intersection_start;
+    float aabb_intersection_end;
+    if (!ray_aabb_intersect(origin, rayDir, opaque_t, cloud_bounding_box_min, cloud_bounding_box_max, aabb_intersection_start, aabb_intersection_end)) {
+        output.colour = float4(0.0, 0.0, 0.0, 0.0);
+        return output;
     }
 
-    //tt -= mt;
-    //float final_step = max_march_distance - tt;
-    //tdensity += 0.1 * final_step;
-    //col += (1.0 - exp(-tdensity)) * read_camera_lighting_grid(input.tex_coord, max_march_distance).rgb * final_step;
+    if (aabb_intersection_start < 160.0) {
+        const int start_i = clamp(int(ceil(depth_m_to_z_uv(aabb_intersection_start) * 64.0)), 0, 64);
+        const int end_i = clamp(int(floor(depth_m_to_z_uv(aabb_intersection_end) * 64.0)), 0, 64);
+        const float end_stt = min(z_cell_to_depth_m(start_i), aabb_intersection_end);
+
+        // output.colour = float4(float3(max(end_stt - tt, 0.0)), 0.5);
+        // return output;
+
+        const float3 stt_lighting = read_camera_lighting_grid(input.tex_coord, lerp(aabb_intersection_start, end_stt, 0.5)).rgb;
+        const float entrance_depth = end_stt - aabb_intersection_start;
+        tdensity += density * entrance_depth;
+        col += (1.0 - exp(-tdensity)) * stt_lighting * entrance_depth;
+
+        tt = end_stt;
+
+        // output.colour = float4(float3(float(start_i) / 64.0), 0.5);
+        // return output;
+
+        // frustum grid based lighting step
+        float last_gt = end_stt;
+        for (int i = start_i; i <= end_i; i++) {
+            float gt = z_cell_to_depth_m(i);
+            const float step_dist = gt - last_gt;
+            const float3 pos = origin + rayDir * gt;
+
+            tdensity += density * step_dist;
+            const float3 lighting = read_camera_lighting_grid(input.tex_coord, lerp(last_gt, gt, 0.5)).rgb;
+
+            // Accumulate in-scattered light (additive) weighted by transmittance and step
+            col += (1.0 - exp(-tdensity)) * lighting * step_dist;
+            tt = gt;
+
+            last_gt = gt;
+        }
+
+        float start_ett = tt;
+        float exit_distance = min(aabb_intersection_end, 160.0) - start_ett;
+        // output.colour.rgb = float3(tt - start_ett);
+        // return output;
+
+        const float3 ett_lighting = read_camera_lighting_grid(input.tex_coord, lerp(start_ett, aabb_intersection_end, 0.5)).rgb;
+        tdensity += density * exit_distance;
+        col += (1.0 - exp(-tdensity)) * ett_lighting * exit_distance;
+
+        aabb_intersection_start = start_ett + exit_distance;
+    }
+
+    if (aabb_intersection_start >= 160.0) {
+        tt = aabb_intersection_start;
+        max_march_distance = min(max_march_distance, aabb_intersection_end);
+
+        // raymarch step
+        while (tt < max_march_distance) {
+            tt += small_march_distance;
+            float3 pos = origin + rayDir * tt;
+
+            float light_aabb_start;
+            float light_aabb_end;
+            if (!ray_aabb_intersect(pos, -sun_light_dir, 100.0, cloud_bounding_box_min, cloud_bounding_box_max, light_aabb_start, light_aabb_end)) {
+                continue;
+            }
+
+            // Advance optical depth along the ray
+            tdensity += density * small_march_distance;
+
+            float ldensity = 0.0;
+            for (float lt = 0.0; lt < light_aabb_end; lt += small_march_distance) {
+                const float3 lpos = pos - sun_light_dir * lt;
+                // sample density at lpos (constant here)
+                ldensity += density * small_march_distance;
+            }
+
+            const float3 lighting = sun_light_colour * cloud_albedo * (1.0 - exp(-ldensity));
+
+            // Accumulate in-scattered light (additive) weighted by transmittance and step
+            col += (1.0 - exp(-tdensity)) * lighting * small_march_distance;
+        }
+    }
 
     float alpha = 1.0 - exp(-tdensity);
     output.colour = float4(col, alpha);

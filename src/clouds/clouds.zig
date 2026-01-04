@@ -489,7 +489,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         };
 
         cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
-        cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.render_descriptor_set, } });
+        cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.render_descriptor_set, }, });
         cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&render_push_constants), .offset = 0, .shader_stages = .{ .Pixel = true, } });
         cmd.cmd_draw(.{ .vertex_count = 6, });
     }
