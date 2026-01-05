@@ -102,36 +102,45 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
 
     float3 cloud_albedo = float3(1.0, 1.0, 1.0);
 
-    const float3 cloud_bounding_box_min = float3(-20.0, -20.0, -20.0);
-    const float3 cloud_bounding_box_max = float3(20.0, 0.0, 20.0);
+    const float3 cloud_bounding_box_min = float3(-1000.0, -20.0, -1000.0);
+    const float3 cloud_bounding_box_max = float3(1000.0, 0.0, 1000.0);
 
     float tdensity = 0.0;
     float3 col = float3(0.0, 0.0, 0.0);
 
     const float max_march_distance = 1000.0;
-    float small_march_distance = 0.5;
+    float small_march_distance = 0.1;
     float large_march_distance = 1.0;
 
-    constexpr float density = 0.002;
+    constexpr float density = 0.0001;
 
-    inline for (int l = 0; l < MAX_LIGHTS; l++) {
+    for (int l = 0; l < MAX_LIGHTS; l++) {
         float3 light_dir;
         float3 light_colour;
-        if (!calculate_light(lights_data.lights[l], pos, light_dir, light_colour)) { continue; }
+        if (calculate_light(lights_data.lights[l], pos, light_dir, light_colour)) {
+            float dist_point_to_light = length(lights_data.lights[l].position.xyz - pos);
+            if (lights_data.lights[l].type == LIGHT_TYPE_SUN || lights_data.lights[l].type == LIGHT_TYPE_DIRECTIONAL) {
+                dist_point_to_light = 1000.0;
+            }
 
-        // Compute approximate optical depth toward the light
-        float ldensity = 0.0;
-        float lt = 0.0;
-        float max_length = min(length(lights_data.lights[l].position.xyz - pos), 20.0);
-        for (lt = 0.0; lt < max_length; lt += small_march_distance) {
-            const float3 lpos = pos - light_dir * lt;
-            // sample density at lpos (constant here)
-            ldensity += density * small_march_distance;
+            float aabb_start_t;
+            float aabb_end_t;
+            if (!ray_aabb_intersect(pos, -light_dir, dist_point_to_light, cloud_bounding_box_min, cloud_bounding_box_max, aabb_start_t, aabb_end_t)) { continue; }
+            
+            // Compute approximate optical depth toward the light
+            float ldensity = 0.0;
+            float lt = 0.0;
+            const float max_length = aabb_end_t;
+            for (lt = 0.0; lt < max_length; lt += small_march_distance) {
+                const float3 lpos = pos - light_dir * lt;
+                // sample density at lpos (constant here)
+                ldensity += density * small_march_distance;
+            }
+
+            float lightTrans = exp(-ldensity);
+            float3 lum = light_colour * cloud_albedo * (lightTrans);
+            col += lum;
         }
-
-        float lightTrans = exp(-ldensity);
-        float3 lum = light_colour * cloud_albedo * (1.0 - lightTrans);
-        col += lum;
     }
 
     float alpha = 1.0 - exp(-tdensity);

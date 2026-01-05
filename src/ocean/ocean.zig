@@ -15,7 +15,7 @@ const MAP_LENGTH_M = 256;
 const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 
 const ShaderPath = "../../src/ocean/ocean_render.slang";
-const CLIPMAP_QUAD_COUNT = 1024;
+const CLIPMAP_QUAD_COUNT = 128;
 
 const MAX_SHALLOW_SPOTS = 4;
 
@@ -1129,9 +1129,9 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSe
         .dst_stage = .{ .compute_shader = true, },
     });
 
+    cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
     inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         // dispatch h0 image generation
-        cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.h0_descriptor_set[layer],
@@ -1217,9 +1217,9 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
+    cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
     inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         // dispatch spectrum image generation
-        cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.spectrum_descriptor_set[layer],
@@ -1273,9 +1273,9 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
+    cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         // dispatch horizontal stage FFTs
-        cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.fft_descriptor_sets_hs[layer][0],
@@ -1327,9 +1327,9 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .compute_shader = true, },
     });
 
+    cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
     inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         // dispatch vertical stage FFTs
-        cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.fft_descriptor_sets_hs[layer][1],
@@ -1360,9 +1360,9 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
         .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
     });
 
+    cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
     inline for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         // dispatch jacobian image generation
-        cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.jacobian_descriptor_set[layer],

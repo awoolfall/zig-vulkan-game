@@ -18,7 +18,7 @@ const StandardRenderer = @import("../render.zig");
 
 const ShaderFilePath = "../../src/terrain/terrain.slang";
 
-const CLIPMAP_QUAD_COUNT = 512;
+const CLIPMAP_QUAD_COUNT = 128;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,

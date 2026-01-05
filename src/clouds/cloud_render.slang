@@ -139,7 +139,7 @@ ps_out ps_main(vs_out input)
     float tdensity = 0.0;
     float3 col = float3(0.0, 0.0, 0.0);
 
-    const float density = 0.002;
+    const float density = 0.0001;
 
     float tt = 0.0;
 
@@ -210,7 +210,7 @@ ps_out ps_main(vs_out input)
 
             float light_aabb_start;
             float light_aabb_end;
-            if (!ray_aabb_intersect(pos, -sun_light_dir, 100.0, cloud_bounding_box_min, cloud_bounding_box_max, light_aabb_start, light_aabb_end)) {
+            if (!ray_aabb_intersect(pos, -sun_light_dir, 1000.0, cloud_bounding_box_min, cloud_bounding_box_max, light_aabb_start, light_aabb_end)) {
                 continue;
             }
 
@@ -224,7 +224,7 @@ ps_out ps_main(vs_out input)
                 ldensity += density * small_march_distance;
             }
 
-            const float3 lighting = sun_light_colour * cloud_albedo * (1.0 - exp(-ldensity));
+            const float3 lighting = sun_light_colour * cloud_albedo * (exp(-ldensity));
 
             // Accumulate in-scattered light (additive) weighted by transmittance and step
             col += (1.0 - exp(-tdensity)) * lighting * small_march_distance;
