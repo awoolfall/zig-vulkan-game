@@ -14,6 +14,8 @@ const CAMERA_LIGHTING_GRID_IMAGE_SIZE: [3]u32 = .{ 160, 88, 64 };
 
 const CloudDensityPushConstant = extern struct {
     inv_view_projection_matrix: zm.Mat,
+    start_z: u32,
+    offset: f32,
 };
 
 const RenderPushConstant = extern struct {
@@ -426,8 +428,14 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         std.log.err("Could not update lights buffer for cloud render: {}", .{err});
     };
 
+    const amortize_frames: comptime_int = 8;
+
+    //var rand = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
+
     const compute_push_constants = CloudDensityPushConstant {
         .inv_view_projection_matrix = zm.inverse(zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()))),
+        .start_z = @intCast(eng.get().time.frame_number % amortize_frames),
+        .offset = 0.0, //rand.random().floatNorm(f32) / 2.0, // TODO jitter per frame and blend to smooth out transitions (hopefully)
     };
 
     cmd.cmd_pipeline_barrier(.{
@@ -460,7 +468,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
     cmd.cmd_bind_compute_pipeline(self.compute_pipeline);
     cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.compute_descriptor_set } });
     cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true, } });
-    cmd.cmd_dispatch(.{ .group_count_x = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0], .group_count_y = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1], .group_count_z = CAMERA_LIGHTING_GRID_IMAGE_SIZE[2], });
+    cmd.cmd_dispatch(.{ .group_count_x = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0], .group_count_y = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1], .group_count_z = @divExact(CAMERA_LIGHTING_GRID_IMAGE_SIZE[2], amortize_frames), });
 
     cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .compute_shader = true, },

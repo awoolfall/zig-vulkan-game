@@ -21,6 +21,8 @@ ConstantBuffer<LightsData> lights_data : register(b0);
 
 struct PushConstants {
     float4x4 inv_view_projection_matrix;
+    uint start_z;
+    float offset;
 };
 
 [[vk::push_constant]]
@@ -40,14 +42,21 @@ float sample_depth_t(float opaque_depth, float2 ndc, float4x4 inv_view_projectio
     return opaque_t;
 }
 
-inline float z_cell_to_depth_m(int z_cell) {
-    constexpr float c = 5.0 / 128.0;
-    return c * float(z_cell * z_cell);
+#define frustum_length 160.0
+#define frustum_z_cells 64.0
+#define exp_scale 12.5
+
+inline float z_cell_to_depth_m(float z_cell) {
+
+    return exp(z_cell / exp_scale);
+    // constexpr float c = 5.0 / 128.0;
+    // return c * float(z_cell * z_cell);
 }
 
 inline float depth_m_to_z_uv(float depth_m) {
-    constexpr float ci = 128.0 / 5.0;
-    return sqrt(ci * depth_m) / 64.0;
+    return (exp_scale * log(depth_m) / 64.0);
+    // constexpr float ci = 128.0 / 5.0;
+    // return sqrt(ci * depth_m) / 64.0;
 }
 
 bool ray_aabb_intersect(float3 ray_origin, float3 ray_dir, float ray_max, float3 box_min, float3 box_max, out float tMin, out float tMax)
@@ -72,7 +81,7 @@ bool ray_aabb_intersect(float3 ray_origin, float3 ray_dir, float ray_max, float3
 [numthreads(8, 8, 8)]
 void cs_main(uint3 dtid: SV_DispatchThreadID)
 {
-    uint3 pixelCoord = dtid.xyz;
+    uint3 pixelCoord = dtid.xyz + uint3(0, 0, push_constant.start_z);
     uint3 imageDim;
     out_image.GetDimensions(imageDim.x, imageDim.y, imageDim.z);
 
@@ -97,7 +106,7 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     float3 rayDir = normalize(farPoint.xyz - nearPoint.xyz);
 
     // calculate world position of grid cell
-    float depth = z_cell_to_depth_m(dtid.z);
+    float depth = z_cell_to_depth_m(float(pixelCoord.z) + push_constant.offset);
     float3 pos = nearPoint.xyz + (rayDir * depth);
 
     float3 cloud_albedo = float3(1.0, 1.0, 1.0);
@@ -144,6 +153,7 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     }
 
     float alpha = 1.0 - exp(-tdensity);
-    out_image.Store(dtid.xyz, float4(col.rgb, 0.0));
+    float3 old_col = out_image.Load(pixelCoord.xyz).rgb;
+    out_image.Store(pixelCoord.xyz, float4((old_col*2.0 + col.rgb) / 3.0, 0.0));
     return;
 }
