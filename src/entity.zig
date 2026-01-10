@@ -10,6 +10,7 @@ anim_controller: ?eng.animation.AnimController = null,
 particle_system: ?eng.particles.ParticleSystem = null,
 light: ?StandardRenderer.Light = null,
 terrain: ?Terrain = null,
+cloud_volume: ?u32 = null,
 
 pub fn deinit(self: *Self) void {
     if (self.anim_controller) |*anim_controller| {
@@ -32,6 +33,7 @@ pub fn serialize(alloc: std.mem.Allocator, self: Self) !std.json.Value {
     try object.put("particle_system_settings", try eng.serialize.serialize_value(?eng.particles.ParticleSystemSettings, alloc, if (self.particle_system) |ps| ps.settings else null));
     try object.put("light", try eng.serialize.serialize_value(?StandardRenderer.Light, alloc, self.light));
     try object.put("terrain", try eng.serialize.serialize_value(?Terrain, alloc, self.terrain));
+    try object.put("cloud_volume", try eng.serialize.serialize_value(?u32, alloc, self.cloud_volume));
 
     return std.json.Value { .object = object };
 }
@@ -60,6 +62,8 @@ pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
 
     if (object.get("terrain")) |v| blk: { self.terrain = eng.serialize.deserialize_value(?Terrain, alloc, v) catch break :blk; }
     errdefer if (self.terrain) |*t| { t.deinit(); };
+
+    if (object.get("cloud_volume")) |v| blk: { self.cloud_volume = eng.serialize.deserialize_value(?u32, alloc, v) catch break :blk; }
 
     return self;
 }

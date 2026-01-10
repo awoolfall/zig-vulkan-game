@@ -4,6 +4,10 @@
 #define MAX_LIGHTS 4
 #endif
 
+#ifndef MAX_CLOUD_VOLUMES
+#define MAX_CLOUD_VOLUMES 4
+#endif
+
 [[vk::binding(0, 0)]]
 [[vk::image_format("rgba32f")]]
 RWTexture3D<float4> out_image;
@@ -18,6 +22,16 @@ struct LightsData
 
 [[vk::binding(2, 0)]]
 ConstantBuffer<LightsData> lights_data : register(b0);
+
+struct CloudVolume
+{
+    float3 min;
+    uint phase_function;
+    float3 max;
+};
+
+[[vk::binding(3, 0)]]
+ConstantBuffer<CloudVolume[MAX_CLOUD_VOLUMES]> volumes_data : register(b0);
 
 struct PushConstants {
     float4x4 inv_view_projection_matrix;
@@ -70,11 +84,14 @@ bool ray_aabb_intersect(float3 ray_origin, float3 ray_dir, float ray_max, float3
     float3 tLarger = max(t0, t1);
 
     // Find the largest tMin and smallest tMax
-    tMin = max(0.0, max(max(tSmaller.x, tSmaller.y), tSmaller.z));
-    tMax = min(ray_max, min(min(tLarger.x, tLarger.y), tLarger.z));
+    tMin = max(max(tSmaller.x, tSmaller.y), tSmaller.z);
+    tMax = min(min(tLarger.x, tLarger.y), tLarger.z);
+
+    tMin = max(0.0, tMin);
+    //tMax = min(tMax, ray_max);
 
     // Ray intersects if tMin <= tMax and tMax >= 0
-    return tMin < ray_max && tMax >= max(tMin, 0.0);
+    return tMax >= max(tMin, 0.0);
 }
 
 [shader("compute")]
@@ -106,13 +123,13 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     float3 rayDir = normalize(farPoint.xyz - nearPoint.xyz);
 
     // calculate world position of grid cell
-    float depth = z_cell_to_depth_m(float(pixelCoord.z) + push_constant.offset);
-    float3 pos = nearPoint.xyz + (rayDir * depth);
+    float froxel_min_depth = z_cell_to_depth_m(float(pixelCoord.z) + push_constant.offset);
+    float froxel_max_depth = z_cell_to_depth_m(float(pixelCoord.z + 1) + push_constant.offset);
 
     float3 cloud_albedo = float3(1.0, 1.0, 1.0);
 
-    const float3 cloud_bounding_box_min = float3(-1000.0, -20.0, -1000.0);
-    const float3 cloud_bounding_box_max = float3(1000.0, 0.0, 1000.0);
+    const float3 cloud_bounding_box_min = volumes_data[0].min; //float3(-1000.0, -200.0, -1000.0);
+    const float3 cloud_bounding_box_max = volumes_data[0].max; //float3(1000.0, 200.0, 1000.0);
 
     float tdensity = 0.0;
     float3 col = float3(0.0, 0.0, 0.0);
@@ -121,39 +138,47 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     float small_march_distance = 0.1;
     float large_march_distance = 1.0;
 
-    constexpr float density = 0.0001;
+    constexpr float density = 0.001;
 
-    for (int l = 0; l < MAX_LIGHTS; l++) {
-        float3 light_dir;
-        float3 light_colour;
-        if (calculate_light(lights_data.lights[l], pos, light_dir, light_colour)) {
-            float dist_point_to_light = length(lights_data.lights[l].position.xyz - pos);
-            if (lights_data.lights[l].type == LIGHT_TYPE_SUN || lights_data.lights[l].type == LIGHT_TYPE_DIRECTIONAL) {
-                dist_point_to_light = 1000.0;
+    const float step_distance = (froxel_max_depth - froxel_min_depth) / 4;
+    for (int i = 0; i < 4; i++) {
+        const float3 pos = nearPoint.xyz + (rayDir * (froxel_min_depth + step_distance * i));
+
+        for (int l = 0; l < MAX_LIGHTS; l++) {
+            float3 light_dir;
+            float3 light_colour;
+            if (calculate_light(lights_data.lights[l], pos, light_dir, light_colour)) {
+                float dist_point_to_light = length(lights_data.lights[l].position.xyz - pos);
+                // if (lights_data.lights[l].type == LIGHT_TYPE_SUN || lights_data.lights[l].type == LIGHT_TYPE_DIRECTIONAL) {
+                //     dist_point_to_light = 1000.0;
+                // }
+
+                float aabb_start_t;
+                float aabb_end_t;
+                if (!ray_aabb_intersect(pos, -normalize(light_dir), dist_point_to_light, cloud_bounding_box_min, cloud_bounding_box_max, aabb_start_t, aabb_end_t)) { continue; }
+                //if (aabb_end_t < 100.0) { col = float3(1.0, 0.0, 0.0); break; }
+                
+                // Compute approximate optical depth toward the light
+                float ldensity = 0.0;
+                float lt = 0.0;
+                const float max_length = aabb_end_t;
+                for (lt = 0.0; lt < max_length; lt += small_march_distance) {
+                    const float3 lpos = pos - light_dir * lt;
+                    // sample density at lpos (constant here)
+                    ldensity += density;
+                }
+
+                float lightTrans = exp(-aabb_end_t * ldensity * 20.0);
+                float3 lum = light_colour * cloud_albedo * (lightTrans);
+                col += lum;
             }
-
-            float aabb_start_t;
-            float aabb_end_t;
-            if (!ray_aabb_intersect(pos, -light_dir, dist_point_to_light, cloud_bounding_box_min, cloud_bounding_box_max, aabb_start_t, aabb_end_t)) { continue; }
-            
-            // Compute approximate optical depth toward the light
-            float ldensity = 0.0;
-            float lt = 0.0;
-            const float max_length = aabb_end_t;
-            for (lt = 0.0; lt < max_length; lt += small_march_distance) {
-                const float3 lpos = pos - light_dir * lt;
-                // sample density at lpos (constant here)
-                ldensity += density * small_march_distance;
-            }
-
-            float lightTrans = exp(-ldensity);
-            float3 lum = light_colour * cloud_albedo * (lightTrans);
-            col += lum;
         }
     }
 
+    col /= 4;
+
     float alpha = 1.0 - exp(-tdensity);
     float3 old_col = out_image.Load(pixelCoord.xyz).rgb;
-    out_image.Store(pixelCoord.xyz, float4((old_col*2.0 + col.rgb) / 3.0, 0.0));
+    out_image.Store(pixelCoord.xyz, float4(col.rgb, 0.0));
     return;
 }

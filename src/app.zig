@@ -713,6 +713,13 @@ fn update(self: *Self) !void {
                 &self.standard_renderer
             );
         }
+        if (entity.app.cloud_volume) |_| {
+            self.clouds.push_cloud_volume(.{
+                .min = zm.vecToArr3(entity.transform.position - entity.transform.scale),
+                .max = zm.vecToArr3(entity.transform.position + entity.transform.scale),
+                .phase_function = 1,
+            });
+        }
     }
 
     self.ocean.update_images(cmd);

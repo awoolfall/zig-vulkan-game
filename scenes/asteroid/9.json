@@ -1,0 +1,59 @@
+{
+  "serialize_id": 9,
+  "name": "new entity",
+  "transform": {
+    "position": [
+      12.616695404052734,
+      13.96552848815918,
+      26.65227699279785,
+      1
+    ],
+    "rotation": [
+      -0.9852344989776611,
+      0,
+      0,
+      -0.17121127247810364
+    ],
+    "scale": [
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "model": null,
+  "physics": {
+    "None": {}
+  },
+  "app": {
+    "health_points": null,
+    "anim_constroller": null,
+    "particle_system_settings": null,
+    "light": {
+      "position": [
+        12.616695404052734,
+        13.96552848815918,
+        26.65227699279785,
+        1
+      ],
+      "direction": [
+        0,
+        0.3373664915561676,
+        0.9413740634918213,
+        0
+      ],
+      "colour": [
+        0,
+        1,
+        0.12151575088500977,
+        1
+      ],
+      "intensity": 1.1500335931777954,
+      "umbra": 0.3490658402442932,
+      "delta_penumbra": 0.008726646192371845,
+      "light_type": "Point"
+    },
+    "terrain": null,
+    "cloud_volume": null
+  }
+}

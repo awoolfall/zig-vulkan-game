@@ -11,6 +11,7 @@ const ComputeShaderPath = "../../src/clouds/cloud_compute.slang";
 const RenderShaderPath = "../../src/clouds/cloud_render.slang";
 
 const CAMERA_LIGHTING_GRID_IMAGE_SIZE: [3]u32 = .{ 160, 88, 64 };
+const MAX_CLOUD_VOLUMES = 4;
 
 const CloudDensityPushConstant = extern struct {
     inv_view_projection_matrix: zm.Mat,
@@ -22,12 +23,20 @@ const RenderPushConstant = extern struct {
     inv_view_projection_matrix: zm.Mat,
 };
 
+pub const CloudVolume = extern struct {
+    min: [3]f32 = .{0.0, 0.0, 0.0},
+    phase_function: u32 = 0,
+    max: [3]f32 = .{0.0, 0.0, 0.0},
+    __pad: f32 = 0.0,
+};
+
 camera_lighting_grid_image: gfx.Image.Ref,
 camera_lighting_grid_view: gfx.ImageView.Ref,
 
 compute_shader_file_watcher: FileWatcher,
 render_shader_file_watcher: FileWatcher,
 
+cloud_volumes_buffer: gfx.Buffer.Ref,
 lights_buffer: gfx.Buffer.Ref,
 render_sampler: gfx.Sampler.Ref,
 
@@ -43,10 +52,13 @@ render_render_pass: gfx.RenderPass.Ref,
 render_framebuffer: gfx.FrameBuffer.Ref,
 render_pipeline: gfx.GraphicsPipeline.Ref,
 
+cloud_volumes_list: std.ArrayList(CloudVolume),
+
 pub fn deinit(self: *Self) void {
     self.camera_lighting_grid_image.deinit();
     self.camera_lighting_grid_view.deinit();
 
+    self.cloud_volumes_buffer.deinit();
     self.lights_buffer.deinit();
     self.render_sampler.deinit();
 
@@ -64,6 +76,8 @@ pub fn deinit(self: *Self) void {
     self.render_descriptor_set.deinit();
     self.render_descriptor_pool.deinit();
     self.render_descriptor_layout.deinit();
+
+    self.cloud_volumes_list.deinit(eng.get().general_allocator);
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -84,6 +98,13 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer camera_lighting_grid_view.deinit();
 
     // compute resources
+    const cloud_volumes_buffer = try gfx.Buffer.init(
+        @sizeOf([MAX_CLOUD_VOLUMES]CloudVolume),
+        .{ .ConstantBuffer = true, },
+        .{ .CpuWrite = true, },
+    );
+    errdefer cloud_volumes_buffer.deinit();
+
     const lights_buffer = try gfx.Buffer.init(
         @sizeOf(StandardRenderer.LightsStruct),
         .{ .ConstantBuffer = true, },
@@ -115,7 +136,12 @@ pub fn init(alloc: std.mem.Allocator) !Self {
                 .shader_stages = .{ .Compute = true, },
                 .binding = 2,
                 .binding_type = .UniformBuffer,
-            }
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 3,
+                .binding_type = .UniformBuffer,
+            },
         },
     });
     errdefer density_descriptor_layout.deinit();
@@ -134,6 +160,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .{ .binding = 0, .data = .{ .StorageImage = camera_lighting_grid_view }, },
             .{ .binding = 1, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
             .{ .binding = 2, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
+            .{ .binding = 3, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer, } } },
         },
     });
 
@@ -148,7 +175,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Pixel = true, },
                 .binding = 1,
-                .binding_type = .ImageView,
+                .binding_type = .UniformBuffer,
             },
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Pixel = true, },
@@ -158,6 +185,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Pixel = true, },
                 .binding = 3,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Pixel = true, },
+                .binding = 4,
                 .binding_type = .Sampler,
             },
         },
@@ -176,9 +208,10 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
             .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
-            .{ .binding = 1, .data = .{ .ImageView = camera_lighting_grid_view }, },
-            .{ .binding = 2, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
-            .{ .binding = 3, .data = .{ .Sampler = sampler }, },
+            .{ .binding = 1, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer, } } },
+            .{ .binding = 2, .data = .{ .ImageView = camera_lighting_grid_view }, },
+            .{ .binding = 3, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
+            .{ .binding = 4, .data = .{ .Sampler = sampler }, },
         },
     });
 
@@ -241,10 +274,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var render_shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
     errdefer render_shader_file_watcher.deinit();
 
+    var cloud_volumes_list = try std.ArrayList(CloudVolume).initCapacity(eng.get().general_allocator, 8);
+    errdefer cloud_volumes_list.deinit(eng.get().general_allocator);
+
     var self = Self {
         .camera_lighting_grid_image = camera_lighting_grid_image,
         .camera_lighting_grid_view = camera_lighting_grid_view,
 
+        .cloud_volumes_buffer = cloud_volumes_buffer,
         .lights_buffer = lights_buffer,
         .render_sampler = sampler,
         
@@ -262,6 +299,8 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
         .compute_shader_file_watcher = compute_shader_file_watcher,
         .render_shader_file_watcher = render_shader_file_watcher,
+
+        .cloud_volumes_list = cloud_volumes_list,
     };
 
     self.compute_pipeline = try self.create_compute_pipeline();
@@ -393,7 +432,15 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     return pipeline;
 }
 
+pub fn push_cloud_volume(self: *Self, cloud_volume: CloudVolume) void {
+    self.cloud_volumes_list.append(eng.get().general_allocator, cloud_volume) catch |err| {
+        std.log.warn("Failed to push cloud volume for rendering: {}", .{err});
+    };
+}
+
 pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, standard_renderer: *StandardRenderer) !void {
+    defer self.cloud_volumes_list.clearRetainingCapacity();
+    
     if (self.compute_shader_file_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_compute_pipeline() catch |err| {
             std.log.err("Unable to update cloud compute shader: {}", .{err});
@@ -426,6 +473,20 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
         @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
     }) catch |err| {
         std.log.err("Could not update lights buffer for cloud render: {}", .{err});
+    };
+
+    (blk: {
+        const volumes_buffer = self.cloud_volumes_buffer.get() catch break :blk error.UnableToGetBuffer;
+        const mapped_buffer = volumes_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        defer mapped_buffer.unmap();
+
+        const data = mapped_buffer.data_array(CloudVolume, MAX_CLOUD_VOLUMES);
+        @memset(data[0..MAX_CLOUD_VOLUMES], CloudVolume {});
+        for (0..@min(self.cloud_volumes_list.items.len, MAX_CLOUD_VOLUMES)) |idx| {
+            data[idx] = self.cloud_volumes_list.items[idx];
+        }
+    }) catch |err| {
+        std.log.err("Could not update cloud volumes buffer for cloud render: {}", .{err});
     };
 
     const amortize_frames: comptime_int = 8;

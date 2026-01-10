@@ -119,8 +119,8 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     float4x4 vp = mul(camera_data.view, camera_data.projection);
     output.position = mul(output.position, vp);
 
-    output.normal = mul(float4(input.normals.xyz, 0.0), data.model_matrix).xyz;
-    output.tangent = mul(float4(input.tangents.xyz, 0.0), data.model_matrix).xyz;
+    output.normal = normalize(mul(input.normals.xyz, float3x3(data.model_matrix)).xyz);
+    output.tangent = normalize(mul(input.tangents.xyz, float3x3(data.model_matrix)).xyz);
 
     output.tex_coord = input.tex_coord;
     output.tex_coord.y = 1.0 - output.tex_coord.y;
@@ -162,7 +162,7 @@ ps_out ps_main(vs_out input)
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         LightData light = ldata.lights[i];
-        output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_pos.xyz, input.normal, reflectivity, roughness);
+        output.colour.rgb += calculate_light_contribution(light, diffuse_colour.rgb, view_dir, input.world_pos.xyz, normals, reflectivity, roughness);
     }
 
     if ((data.flags & IS_UNLIT_BIT) != 0) {

@@ -902,6 +902,20 @@ fn entity_editor_ui(
 
         _ = Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber, }, key ++ .{@src()});
     }
+
+    const cloud_volume_collapsible = Imui.widgets.collapsible.create(imui, "Cloud Volume", null, key ++ .{@src()});
+    const cloud_volume_collapsible_open, _ = imui.get_widget_data(bool, cloud_volume_collapsible.id) catch .{ &false, .Cont };
+    if (cloud_volume_collapsible_open.*) {
+        var enable_value: bool = entity.app.cloud_volume != null;
+        const enable_checkbox = Imui.widgets.checkbox.create(imui, &enable_value, "Enable Cloud Volume", key ++ .{@src()});
+        if (enable_checkbox.clicked) {
+            if (entity.app.cloud_volume == null) {
+                entity.app.cloud_volume = 1;
+            } else {
+                entity.app.cloud_volume = null;
+            }
+        }
+    }
 }
 
 fn physics_shape_editor_ui(
