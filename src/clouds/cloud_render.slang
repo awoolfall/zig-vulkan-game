@@ -38,9 +38,12 @@ ConstantBuffer<CloudVolume[MAX_CLOUD_VOLUMES]> volumes_data : register(b0);
 Texture3D camera_lighting_grid_image;
 
 [[vk::binding(3, 0)]]
-Texture2D depth_image;
+Texture3D noise_image;
 
 [[vk::binding(4, 0)]]
+Texture2D depth_image;
+
+[[vk::binding(5, 0)]]
 SamplerState diffuse_sampler;
 
 struct vs_out

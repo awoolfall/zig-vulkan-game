@@ -33,6 +33,9 @@ pub const CloudVolume = extern struct {
 camera_lighting_grid_image: gfx.Image.Ref,
 camera_lighting_grid_view: gfx.ImageView.Ref,
 
+noise_image: gfx.Image.Ref,
+noise_view: gfx.ImageView.Ref,
+
 compute_shader_file_watcher: FileWatcher,
 render_shader_file_watcher: FileWatcher,
 
@@ -57,6 +60,9 @@ cloud_volumes_list: std.ArrayList(CloudVolume),
 pub fn deinit(self: *Self) void {
     self.camera_lighting_grid_image.deinit();
     self.camera_lighting_grid_view.deinit();
+
+    self.noise_view.deinit();
+    self.noise_image.deinit();
 
     self.cloud_volumes_buffer.deinit();
     self.lights_buffer.deinit();
@@ -96,6 +102,13 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     const camera_lighting_grid_view = try gfx.ImageView.init(.{ .image = camera_lighting_grid_image, .view_type = .ImageView3D });
     errdefer camera_lighting_grid_view.deinit();
+
+    // noise image
+    const noise_image = try generate_noise_image(128, 128, @divExact(128, 16), @divExact(128, 8), alloc);
+    errdefer noise_image.deinit();
+
+    const noise_image_view = try gfx.ImageView.init(.{ .image = noise_image, .view_type = .ImageView3D, });
+    errdefer noise_image_view.deinit();
 
     // compute resources
     const cloud_volumes_buffer = try gfx.Buffer.init(
@@ -190,6 +203,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             gfx.DescriptorBindingInfo {
                 .shader_stages = .{ .Pixel = true, },
                 .binding = 4,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Pixel = true, },
+                .binding = 5,
                 .binding_type = .Sampler,
             },
         },
@@ -210,8 +228,9 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
             .{ .binding = 1, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer, } } },
             .{ .binding = 2, .data = .{ .ImageView = camera_lighting_grid_view }, },
-            .{ .binding = 3, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
-            .{ .binding = 4, .data = .{ .Sampler = sampler }, },
+            .{ .binding = 3, .data = .{ .ImageView = noise_image_view }, },
+            .{ .binding = 4, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
+            .{ .binding = 5, .data = .{ .Sampler = sampler }, },
         },
     });
 
@@ -280,6 +299,9 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var self = Self {
         .camera_lighting_grid_image = camera_lighting_grid_image,
         .camera_lighting_grid_view = camera_lighting_grid_view,
+
+        .noise_image = noise_image,
+        .noise_view = noise_image_view,
 
         .cloud_volumes_buffer = cloud_volumes_buffer,
         .lights_buffer = lights_buffer,
@@ -430,6 +452,232 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     errdefer pipeline.deinit();
 
     return pipeline;
+}
+
+fn generate_noise_image(
+    comptime size_xy: comptime_int, 
+    comptime size_z: comptime_int, 
+    comptime large_voronoi_grid_size: comptime_int, 
+    comptime small_voronoi_grid_size: comptime_int,
+    alloc: std.mem.Allocator
+) !gfx.Image.Ref {
+    const num_large_voronoi_grid_cells: comptime_int = @divExact(size_xy, large_voronoi_grid_size) * @divExact(size_xy, large_voronoi_grid_size) * @divExact(size_z, large_voronoi_grid_size);
+    const num_small_voronoi_grid_cells: comptime_int = @divExact(size_xy, small_voronoi_grid_size) * @divExact(size_xy, small_voronoi_grid_size) * @divExact(size_z, small_voronoi_grid_size);
+
+    var default_prng = std.Random.DefaultPrng.init(@truncate(@as(u128, @intCast(std.time.nanoTimestamp()))));
+    var rand = default_prng.random();
+
+    // Large voronoi feature points
+    const voronoi_points_buffer_large = try alloc.alloc([4]f32, num_large_voronoi_grid_cells);
+    defer alloc.free(voronoi_points_buffer_large);
+
+    const large_features_image_dimensions = [3]u32 { @divExact(size_xy, large_voronoi_grid_size), @divExact(size_xy, large_voronoi_grid_size), @divExact(size_z, large_voronoi_grid_size) };
+    {
+        const grid_texel_size = zm.f32x4s(@floatFromInt(large_voronoi_grid_size));
+        for (0..large_features_image_dimensions[0]) |x| {
+            for (0..large_features_image_dimensions[1]) |y| {
+                for (0..large_features_image_dimensions[2]) |z| {
+                    const grid_pos = zm.f32x4(@as(f32, @floatFromInt(x)), @as(f32, @floatFromInt(y)), @as(f32, @floatFromInt(z)), 0.0);
+                    const center_texel = (grid_pos + zm.f32x4s(0.5)) * grid_texel_size;
+                    const offset = (zm.f32x4(rand.float(f32), rand.float(f32), rand.float(f32), 0.0) - zm.f32x4s(0.5)) * grid_texel_size;
+                    const voronoi_pos = zm.round(center_texel + offset);
+
+                    const idx = z * large_features_image_dimensions[0] * large_features_image_dimensions[1] + y * large_features_image_dimensions[0] + x;
+                    voronoi_points_buffer_large[idx] = zm.vecToArr4(voronoi_pos);
+                }
+            }
+        }
+    }
+
+    const voronoi_points_large_image = try gfx.Image.init(
+        .{
+            .format = .Rgba32_Float,
+            .width = large_features_image_dimensions[0],
+            .height = large_features_image_dimensions[1],
+            .depth = large_features_image_dimensions[2],
+            .usage_flags = .{ .ShaderResource = true, },
+            .access_flags = .{},
+            .dst_layout = .ShaderReadOnlyOptimal,
+        },
+        std.mem.sliceAsBytes(voronoi_points_buffer_large)
+    );
+    defer voronoi_points_large_image.deinit();
+
+    const voronoi_points_large_view = try gfx.ImageView.init(.{ .image = voronoi_points_large_image, .view_type = .ImageView3D, });
+    defer voronoi_points_large_view.deinit();
+
+    // Small voronoi feature points
+    const voronoi_points_buffer_small = try alloc.alloc([4]f32, num_small_voronoi_grid_cells);
+    defer alloc.free(voronoi_points_buffer_small);
+
+    const small_features_image_dimensions = [3]u32 { @divExact(size_xy, small_voronoi_grid_size), @divExact(size_xy, small_voronoi_grid_size), @divExact(size_z, small_voronoi_grid_size) };
+    {
+        const grid_texel_size = zm.f32x4s(@floatFromInt(small_voronoi_grid_size));
+        for (0..small_features_image_dimensions[0]) |x| {
+            for (0..small_features_image_dimensions[1]) |y| {
+                for (0..small_features_image_dimensions[2]) |z| {
+                    const grid_pos = zm.f32x4(@as(f32, @floatFromInt(x)), @as(f32, @floatFromInt(y)), @as(f32, @floatFromInt(z)), 0.0);
+                    const center_texel = (grid_pos + zm.f32x4s(0.5)) * grid_texel_size;
+                    const offset = (zm.f32x4(rand.float(f32), rand.float(f32), rand.float(f32), 0.0) - zm.f32x4s(0.5)) * grid_texel_size;
+                    const voronoi_pos = zm.round(center_texel + offset);
+
+                    const idx = z * small_features_image_dimensions[0] * small_features_image_dimensions[1] + y * small_features_image_dimensions[0] + x;
+                    voronoi_points_buffer_small[idx] = zm.vecToArr4(voronoi_pos);
+                }
+            }
+        }
+    }
+
+    const voronoi_points_small_image = try gfx.Image.init(
+        .{
+            .format = .Rgba32_Float,
+            .width = small_features_image_dimensions[0],
+            .height = small_features_image_dimensions[1],
+            .depth = small_features_image_dimensions[2],
+            .usage_flags = .{ .ShaderResource = true, },
+            .access_flags = .{},
+            .dst_layout = .ShaderReadOnlyOptimal,
+        },
+        std.mem.sliceAsBytes(voronoi_points_buffer_small)
+    );
+    defer voronoi_points_small_image.deinit();
+
+    const voronoi_points_small_view = try gfx.ImageView.init(.{ .image = voronoi_points_small_image, .view_type = .ImageView3D, });
+    defer voronoi_points_small_view.deinit();
+
+    // worley storage image
+    const worley_storage_image = try gfx.Image.init(
+        .{
+            .format = .Rgba32_Float,
+            .width = size_xy,
+            .height = size_xy,
+            .depth = size_z,
+            .dst_layout = .General,
+            .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
+            .access_flags = .{},
+        },
+        null
+    );
+    errdefer worley_storage_image.deinit();
+
+    const worley_storage_image_view = try gfx.ImageView.init(.{ .image = worley_storage_image, .view_type = .ImageView3D, });
+    defer worley_storage_image_view.deinit();
+
+    // create worley compute pipeline
+    const descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 0,
+                .binding_type = .StorageImage,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 1,
+                .binding_type = .ImageView,
+            },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Compute = true, },
+                .binding = 2,
+                .binding_type = .ImageView,
+            },
+        },
+    });
+    defer descriptor_layout.deinit();
+
+    const descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = descriptor_layout },
+        .max_sets = 1,
+    });
+    defer descriptor_pool.deinit();
+
+    const descriptor_set = try (try descriptor_pool.get()).allocate_set(.{ .layout = descriptor_layout });
+    defer descriptor_set.deinit();
+
+    try (try descriptor_set.get()).update(.{
+        .writes = &.{
+            .{ .binding = 0, .data = .{ .StorageImage = worley_storage_image_view }, },
+            .{ .binding = 1, .data = .{ .ImageView = voronoi_points_large_view }, },
+            .{ .binding = 2, .data = .{ .ImageView = voronoi_points_small_view }, },
+        },
+    });
+
+    const spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = @embedFile("worley.slang"),
+        .shader_entry_points = &.{
+            "cs_main",
+        },
+        .preprocessor_macros = &.{
+        },
+    });
+    defer alloc.free(spirv);
+
+    const shader_module = try gfx.ShaderModule.init(.{
+        .spirv_data = spirv,
+    });
+    defer shader_module.deinit();
+
+    const compute_pipeline = try gfx.ComputePipeline.init(.{
+        .compute_shader = .{
+            .module = &shader_module,
+            .entry_point = "cs_main",
+        },
+        .descriptor_set_layouts = &.{
+            descriptor_layout,
+        },
+        .push_constants = &.{
+        }
+    });
+    defer compute_pipeline.deinit();
+
+    // dispatch compute
+    {
+        const pool = try gfx.CommandPool.init(.{ .queue_family = .Graphics, });
+        defer pool.deinit();
+
+        var cmd = try (try pool.get()).allocate_command_buffer(.{ .level = .Primary, });
+        defer cmd.deinit();
+
+        {
+            try cmd.cmd_begin(.{ .one_time_submit = true, });
+
+            cmd.cmd_bind_compute_pipeline(compute_pipeline);
+            cmd.cmd_bind_descriptor_sets(.{
+                .descriptor_sets = &.{
+                    descriptor_set,
+                },
+            });
+            cmd.cmd_dispatch(.{ .group_count_x = size_xy, .group_count_y = size_xy, .group_count_z = size_z, });
+
+            cmd.cmd_pipeline_barrier(.{
+                .src_stage = .{ .compute_shader = true, },
+                .dst_stage = .{ .fragment_shader = true, },
+                .image_barriers = &.{
+                    gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                        .image = worley_storage_image,
+                        .src_access_mask = .{ .shader_write = true, },
+                        .dst_access_mask = .{ .shader_read = true, },
+                        .old_layout = .General,
+                        .new_layout = .ShaderReadOnlyOptimal,
+                    },
+                },
+            });
+
+            try cmd.cmd_end();
+        }
+
+        var fence = try gfx.Fence.init(.{ .create_signalled = false, });
+        defer fence.deinit();
+
+        try eng.get().gfx.submit_command_buffer(.{
+            .command_buffers = &.{ &cmd, },
+            .fence = fence,
+        });
+
+        try fence.wait();
+    }
+
+    return worley_storage_image;
 }
 
 pub fn push_cloud_volume(self: *Self, cloud_volume: CloudVolume) void {
