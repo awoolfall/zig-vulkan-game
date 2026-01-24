@@ -427,17 +427,19 @@ fn update(self: *Self) !void {
                     character_velocity[1] = 0.0;
 
                     const character_movement_speed = 4.0;
-                    const friction = 8.0;
+                    //const friction = 8.0;
 
-                    character_velocity = character_velocity
-                        // apply supported movement
-                        + world_movement_direction * zm.f32x4s(character_movement_speed * friction * engine.time.delta_time_f32())
-                        // apply friction
-                        - character_velocity * zm.f32x4s(friction * engine.time.delta_time_f32());
+                    // apply supported movement
+                    if (zm.length3(world_movement_direction)[0] > 0.0) {
+                        character_velocity = zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(character_movement_speed), 0.5);
+                    } else {
+                        // apply friction TODO FIX
+                        character_velocity = zm.lerp(character_velocity, zm.f32x4s(0.0), 0.5);
+                    }
                 } else {
                     // if not supported then apply gravity
                     character_velocity = character_velocity
-                        + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                        + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.physics.PhysicsSystem.UpdateRateS * eng.physics.PhysicsSystem.UpdateRateS);
                 }
 
                 character.setLinearVelocity(zm.vecToArr3(character_velocity));
@@ -564,14 +566,14 @@ fn update(self: *Self) !void {
                     desired_movement_direction += zm.normalize3(pos_diff);
                 }
 
-                const character_physics = opponent.physics.runtime_data.CharacterVirtual.virtual;
+                const opponent_physics = opponent.physics.runtime_data.CharacterVirtual.virtual;
 
                 if (zm.length3(desired_movement_direction)[0] != 0.0) {
                     desired_movement_direction = zm.normalize3(desired_movement_direction);
 
-                    var character_velocity = zm.loadArr3(character_physics.getLinearVelocity());
+                    var character_velocity = zm.loadArr3(opponent_physics.getLinearVelocity());
 
-                    if (character_is_supported(character_physics)) {
+                    if (character_is_supported(opponent_physics)) {
                         // remove any gravity
                         character_velocity[1] = 0.0;
 
@@ -589,14 +591,14 @@ fn update(self: *Self) !void {
                             + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
                     }
 
-                    character_physics.setLinearVelocity(zm.vecToArr3(character_velocity));
+                    opponent_physics.setLinearVelocity(zm.vecToArr3(character_velocity));
                 } else {
-                    character_physics.setLinearVelocity(zm.vecToArr3(zm.f32x4s(0.0)));
+                    opponent_physics.setLinearVelocity(.{ 0.0, 0.0, 0.0 });
                 }
 
                 // Rotate to face character
                 const rot = zm.lookAtRh(zm.f32x4s(0.0), zm.normalize3(pos_diff), zm.f32x4(0.0, 1.0, 0.0, 0.0));
-                character_physics.setRotation(
+                opponent_physics.setRotation(
                     zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)
                 );
             }
@@ -612,12 +614,12 @@ fn update(self: *Self) !void {
             //     }
             // }
 
+            // update camera position to track the character entity's visual location
             var target_pos = zm.f32x4s(0.0);
             if (engine.entities.get(self.character_idx)) |character_entity| {
-                target_pos = character_entity.transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
+                const visual_transform = engine.physics.calculate_entity_visual_transform(character_entity);
+                target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
             }
-
-            // update camera
             self.camera.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
 
             render_camera = &self.camera;
@@ -666,7 +668,6 @@ fn update(self: *Self) !void {
         }
         _ = engine.imui.pop_layout();
     }
-
 
     // Draw frame
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
@@ -907,7 +908,7 @@ pub fn push_entity_model_for_rendering(
                 .bone_info = bi,
             }
             else null,
-            entity.transform
+            engine.physics.calculate_entity_visual_transform(entity)
         ) catch unreachable;
     } else {
         if (self.current_mode == .Edit) {

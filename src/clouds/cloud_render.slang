@@ -254,13 +254,15 @@ ps_out ps_main(vs_out input)
             }
 
             // Advance optical depth along the ray
-            tdensity += density;
+            float local_density = noise_image.Sample(diffuse_sampler, (pos / 20.0) % float3(1.0)).r;
+            tdensity += local_density * 0.01;
 
             float ldensity = 0.0;
             float lt = 0.0;
             for (lt = 0.0; lt < light_aabb_end; lt += step_distance) {
                 const float3 lpos = pos + sun_light_dir * lt;
                 // sample density at lpos (constant here)
+                float llocal_density = noise_image.Sample(diffuse_sampler, (lpos / 20.0) % float3(1.0)).r;
                 ldensity += density;
             }
 
