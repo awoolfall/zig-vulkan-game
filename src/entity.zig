@@ -1,69 +1,210 @@
-const Self = @This();
-
 const std = @import("std");
 const eng = @import("engine");
+const sr = eng.serialize;
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
 
-health_points: ?i32 = null,
-anim_controller: ?eng.animation.AnimController = null,
-particle_system: ?eng.particles.ParticleSystem = null,
-light: ?StandardRenderer.Light = null,
-terrain: ?Terrain = null,
-cloud_volume: ?u32 = null,
+pub const HealthPointComponent = struct {
+    health_points: i32 = 0,
 
-pub fn deinit(self: *Self) void {
-    if (self.anim_controller) |*anim_controller| {
-        anim_controller.deinit();
+    pub fn deinit(self: *HealthPointComponent) void {
+        _ = self;
     }
-    if (self.particle_system) |*particle_system| {
-        particle_system.deinit();
+
+    pub fn init() !HealthPointComponent {
+        return .{};
     }
-    if (self.terrain) |*terrain| {
-        terrain.deinit();
+
+    pub fn serialize(alloc: std.mem.Allocator, value: HealthPointComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("health_points", try sr.serialize_value(i32, alloc, value.health_points));
+
+        return std.json.Value { .object = object };
     }
-}
 
-pub fn serialize(alloc: std.mem.Allocator, self: Self) !std.json.Value {
-    var object = std.json.ObjectMap.init(alloc);
-    errdefer object.deinit();
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !HealthPointComponent {
+        var component: HealthPointComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
-    try object.put("health_points", try eng.serialize.serialize_value(?i32, alloc, self.health_points));
-    try object.put("anim_constroller", try eng.serialize.serialize_value(?eng.animation.AnimController, alloc, self.anim_controller));
-    try object.put("particle_system_settings", try eng.serialize.serialize_value(?eng.particles.ParticleSystemSettings, alloc, if (self.particle_system) |ps| ps.settings else null));
-    try object.put("light", try eng.serialize.serialize_value(?StandardRenderer.Light, alloc, self.light));
-    try object.put("terrain", try eng.serialize.serialize_value(?Terrain, alloc, self.terrain));
-    try object.put("cloud_volume", try eng.serialize.serialize_value(?u32, alloc, self.cloud_volume));
+        component.health_points = try sr.deserialize_value(i32, alloc, object.get("health_points"));
 
-    return std.json.Value { .object = object };
-}
-
-pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
-    var self = Self {};
-    errdefer self.deinit();
-
-    const object: *const std.json.ObjectMap = switch (value) { .object => |obj| &obj, else => return error.InvalidType, };
-
-    if (object.get("health_points")) |v| blk: { self.health_points = eng.serialize.deserialize_value(?i32, alloc, v) catch break :blk; }
-
-    if (object.get("anim_controller")) |v| blk: { self.anim_controller = eng.serialize.deserialize_value(?eng.animation.AnimController, alloc, v) catch break :blk; }
-    errdefer if (self.anim_controller) |*a| { a.deinit(); };
-
-    var particle_system_settings: ?eng.particles.ParticleSystemSettings = null;
-    defer if (particle_system_settings) |*pss| pss.deinit(alloc);
-    if (object.get("particle_system_settings")) |v| blk: { particle_system_settings = eng.serialize.deserialize_value(?eng.particles.ParticleSystemSettings, alloc, v) catch break :blk; }
-
-    if (particle_system_settings) |settings| {
-        self.particle_system = try eng.particles.ParticleSystem.init(alloc, settings);
+        return component;
     }
-    errdefer if (self.particle_system) |*ps| { ps.deinit(); };
+};
 
-    if (object.get("light")) |v| blk: { self.light = eng.serialize.deserialize_value(?StandardRenderer.Light, alloc, v) catch break :blk; }
+pub const AnimControllerComponent = struct {
+    anim_controller: eng.animation.AnimController,
 
-    if (object.get("terrain")) |v| blk: { self.terrain = eng.serialize.deserialize_value(?Terrain, alloc, v) catch break :blk; }
-    errdefer if (self.terrain) |*t| { t.deinit(); };
+    pub fn deinit(self: *AnimControllerComponent) void {
+        self.anim_controller.deinit();
+    }
 
-    if (object.get("cloud_volume")) |v| blk: { self.cloud_volume = eng.serialize.deserialize_value(?u32, alloc, v) catch break :blk; }
+    pub fn init() !AnimControllerComponent {
+        const anim_controller = try eng.animation.AnimController.init(eng.get().general_allocator);
+        errdefer anim_controller.deinit();
 
-    return self;
-}
+        return .{
+            .anim_controller = anim_controller,
+        };
+    }
+
+    pub fn serialize(alloc: std.mem.Allocator, value: AnimControllerComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("anim_controller", try sr.serialize_value(eng.animation.AnimController, alloc, value.anim_controller));
+
+        return std.json.Value { .object = object };
+    }
+
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !AnimControllerComponent {
+        var component: AnimControllerComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
+
+        component.anim_controller = try sr.deserialize_value(eng.animation.AnimController, alloc, object.get("anim_controller"));
+
+        return component;
+    }
+};
+
+pub const ParticleSystemComponent = struct {
+    particle_system: eng.particles.ParticleSystem,
+
+    pub fn deinit(self: *ParticleSystemComponent) void {
+        self.particle_system.deinit();
+    }
+
+    pub fn init() !ParticleSystemComponent {
+        const particle_system = try eng.particles.ParticleSystem.init(eng.get().general_allocator, .{});
+        errdefer particle_system.deinit();
+
+        return .{
+            .particle_system = particle_system,
+        };
+    }
+
+    pub fn serialize(alloc: std.mem.Allocator, value: ParticleSystemComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("particle_system_settings", try sr.serialize_value(eng.particles.ParticleSystemSettings, alloc, value.particle_system.settings));
+
+        return std.json.Value { .object = object };
+    }
+
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !ParticleSystemComponent {
+        var component: ParticleSystemComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
+
+        var particle_system_settings: eng.particles.ParticleSystemSettings = .{};
+        defer if (particle_system_settings) |*pss| pss.deinit(alloc);
+        particle_system_settings = try sr.deserialize_value(eng.particles.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
+
+        if (particle_system_settings) |settings| {
+            component.particle_system = try eng.particles.ParticleSystem.init(alloc, settings);
+        }
+        errdefer component.particle_system.deinit();
+        
+        return component;
+    }
+};
+
+pub const LightComponent = struct {
+    light: StandardRenderer.Light,
+
+    pub fn deinit(self: *LightComponent) void {
+        _ = self;
+    }
+
+    pub fn init() !LightComponent {
+        return .{
+            .light = .{},
+        };
+    }
+
+    pub fn serialize(alloc: std.mem.Allocator, value: LightComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("light", try sr.serialize_value(StandardRenderer.Light, alloc, value.light));
+
+        return std.json.Value { .object = object };
+    }
+
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !LightComponent {
+        var component: LightComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
+
+        component.light = try sr.deserialize_value(StandardRenderer.Light, alloc, object.get("light"));
+
+        return component;
+    }
+};
+
+pub const TerrainComponent = struct {
+    terrain: Terrain,
+
+    pub fn deinit(self: *TerrainComponent) void {
+        self.terrain.deinit();
+    }
+
+    pub fn init() !TerrainComponent {
+        const terrain = try Terrain.init(eng.get().general_allocator);
+        errdefer terrain.deinit();
+
+        return .{
+            .terrain = terrain,
+        };
+    }
+
+    pub fn serialize(alloc: std.mem.Allocator, value: TerrainComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("terrain", try sr.serialize_value(Terrain, alloc, value.terrain));
+
+        return std.json.Value { .object = object };
+    }
+
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !TerrainComponent {
+        var component: TerrainComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
+
+        component.terrain = sr.deserialize_value(Terrain, alloc, object.get("terrain"));
+        errdefer component.terrain.deinit();
+
+        return component;
+    }
+};
+
+pub const CloudVolumeComponent = struct {
+    int: u32 = 0,
+
+    pub fn deinit(self: *CloudVolumeComponent) void {
+        _ = self;
+    }
+
+    pub fn init() !CloudVolumeComponent {
+        return .{};
+    }
+
+    pub fn serialize(alloc: std.mem.Allocator, value: CloudVolumeComponent) !std.json.Value {
+        var object = std.json.ObjectMap.init(alloc);
+        errdefer object.deinit();
+
+        try object.put("int", try sr.serialize_value(u32, alloc, value.int));
+
+        return std.json.Value { .object = object };
+    }
+
+    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !CloudVolumeComponent {
+        var component: CloudVolumeComponent = .{};
+        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
+
+        component.int = try sr.deserialize_value(u32, alloc, object.get("int"));
+
+        return component;
+    }
+};

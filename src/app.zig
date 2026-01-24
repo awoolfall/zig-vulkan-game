@@ -27,7 +27,15 @@ const EditMode = @import("edit_mode.zig");
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
 
-pub const EntityData = @import("entity.zig");
+pub const entity_components = @import("entity.zig");
+pub const EntityComponents = .{
+    entity_components.HealthPointComponent,
+    entity_components.AnimControllerComponent,
+    entity_components.ParticleSystemComponent,
+    entity_components.LightComponent,
+    entity_components.TerrainComponent,
+    entity_components.CloudVolumeComponent,
+};
 
 camera: eng.camera.Camera,
 target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
@@ -240,12 +248,13 @@ fn update(self: *Self) !void {
     }
 
     // update particle systems
-    var entities = engine.entities.list.iterator();
-    while (entities.next()) |entity| {
-        if (entity.app.particle_system) |*ps| {
-            ps.settings.spawn_origin = entity.transform.position;
-            ps.update(&engine.time);
-        }
+    var particle_system_iter = engine.ecs.query_iterator(.{ eng.entity.TransformComponent, entity_components.ParticleSystemComponent });
+    while (particle_system_iter.next()) |components| {
+        const entity_transform: *eng.entity.TransformComponent,
+        const entity_particle_system: *entity_components.ParticleSystemComponent = components;
+
+        entity_particle_system.particle_system.settings.spawn_origin = entity_transform.transform.position;
+        entity_particle_system.particle_system.update(&engine.time);
     }
 
     self.player_attack_particle_system.update(&engine.time);
