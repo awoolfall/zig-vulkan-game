@@ -11,7 +11,8 @@ pub const HealthPointComponent = struct {
         _ = self;
     }
 
-    pub fn init() !HealthPointComponent {
+    pub fn init(alloc: std.mem.Allocator) !HealthPointComponent {
+        _ = alloc;
         return .{};
     }
 
@@ -32,6 +33,16 @@ pub const HealthPointComponent = struct {
 
         return component;
     }
+
+    pub fn editor_ui(imui: *eng.ui, component: *HealthPointComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
+    }
 };
 
 pub const AnimControllerComponent = struct {
@@ -41,8 +52,8 @@ pub const AnimControllerComponent = struct {
         self.anim_controller.deinit();
     }
 
-    pub fn init() !AnimControllerComponent {
-        const anim_controller = try eng.animation.AnimController.init(eng.get().general_allocator);
+    pub fn init(alloc: std.mem.Allocator) !AnimControllerComponent {
+        const anim_controller = try eng.animation.AnimController.init(alloc);
         errdefer anim_controller.deinit();
 
         return .{
@@ -60,12 +71,24 @@ pub const AnimControllerComponent = struct {
     }
 
     pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !AnimControllerComponent {
-        var component: AnimControllerComponent = .{};
         const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
-        component.anim_controller = try sr.deserialize_value(eng.animation.AnimController, alloc, object.get("anim_controller"));
+        const anim_controller = try sr.deserialize_value(eng.animation.AnimController, alloc, object.get("anim_controller"));
+        errdefer anim_controller.deinit();
 
-        return component;
+        return AnimControllerComponent {
+            .anim_controller = anim_controller,
+        };
+    }
+    
+    pub fn editor_ui(imui: *eng.ui, component: *AnimControllerComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
     }
 };
 
@@ -76,8 +99,8 @@ pub const ParticleSystemComponent = struct {
         self.particle_system.deinit();
     }
 
-    pub fn init() !ParticleSystemComponent {
-        const particle_system = try eng.particles.ParticleSystem.init(eng.get().general_allocator, .{});
+    pub fn init(alloc: std.mem.Allocator) !ParticleSystemComponent {
+        const particle_system = try eng.particles.ParticleSystem.init(alloc, .{});
         errdefer particle_system.deinit();
 
         return .{
@@ -95,19 +118,27 @@ pub const ParticleSystemComponent = struct {
     }
 
     pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !ParticleSystemComponent {
-        var component: ParticleSystemComponent = .{};
         const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
-        var particle_system_settings: eng.particles.ParticleSystemSettings = .{};
-        defer if (particle_system_settings) |*pss| pss.deinit(alloc);
-        particle_system_settings = try sr.deserialize_value(eng.particles.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
+        var particle_system_settings = try sr.deserialize_value(eng.particles.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
+        defer particle_system_settings.deinit(alloc);
 
-        if (particle_system_settings) |settings| {
-            component.particle_system = try eng.particles.ParticleSystem.init(alloc, settings);
-        }
-        errdefer component.particle_system.deinit();
+        const particle_system = try eng.particles.ParticleSystem.init(alloc, particle_system_settings);
+        errdefer particle_system.deinit();
         
-        return component;
+        return ParticleSystemComponent {
+            .particle_system = particle_system,
+        };
+    }
+
+    pub fn editor_ui(imui: *eng.ui, component: *ParticleSystemComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
     }
 };
 
@@ -118,7 +149,8 @@ pub const LightComponent = struct {
         _ = self;
     }
 
-    pub fn init() !LightComponent {
+    pub fn init(alloc: std.mem.Allocator) !LightComponent {
+        _ = alloc;
         return .{
             .light = .{},
         };
@@ -134,12 +166,23 @@ pub const LightComponent = struct {
     }
 
     pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !LightComponent {
-        var component: LightComponent = .{};
         const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
-        component.light = try sr.deserialize_value(StandardRenderer.Light, alloc, object.get("light"));
+        const light = try sr.deserialize_value(StandardRenderer.Light, alloc, object.get("light"));
 
-        return component;
+        return LightComponent {
+            .light = light,
+        };
+    }
+
+    pub fn editor_ui(imui: *eng.ui, component: *LightComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
     }
 };
 
@@ -150,8 +193,8 @@ pub const TerrainComponent = struct {
         self.terrain.deinit();
     }
 
-    pub fn init() !TerrainComponent {
-        const terrain = try Terrain.init(eng.get().general_allocator);
+    pub fn init(alloc: std.mem.Allocator) !TerrainComponent {
+        const terrain = try Terrain.init(alloc);
         errdefer terrain.deinit();
 
         return .{
@@ -169,13 +212,24 @@ pub const TerrainComponent = struct {
     }
 
     pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !TerrainComponent {
-        var component: TerrainComponent = .{};
         const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
-        component.terrain = sr.deserialize_value(Terrain, alloc, object.get("terrain"));
-        errdefer component.terrain.deinit();
+        const terrain = try sr.deserialize_value(Terrain, alloc, object.get("terrain"));
+        errdefer terrain.deinit();
 
-        return component;
+        return TerrainComponent {
+            .terrain = terrain,
+        };
+    }
+    
+    pub fn editor_ui(imui: *eng.ui, component: *TerrainComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
     }
 };
 
@@ -186,7 +240,8 @@ pub const CloudVolumeComponent = struct {
         _ = self;
     }
 
-    pub fn init() !CloudVolumeComponent {
+    pub fn init(alloc: std.mem.Allocator) !CloudVolumeComponent {
+        _ = alloc;
         return .{};
     }
 
@@ -206,5 +261,15 @@ pub const CloudVolumeComponent = struct {
         component.int = try sr.deserialize_value(u32, alloc, object.get("int"));
 
         return component;
+    }
+
+    pub fn editor_ui(imui: *eng.ui, component: *CloudVolumeComponent, key: anytype) !void {
+        _ = imui.push_layout(.Y, key ++ .{@src()});
+        defer imui.pop_layout();
+
+        {
+            // TODO
+            _ = component;
+        }
     }
 };

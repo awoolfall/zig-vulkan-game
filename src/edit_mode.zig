@@ -16,12 +16,13 @@ const zm = eng.zmath;
 const sr = eng.serialize;
 const assets = eng.assets;
 const KeyCode = eng.input.KeyCode;
-const EntityDescriptor = eng.Engine.EntityDescriptor;
 const Transform = eng.Transform;
 const Camera = eng.camera.Camera;
 const Imui = eng.ui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
 const SelectionOutlineRenderer = @import("edit_mode/selection_outline.zig");
+
+const entity_components = @import("entity.zig");
 
 const EditorMode = enum {
     SceneEditor,
@@ -31,7 +32,7 @@ editor_camera: Camera,
 gizmo: Gizmo,
 selection_outline_renderer: SelectionOutlineRenderer,
 
-selected_entity: ?GenerationalIndex = null,
+selected_entity: ?eng.ecs.Entity = null,
 render_only_selected_entity: bool = false,
 
 file_dropdown_open: bool = false,
@@ -89,9 +90,10 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
         // focus camera on selected entity
         if (eng.get().input.get_key_down(KeyCode.F)) blk: {
             if (self.selected_entity) |si| {
-                const selected_entity = eng.get().entities.get(si) orelse break :blk;
+                const selected_entity_transform = eng.get().ecs.get_component(eng.entity.TransformComponent, si) orelse break :blk;
+
                 self.editor_camera.transform.position = 
-                    selected_entity.transform.position -
+                    selected_entity_transform.transform.position -
                     (self.editor_camera.transform.forward_direction() * zm.f32x4s(10.0));
             }
         }
@@ -100,7 +102,9 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
         // new entity button
         if (eng.get().input.get_key_down(KeyCode.E)) {
-            self.create_new_entity();
+            self.create_new_entity() catch |err| {
+                std.log.warn("Unable to create new entity: {}", .{err});
+            };
         }
 
         // delete entity button
@@ -112,8 +116,8 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const entity = eng.get().entities.get(selected_entity) orelse break :blk;
-                if (self.gizmo.update(&entity.transform)) {
+                const entity_transform = eng.get().ecs.get_component(eng.entity.TransformComponent, selected_entity) orelse break :blk;
+                if (self.gizmo.update(&entity_transform.transform)) {
                     interaction_available = false;
                 }
             }
@@ -121,15 +125,14 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const ent = eng.get().entities.get(selected_entity) orelse break :blk;
-                if (ent.app.terrain) |*terrain| {
-                    const modified = terrain.edit_terrain(terrain_renderer) catch |err| {
-                        std.log.err("Failed to edit terrain: {}", .{err});
-                        break :blk;
-                    };
-                    if (modified) {
-                        interaction_available = false;
-                    }
+                const entity_terrain = eng.get().ecs.get_component(entity_components.TerrainComponent, selected_entity) orelse break :blk;
+
+                const modified = entity_terrain.terrain.edit_terrain(terrain_renderer) catch |err| {
+                    std.log.err("Failed to edit terrain: {}", .{err});
+                    break :blk;
+                };
+                if (modified) {
+                    interaction_available = false;
                 }
             }
         }
@@ -144,18 +147,22 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
             if (selection_entity_id == 0) {
                 self.selected_entity = null;
-            } else if (self.selected_entity != null and self.selected_entity.?.index == selection_entity_id) {
+            } else if (self.selected_entity != null and self.selected_entity.?.idx.index == selection_entity_id) {
                 self.selected_entity = null;
             } else {
-                const entity = eng.get().entities.get_dont_check_generation(selection_entity_id);
-                if (entity) |ent| {
-                    std.log.info("entity name: {s}", .{ent.name orelse "unnamed"});
-                    self.selected_entity = .{
-                        .index = selection_entity_id,
-                        .generation = eng.get().entities.list.data.items[selection_entity_id].generation,
-                    };
+                if (selection_entity_id < eng.get().ecs.entity_data.data.items.len) {
+                    const entity_item = eng.get().ecs.entity_data.data.items[selection_entity_id];
+                    const entity = eng.ecs.Entity { .idx = .{ .index = selection_entity_id, .generation = entity_item.generation, } };
+                    if (entity_item.item_data) |_| {
+                        const entity_name = eng.get().ecs.get_entity_name(entity) orelse "unnamed";
+                        std.log.info("selected new entity with name: {s}", .{entity_name});
+
+                        self.selected_entity = entity;
+                    } else {
+                        std.log.info("entity not found!", .{});
+                    }
                 } else {
-                    std.log.info("entity not found!", .{});
+                    std.log.warn("Attempted to set invalid index as the selected entity", .{});
                 }
             }
         }
@@ -310,7 +317,9 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
 
                 const new_button = Imui.widgets.badge.create(imui, "New Entity", key ++ .{@src()});
                 if (new_button.clicked) {
-                    self.create_new_entity();
+                    self.create_new_entity() catch |err| {
+                        std.log.err("Failed to create new entity: {}", .{err});
+                    };
                 }
 
                 const delete_button = Imui.widgets.badge.create(imui, "Delete Entity", key ++ .{@src()});
@@ -334,62 +343,58 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
     }
 }
 
-pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) !void {
-    if (self.selected_entity) |s| {
-        if (eng.get().entities.get(s)) |entity| {
-            self.gizmo.render_cmd(cmd, &entity.transform, &self.editor_camera) catch |err| {
+pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) void {
+    if (self.selected_entity) |selected_entity| {
+        blk: {
+            const transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, selected_entity) orelse break :blk;
+            self.gizmo.render_cmd(cmd, &transform_component.transform, &self.editor_camera) catch |err| {
                 std.log.warn("Unable to render edit mode gizmo: {}", .{err});
             };
         }
-        self.selection_outline_renderer.render(cmd, @intCast(s.index)) catch |err| {
+
+        self.selection_outline_renderer.render(cmd, @intCast(selected_entity.idx.index)) catch |err| {
             std.log.warn("Unable to render selection outline: {}", .{err});
         };
     }
 }
 
-fn create_new_entity(self: *Self) void {
-    const entity_id = eng.get().entities.new_entity(.{}) catch |err| {
+fn create_new_entity(self: *Self) !void {
+    const entity_id = eng.get().ecs.create_new_entity() catch |err| {
         std.log.err("Unable to create new entity: {}", .{err});
-        return;
+        return err;
     };
+    errdefer eng.get().ecs.remove_entity(entity_id);
 
-    const entity = eng.get().entities.get(entity_id).?;
-    entity.set_name("new entity") catch |err| { std.log.warn("Unable to set entity name: {}", .{err}); };
-    entity.should_serialize = true;
-    entity.transform = .{
+    const serialize_component = try eng.get().ecs.add_component(eng.entity.SerializationComponent, entity_id);
+    serialize_component.serialize_id = null;
+
+    const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, entity_id);
+    transform_component.transform = .{
         .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
     };
 }
 
 fn duplicate_selected_entity(self: *Self) !void {
     if (self.selected_entity) |selected_entity_id| {
-        const selected_entity = eng.get().entities.get(selected_entity_id) orelse {
-            self.selected_entity = null;
-            return error.UnableToGetSelectedEntity;
-        };
-
         var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
         defer arena.deinit();
 
-        const serialized_entity = try sr.serialize_value(eng.entity.EntitySuperStruct, arena.allocator(), selected_entity.*);
+        const serialized_entity = try eng.get().ecs.serialize_entity(arena.allocator(), selected_entity_id);
 
-        var entity_data = try sr.deserialize_value(eng.entity.EntitySuperStruct, eng.get().general_allocator, serialized_entity);
+        const new_entity = try eng.get().ecs.deserialize_to_entity(serialized_entity);
+        errdefer eng.get().ecs.remove_entity(new_entity);
+
         // clear the serialize id so that it will be generated on the next save
-        entity_data.should_serialize = selected_entity.should_serialize;
-        entity_data.serialize_id = null;
+        const entity_serialize_component = try eng.get().ecs.add_component(eng.entity.SerializationComponent, new_entity);
+        entity_serialize_component.serialize_id = null;
 
-        const new_entity_id = try eng.get().entities.new_entity(entity_data);
-        errdefer eng.get().entities.remove_entity(new_entity_id) catch {};
-
-        self.selected_entity = new_entity_id;
+        self.selected_entity = new_entity;
     }
 }
 
 fn remove_selected_entity(self: *Self) void {
     if (self.selected_entity) |selected_entity| {
-        eng.get().entities.remove_entity(selected_entity) catch |err| {
-            std.log.err("Failed to remove entity: {}", .{err});
-        };
+        eng.get().ecs.remove_entity(selected_entity);
         self.selected_entity = null;
     }
 }
@@ -403,49 +408,6 @@ fn set_background_widget_layout(background_widget: *Imui.Widget) void {
     background_widget.padding_px = .all(10);
     background_widget.corner_radii_px = .all(10);
     background_widget.children_gap = 5;
-}
-
-const ModelNames = struct {
-    arena: std.heap.ArenaAllocator,
-    names: [][]u8,
-
-    pub fn deinit(self: *ModelNames) void {
-        self.arena.allocator().free(self.names);
-        self.arena.deinit();
-    }
-};
-
-fn get_all_model_names(alloc: std.mem.Allocator) !ModelNames {
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    errdefer arena.deinit();
-
-    // generate model option names from asset packs
-    var model_names = std.ArrayList([]u8).empty;
-    defer model_names.deinit(alloc);
-
-    var asset_packs_iter = eng.get().asset_manager.asset_packs.iterator();
-    while (asset_packs_iter.next()) |it| {
-        const pack = it.value_ptr;
-        var iter = pack.assets.iterator();
-        while (iter.next()) |p| {
-            switch (p.value_ptr.asset) {
-                .Model => {
-                    const asset_id = assets.ModelAssetId{ .pack_id = pack.unique_name_hash, .asset_id = p.key_ptr.* };
-
-                    const asset_identifier_string = try asset_id.to_string_identifier(alloc);
-                    defer alloc.free(asset_identifier_string);
-
-                    try model_names.append(alloc, try std.fmt.allocPrint(arena.allocator(), "{s}", .{asset_identifier_string}));
-                },
-                else => {},
-            }
-        }
-    }
-
-    return ModelNames {
-        .arena = arena,
-        .names = try model_names.toOwnedSlice(alloc),
-    };
 }
 
 const PhysicsData = struct {
@@ -473,12 +435,11 @@ fn entity_editor_ui(
     key: anytype,
 ) void {
     const imui = &eng.get().imui;
+
+    const entity = self.selected_entity orelse return;
     
     var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer arena.deinit();
-
-    if (self.selected_entity == null) return;
-    const entity = eng.get().entities.get(self.selected_entity.?) orelse return;
 
     const background_box = imui.push_floating_layout(.Y, 0.0, 0.0, key ++ .{@src()});
     defer imui.pop_layout();
@@ -512,7 +473,7 @@ fn entity_editor_ui(
         entity_editor_title_widget.anchor = .{ 0.5, 0.5 };
         entity_editor_title_widget.pivot = .{ 0.5, 0.5 };
     }
-    _ = Imui.widgets.checkbox.create(imui, &entity.should_serialize, "should serialize", key ++ .{@src()});
+    //_ = Imui.widgets.checkbox.create(imui, &entity.should_serialize, "should serialize", key ++ .{@src()});
 
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -530,392 +491,406 @@ fn entity_editor_ui(
         // if name line edit has changed then update the entity's name
         if (name_edit.init) {
             const name_edit_data, _ = imui.get_widget_data(Imui.widgets.line_edit.TextInputState, name_edit.id.box) catch unreachable;
-            name_edit_data.text.appendSlice(imui.widget_allocator(), entity.name orelse "unnamed") catch unreachable;
+            name_edit_data.text.appendSlice(imui.widget_allocator(), eng.get().ecs.get_entity_name(entity) orelse "unnamed") catch unreachable;
             name_edit_data.cursor = name_edit_data.text.items.len;
             name_edit_data.mark = name_edit_data.text.items.len;
         }
         if (name_edit.data_changed) {
-            if (entity.name) |_| {
-                const name_edit_data, _ = imui.get_widget_data(Imui.widgets.line_edit.TextInputState, name_edit.id.box) catch unreachable;
-                eng.get().general_allocator.free(entity.name.?);
-                entity.name = eng.get().general_allocator.dupe(u8, name_edit_data.text.items) catch unreachable;
-            }
+            const name_edit_data, _ = imui.get_widget_data(Imui.widgets.line_edit.TextInputState, name_edit.id.box) catch unreachable;
+            eng.get().ecs.set_entity_name(entity, name_edit_data.text.items) catch |err| {
+                std.log.warn("Failed to set entity name: {}", .{err});
+            };
         }
     }
+
     _ = arena.reset(.retain_capacity);
 
-    {
-        const ll = imui.push_layout(.X, .{@src()});
-        if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
-            ll_widget.children_gap = 4;
-        }
-        defer imui.pop_layout();
+    const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
+    inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+        if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
+            const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
+            const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
 
-        const labell = Imui.widgets.label.create(imui, "model: ");
-        if (imui.get_widget(labell.id)) |label_widget| {
-            label_widget.semantic_size[0] = form_label_size;
-        }
-
-        const model_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
-        if (model_combobox.init) {
-            std.log.info("model combobox init", .{});
-
-            const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
-            model_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
-            model_combobox_data.can_be_default = true;
-
-            var model_names = get_all_model_names(eng.get().frame_allocator) catch unreachable;
-            defer model_names.deinit();
-
-            for (model_names.names) |option| {
-                model_combobox_data.append_option(imui.widget_allocator(), option) catch |err| {
-                    std.log.err("Failed to append combobox option: {}", .{err});
-                    break;
+            if (collapsible_open.*) {
+                eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, component, key ++ .{@src(), idx}) catch |err| {
+                    std.log.warn("Failed to load editor ui for component '{s}': {}", .{@typeName(eng.AppEcsSystem.ComponentTypes[idx]), err});
                 };
-            }
-
-            const model_text = if (entity.model) |mid| (mid.to_string_identifier(arena.allocator()) catch unreachable) else "None";
-
-            model_combobox_data.selected_index = null;
-            for (model_combobox_data.options.items, 0..) |option, i| {
-                if (std.mem.eql(u8, option, model_text)) {
-                    model_combobox_data.selected_index = i;
-                    break;
-                }
-            }
-        }
-        if (model_combobox.data_changed) {
-            const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
-            if (model_combobox_data.selected_index) |si| {
-                if (assets.ModelAssetId.from_string_identifier(model_combobox_data.options.items[si])) |model_id| {
-                    entity.model = model_id;
-                } else |_| { 
-                    std.log.err("Failed to deserialize model id!", .{});
-                }
-                _ = arena.reset(.retain_capacity);
-            } else {
-                entity.model = null;
             }
         }
     }
-    _ = arena.reset(.retain_capacity);
 
-    const transform_collapsible = Imui.widgets.collapsible.create(imui, "Transform", null, .{@src()});
-    const transform_collapsible_open, _ = imui.get_widget_data(bool, transform_collapsible.id) catch .{ &false, .Cont };
+    // {
+    //     const ll = imui.push_layout(.X, .{@src()});
+    //     if (imui.get_widget(ll)) |ll_widget| {
+    //         ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+    //         ll_widget.children_gap = 4;
+    //     }
+    //     defer imui.pop_layout();
 
-    if (transform_collapsible_open.*) {
-        const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
-        if (imui.get_widget(transform_layout)) |transform_layout_widget| {
-            transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
-            transform_layout_widget.semantic_size[0].value = 1.0;
-            transform_layout_widget.padding_px = .{
-                .left = EntityEditorTabWidth,
-            };
-            transform_layout_widget.children_gap = 5;
-        }
-        defer imui.pop_layout();
+    //     const labell = Imui.widgets.label.create(imui, "model: ");
+    //     if (imui.get_widget(labell.id)) |label_widget| {
+    //         label_widget.semantic_size[0] = form_label_size;
+    //     }
 
-        {
-            _ = imui.push_form_layout_item(.{@src()});
-            defer imui.pop_layout();
+    //     const model_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+    //     if (model_combobox.init) {
+    //         std.log.info("model combobox init", .{});
 
-            _ = Imui.widgets.label.create(imui, "position: ");
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[0], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[1], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[2], .{}, key ++ .{@src()});
-        }
-        {
-            _ = imui.push_form_layout_item(.{@src()});
-            defer imui.pop_layout();
+    //         const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
+    //         model_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
+    //         model_combobox_data.can_be_default = true;
 
-            _ = Imui.widgets.label.create(imui, "rotation: ");
-            var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
-            const rx = Imui.widgets.number_slider.create(imui, &rot[0], .{}, key ++ .{@src()});
-            const ry = Imui.widgets.number_slider.create(imui, &rot[1], .{}, key ++ .{@src()});
-            const rz = Imui.widgets.number_slider.create(imui, &rot[2], .{}, key ++ .{@src()});
+    //         var model_names = get_all_model_names(eng.get().frame_allocator) catch unreachable;
+    //         defer model_names.deinit();
 
-            if (rx.data_changed or ry.data_changed or rz.data_changed) {
-                rot = rot * zm.f32x4s(std.math.pi / 180.0);
-                entity.transform.rotation = zm.quatFromRollPitchYawV(rot);
-            }
-        }
-        {
-            _ = imui.push_form_layout_item(.{@src()});
-            defer imui.pop_layout();
+    //         for (model_names.names) |option| {
+    //             model_combobox_data.append_option(imui.widget_allocator(), option) catch |err| {
+    //                 std.log.err("Failed to append combobox option: {}", .{err});
+    //                 break;
+    //             };
+    //         }
 
-            _ = Imui.widgets.label.create(imui, "scale: ");
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[0], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[1], .{}, key ++ .{@src()});
-            _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[2], .{}, key ++ .{@src()});
-        }
-    }
+    //         const model_text = if (entity.model) |mid| (mid.to_string_identifier(arena.allocator()) catch unreachable) else "None";
 
-    // physics
-    const physics_collapsible = Imui.widgets.collapsible.create(imui, "Physics", null, key ++ .{@src()});
-    const physics_collapsible_open, _ = imui.get_widget_data(bool, physics_collapsible.id) catch .{ &false, .Cont };
-    if (physics_collapsible_open.*) physics_collapsible_blk: {
-        const physics_button = Imui.widgets.badge.create(imui, "Set Physics", key ++ .{@src()});
-        const data, _ = imui.get_widget_data(PhysicsData, physics_button.id.box) catch break :physics_collapsible_blk;
+    //         model_combobox_data.selected_index = null;
+    //         for (model_combobox_data.options.items, 0..) |option, i| {
+    //             if (std.mem.eql(u8, option, model_text)) {
+    //                 model_combobox_data.selected_index = i;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //     if (model_combobox.data_changed) {
+    //         const model_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, model_combobox.id) catch unreachable;
+    //         if (model_combobox_data.selected_index) |si| {
+    //             if (assets.ModelAssetId.from_string_identifier(model_combobox_data.options.items[si])) |model_id| {
+    //                 entity.model = model_id;
+    //             } else |_| { 
+    //                 std.log.err("Failed to deserialize model id!", .{});
+    //             }
+    //             _ = arena.reset(.retain_capacity);
+    //         } else {
+    //             entity.model = null;
+    //         }
+    //     }
+    // }
+    // _ = arena.reset(.retain_capacity);
 
-        if (physics_button.clicked) {
-            entity.physics.update_runtime_data(self.selected_entity.?) catch |err| {
-                std.log.err("Unable to update selected entity physics: {}", .{err});
-            };
-        }
+    // const transform_collapsible = Imui.widgets.collapsible.create(imui, "Transform", null, .{@src()});
+    // const transform_collapsible_open, _ = imui.get_widget_data(bool, transform_collapsible.id) catch .{ &false, .Cont };
+
+    // if (transform_collapsible_open.*) {
+    //     const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
+    //     if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+    //         transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
+    //         transform_layout_widget.semantic_size[0].value = 1.0;
+    //         transform_layout_widget.padding_px = .{
+    //             .left = EntityEditorTabWidth,
+    //         };
+    //         transform_layout_widget.children_gap = 5;
+    //     }
+    //     defer imui.pop_layout();
+
+    //     {
+    //         _ = imui.push_form_layout_item(.{@src()});
+    //         defer imui.pop_layout();
+
+    //         _ = Imui.widgets.label.create(imui, "position: ");
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[0], .{}, key ++ .{@src()});
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[1], .{}, key ++ .{@src()});
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.position[2], .{}, key ++ .{@src()});
+    //     }
+    //     {
+    //         _ = imui.push_form_layout_item(.{@src()});
+    //         defer imui.pop_layout();
+
+    //         _ = Imui.widgets.label.create(imui, "rotation: ");
+    //         var rot = zm.loadArr3(zm.quatToRollPitchYaw(entity.transform.rotation)) * zm.f32x4s(180.0 / std.math.pi);
+    //         const rx = Imui.widgets.number_slider.create(imui, &rot[0], .{}, key ++ .{@src()});
+    //         const ry = Imui.widgets.number_slider.create(imui, &rot[1], .{}, key ++ .{@src()});
+    //         const rz = Imui.widgets.number_slider.create(imui, &rot[2], .{}, key ++ .{@src()});
+
+    //         if (rx.data_changed or ry.data_changed or rz.data_changed) {
+    //             rot = rot * zm.f32x4s(std.math.pi / 180.0);
+    //             entity.transform.rotation = zm.quatFromRollPitchYawV(rot);
+    //         }
+    //     }
+    //     {
+    //         _ = imui.push_form_layout_item(.{@src()});
+    //         defer imui.pop_layout();
+
+    //         _ = Imui.widgets.label.create(imui, "scale: ");
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[0], .{}, key ++ .{@src()});
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[1], .{}, key ++ .{@src()});
+    //         _ = Imui.widgets.number_slider.create(imui, &entity.transform.scale[2], .{}, key ++ .{@src()});
+    //     }
+    // }
+
+    // // physics
+    // const physics_collapsible = Imui.widgets.collapsible.create(imui, "Physics", null, key ++ .{@src()});
+    // const physics_collapsible_open, _ = imui.get_widget_data(bool, physics_collapsible.id) catch .{ &false, .Cont };
+    // if (physics_collapsible_open.*) physics_collapsible_blk: {
+    //     const physics_button = Imui.widgets.badge.create(imui, "Set Physics", key ++ .{@src()});
+    //     const data, _ = imui.get_widget_data(PhysicsData, physics_button.id.box) catch break :physics_collapsible_blk;
+
+    //     if (physics_button.clicked) {
+    //         entity.physics.update_runtime_data(self.selected_entity.?) catch |err| {
+    //             std.log.err("Unable to update selected entity physics: {}", .{err});
+    //         };
+    //     }
         
-        const physics_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
-        const physics_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, physics_combobox.id) catch |err| {
-            std.log.err("Unable to get physics combobox data: {}", .{err});
-            unreachable;
-        };
-        if (physics_combobox.init) {
-            physics_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch |err| {
-                std.log.err("Failed to set default physics combobox text: {}", .{err});
-                unreachable;
-            };
-            physics_combobox_data.can_be_default = false;
+    //     const physics_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+    //     const physics_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, physics_combobox.id) catch |err| {
+    //         std.log.err("Unable to get physics combobox data: {}", .{err});
+    //         unreachable;
+    //     };
+    //     if (physics_combobox.init) {
+    //         physics_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch |err| {
+    //             std.log.err("Failed to set default physics combobox text: {}", .{err});
+    //             unreachable;
+    //         };
+    //         physics_combobox_data.can_be_default = false;
         
-            // generate physics option names from enum
-            const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
-            inline for (physics_options_fields) |field| {
-                physics_combobox_data.append_option(imui.widget_allocator(), field.name) catch |err| {
-                    std.log.err("Failed to append physics option to combobox: {}", .{err});
-                    unreachable;
-                };
-            }
+    //         // generate physics option names from enum
+    //         const physics_options_fields = @typeInfo(eng.entity.PhysicsOptionsEnum).@"enum".fields;
+    //         inline for (physics_options_fields) |field| {
+    //             physics_combobox_data.append_option(imui.widget_allocator(), field.name) catch |err| {
+    //                 std.log.err("Failed to append physics option to combobox: {}", .{err});
+    //                 unreachable;
+    //             };
+    //         }
         
-            // set physics descriptor
-            data.settings = entity.physics.settings;
-            physics_combobox_data.selected_index = @intFromEnum(data.settings);
-        }
-        if (physics_combobox.data_changed) {
-            if (physics_combobox_data.selected_index) |si| {
-                switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
-                    .None => data.settings = .{ .None = {} },
-                    .Body => data.settings = .{ .Body = .{} },
-                    .Character => data.settings = .{ .Character = .{} },
-                    .CharacterVirtual => data.settings = .{ .CharacterVirtual = .{} },
-                }
-            }
-        }
+    //         // set physics descriptor
+    //         data.settings = entity.physics.settings;
+    //         physics_combobox_data.selected_index = @intFromEnum(data.settings);
+    //     }
+    //     if (physics_combobox.data_changed) {
+    //         if (physics_combobox_data.selected_index) |si| {
+    //             switch (@as(eng.entity.PhysicsOptionsEnum, @enumFromInt(si))) {
+    //                 .None => data.settings = .{ .None = {} },
+    //                 .Body => data.settings = .{ .Body = .{} },
+    //                 .Character => data.settings = .{ .Character = .{} },
+    //                 .CharacterVirtual => data.settings = .{ .CharacterVirtual = .{} },
+    //             }
+    //         }
+    //     }
 
-        const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
-        if (imui.get_widget(transform_layout)) |transform_layout_widget| {
-            transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
-            transform_layout_widget.semantic_size[0].value = 1.0;
-            transform_layout_widget.children_gap = 5;
-            transform_layout_widget.padding_px = .{
-                .left = EntityEditorTabWidth,
-            };
-        }
-        defer imui.pop_layout();
+    //     const transform_layout = imui.push_layout(.Y, key ++ .{@src()});
+    //     if (imui.get_widget(transform_layout)) |transform_layout_widget| {
+    //         transform_layout_widget.semantic_size[0].kind = .ParentPercentage;
+    //         transform_layout_widget.semantic_size[0].value = 1.0;
+    //         transform_layout_widget.children_gap = 5;
+    //         transform_layout_widget.padding_px = .{
+    //             .left = EntityEditorTabWidth,
+    //         };
+    //     }
+    //     defer imui.pop_layout();
     
-        switch (data.settings) {
-            .None => {},
-            .Body => |*b| {
-                physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
+    //     switch (data.settings) {
+    //         .None => {},
+    //         .Body => |*b| {
+    //             physics_shape_editor_ui(entity, &b.settings, key ++ .{@src()});
 
-                {
-                    _ = imui.push_form_layout_item(key ++ .{@src()});
-                    defer imui.pop_layout();
+    //             {
+    //                 _ = imui.push_form_layout_item(key ++ .{@src()});
+    //                 defer imui.pop_layout();
 
-                    _ = Imui.widgets.label.create(imui, "is sensor:");
-                    _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "", key ++ .{@src()});
-                }
-                {
-                    _ = imui.push_form_layout_item(key ++ .{@src()});
-                    defer imui.pop_layout();
+    //                 _ = Imui.widgets.label.create(imui, "is sensor:");
+    //                 _ = Imui.widgets.checkbox.create(imui, &b.is_sensor, "", key ++ .{@src()});
+    //             }
+    //             {
+    //                 _ = imui.push_form_layout_item(key ++ .{@src()});
+    //                 defer imui.pop_layout();
                     
-                    _ = Imui.widgets.label.create(imui, "is static:");
-                    _ = Imui.widgets.checkbox.create(imui, &b.is_static, "", key ++ .{@src()});
-                }
-            },
-            .Character => |_| {
-                _ = Imui.widgets.label.create(imui, "is character");
-            },
-            .CharacterVirtual => |_| {
-                _ = Imui.widgets.label.create(imui, "is virtual character");
-            },
-        }
-    }
+    //                 _ = Imui.widgets.label.create(imui, "is static:");
+    //                 _ = Imui.widgets.checkbox.create(imui, &b.is_static, "", key ++ .{@src()});
+    //             }
+    //         },
+    //         .Character => |_| {
+    //             _ = Imui.widgets.label.create(imui, "is character");
+    //         },
+    //         .CharacterVirtual => |_| {
+    //             _ = Imui.widgets.label.create(imui, "is virtual character");
+    //         },
+    //     }
+    // }
 
-    const particle_collapsible = Imui.widgets.collapsible.create(imui, "Particle System", null, key ++ .{@src()});
-    defer { 
-        const particle_collapsible_open, _ = imui.get_widget_data(bool, particle_collapsible.id) catch unreachable;
-        if (particle_collapsible_open.*) {
-            const background = imui.push_floating_layout(.Y, 0.0, 0.0, .{@src()});
-            defer imui.pop_layout();
+    // const particle_collapsible = Imui.widgets.collapsible.create(imui, "Particle System", null, key ++ .{@src()});
+    // defer { 
+    //     const particle_collapsible_open, _ = imui.get_widget_data(bool, particle_collapsible.id) catch unreachable;
+    //     if (particle_collapsible_open.*) {
+    //         const background = imui.push_floating_layout(.Y, 0.0, 0.0, .{@src()});
+    //         defer imui.pop_layout();
 
-            if (imui.get_widget(background)) |background_widget| {
-                set_background_widget_layout(background_widget);
-            }
+    //         if (imui.get_widget(background)) |background_widget| {
+    //             set_background_widget_layout(background_widget);
+    //         }
 
-            const background_signals = imui.generate_widget_signals(background);
-            const position_data, const position_state = imui.get_widget_data([2]f32, background) catch unreachable;
+    //         const background_signals = imui.generate_widget_signals(background);
+    //         const position_data, const position_state = imui.get_widget_data([2]f32, background) catch unreachable;
 
-            if (position_state == .Init) {
-                position_data[0] = 20.0;
-                position_data[1] = 20.0;
-            }
+    //         if (position_state == .Init) {
+    //             position_data[0] = 20.0;
+    //             position_data[1] = 20.0;
+    //         }
 
-            imui.set_floating_layout_position(background, position_data[0], position_data[1]);
+    //         imui.set_floating_layout_position(background, position_data[0], position_data[1]);
 
-            if (background_signals.dragged) {
-                position_data[0] += eng.get().input.mouse_delta[0];
-                position_data[1] += eng.get().input.mouse_delta[1];
-            }
+    //         if (background_signals.dragged) {
+    //             position_data[0] += eng.get().input.mouse_delta[0];
+    //             position_data[1] += eng.get().input.mouse_delta[1];
+    //         }
 
-            if (imui.get_widget(background)) |background_widget| {
-                background_widget.computed_relative_position[0] = position_data[0];
-                background_widget.computed_relative_position[1] = position_data[1];
-            }
+    //         if (imui.get_widget(background)) |background_widget| {
+    //             background_widget.computed_relative_position[0] = position_data[0];
+    //             background_widget.computed_relative_position[1] = position_data[1];
+    //         }
 
-            pe.particle_editor(entity, key ++ .{@src()});
-        }
-    }
+    //         pe.particle_editor(entity, key ++ .{@src()});
+    //     }
+    // }
 
-    const light_collapsible = Imui.widgets.collapsible.create(imui, "Light", null, key ++ .{@src()});
-    const light_collapsible_open, _ = imui.get_widget_data(bool, light_collapsible.id) catch .{ &false, .Cont };
-    if (light_collapsible_open.*) {
-        const light_type_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
-        const light_type_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, light_type_combobox.id) catch unreachable;
-        if (light_type_combobox.init) {
-            light_type_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
-            light_type_combobox_data.can_be_default = true;
+    // const light_collapsible = Imui.widgets.collapsible.create(imui, "Light", null, key ++ .{@src()});
+    // const light_collapsible_open, _ = imui.get_widget_data(bool, light_collapsible.id) catch .{ &false, .Cont };
+    // if (light_collapsible_open.*) {
+    //     const light_type_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
+    //     const light_type_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, light_type_combobox.id) catch unreachable;
+    //     if (light_type_combobox.init) {
+    //         light_type_combobox_data.default_text = imui.widget_allocator().dupe(u8, "None") catch unreachable;
+    //         light_type_combobox_data.can_be_default = true;
 
-            const light_type_options_fields = @typeInfo(StandardRenderer.LightType).@"enum".fields;
-            inline for (light_type_options_fields) |field| {
-                light_type_combobox_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
-            }
+    //         const light_type_options_fields = @typeInfo(StandardRenderer.LightType).@"enum".fields;
+    //         inline for (light_type_options_fields) |field| {
+    //             light_type_combobox_data.append_option(imui.widget_allocator(), field.name) catch unreachable;
+    //         }
 
-            light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.light_type) else null;
-        }
-        if (light_type_combobox.data_changed) {
-            if (light_type_combobox_data.selected_index) |si| {
-                if (entity.app.light == null) {
-                    entity.app.light = .{
-                        .intensity = 1.0,
-                    };
-                }
-                entity.app.light.?.light_type = @as(StandardRenderer.LightType, @enumFromInt(si));
-            } else {
-                entity.app.light = null;
-            }
-        }
-        if (entity.app.light) |*light| {
-            {
-                _ = imui.push_form_layout_item(.{@src()});
-                defer imui.pop_layout();
+    //         light_type_combobox_data.selected_index = if (entity.app.light) |l| @intFromEnum(l.light_type) else null;
+    //     }
+    //     if (light_type_combobox.data_changed) {
+    //         if (light_type_combobox_data.selected_index) |si| {
+    //             if (entity.app.light == null) {
+    //                 entity.app.light = .{
+    //                     .intensity = 1.0,
+    //                 };
+    //             }
+    //             entity.app.light.?.light_type = @as(StandardRenderer.LightType, @enumFromInt(si));
+    //         } else {
+    //             entity.app.light = null;
+    //         }
+    //     }
+    //     if (entity.app.light) |*light| {
+    //         {
+    //             _ = imui.push_form_layout_item(.{@src()});
+    //             defer imui.pop_layout();
 
-                _ = Imui.widgets.label.create(imui, "colour: ");
+    //             _ = Imui.widgets.label.create(imui, "colour: ");
                 
-                // _ = imui.push_layout(.X, key ++ .{@src()});
-                // defer imui.pop_layout();
+    //             // _ = imui.push_layout(.X, key ++ .{@src()});
+    //             // defer imui.pop_layout();
 
-                // if (imui.get_widget(container_layout)) |c| {
-                //     c.semantic_size[0] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
-                //     c.semantic_size[1] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
-                // }
+    //             // if (imui.get_widget(container_layout)) |c| {
+    //             //     c.semantic_size[0] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
+    //             //     c.semantic_size[1] = Imui.SemanticSize { .kind = .Pixels, .value = 100.0, .shrinkable_percent = 0.0 };
+    //             // }
 
-                var colour: ?zm.F32x4 = light.colour;
-                const colour_indicator_signals = Imui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
-                const colour_indicator_data, _ = imui.get_widget_data(bool, colour_indicator_signals.id) catch unreachable;
+    //             var colour: ?zm.F32x4 = light.colour;
+    //             const colour_indicator_signals = Imui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
+    //             const colour_indicator_data, _ = imui.get_widget_data(bool, colour_indicator_signals.id) catch unreachable;
 
-                if (colour_indicator_signals.init) {
-                    colour_indicator_data.* = false;
-                }
+    //             if (colour_indicator_signals.init) {
+    //                 colour_indicator_data.* = false;
+    //             }
 
-                if (colour_indicator_signals.clicked) {
-                    colour_indicator_data.* = !colour_indicator_data.*;
-                }
+    //             if (colour_indicator_signals.clicked) {
+    //                 colour_indicator_data.* = !colour_indicator_data.*;
+    //             }
 
-                if (colour_indicator_data.*) {
-                    const picker_floating_layout = imui.push_floating_layout(.Y, 10.0, 10.0, key ++ .{@src()});
-                    defer imui.pop_layout();
+    //             if (colour_indicator_data.*) {
+    //                 const picker_floating_layout = imui.push_floating_layout(.Y, 10.0, 10.0, key ++ .{@src()});
+    //                 defer imui.pop_layout();
 
-                    if (imui.get_widget(picker_floating_layout)) |w| {
-                        set_background_widget_layout(w);
-                        w.semantic_size[0].minimum_pixel_size = 350;
-                        w.semantic_size[1].minimum_pixel_size = 350;
-                    }
+    //                 if (imui.get_widget(picker_floating_layout)) |w| {
+    //                     set_background_widget_layout(w);
+    //                     w.semantic_size[0].minimum_pixel_size = 350;
+    //                     w.semantic_size[1].minimum_pixel_size = 350;
+    //                 }
 
-                    const picker_floating_position, _ = imui.get_widget_data([2]f32, picker_floating_layout) catch unreachable;
-                    imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
+    //                 const picker_floating_position, _ = imui.get_widget_data([2]f32, picker_floating_layout) catch unreachable;
+    //                 imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
 
-                    if (imui.generate_widget_signals(picker_floating_layout).dragged) {
-                        picker_floating_position[0] += eng.get().input.mouse_delta[0];
-                        picker_floating_position[1] += eng.get().input.mouse_delta[1];
-                    }
+    //                 if (imui.generate_widget_signals(picker_floating_layout).dragged) {
+    //                     picker_floating_position[0] += eng.get().input.mouse_delta[0];
+    //                     picker_floating_position[1] += eng.get().input.mouse_delta[1];
+    //                 }
 
-                    _ = Imui.widgets.label.create(imui, "colour picker");
-                    const picker_signals = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
-                    if (picker_signals.data_changed) {
-                        if (colour) |c| {
-                            light.colour = c;
-                        }
-                    }
-                }
-                //_ = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+    //                 _ = Imui.widgets.label.create(imui, "colour picker");
+    //                 const picker_signals = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+    //                 if (picker_signals.data_changed) {
+    //                     if (colour) |c| {
+    //                         light.colour = c;
+    //                     }
+    //                 }
+    //             }
+    //             //_ = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
 
-                // _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
-                // _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
-                // _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
-            }
+    //             // _ = Imui.widgets.number_slider.create(imui, &light.colour[0], .{}, key ++ .{@src()});
+    //             // _ = Imui.widgets.number_slider.create(imui, &light.colour[1], .{}, key ++ .{@src()});
+    //             // _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
+    //         }
 
-            create_form_number_slider("intensity:", &light.intensity, key ++ .{@src()});
+    //         create_form_number_slider("intensity:", &light.intensity, key ++ .{@src()});
 
-            if (light.light_type == .Spot) {
-                var umbra_degrees = std.math.radiansToDegrees(light.umbra);
-                create_form_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
-                light.umbra = std.math.degreesToRadians(umbra_degrees);
+    //         if (light.light_type == .Spot) {
+    //             var umbra_degrees = std.math.radiansToDegrees(light.umbra);
+    //             create_form_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
+    //             light.umbra = std.math.degreesToRadians(umbra_degrees);
 
-                var penumbra_degrees = std.math.radiansToDegrees(light.delta_penumbra);
-                create_form_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
-                light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
-            }
-        }
-    }
+    //             var penumbra_degrees = std.math.radiansToDegrees(light.delta_penumbra);
+    //             create_form_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
+    //             light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
+    //         }
+    //     }
+    // }
 
-    const terrain_collapsible = Imui.widgets.collapsible.create(imui, "Terrain", null, key ++ .{@src()});
-    const terrain_collapsible_open, _ = imui.get_widget_data(bool, terrain_collapsible.id) catch .{ &false, .Cont };
-    if (terrain_collapsible_open.*) {
-        var enable_terrain_value: bool = entity.app.terrain != null;
-        const enable_terrain_checkbox = Imui.widgets.checkbox.create(imui, &enable_terrain_value, "Enable Terrain", key ++ .{@src()});
-        if (enable_terrain_checkbox.clicked) {
-            if (entity.app.terrain == null) {
-                entity.app.terrain = Terrain.init(eng.get().general_allocator) catch |err| {
-                    std.log.err("Failed to create terrain: {}", .{err});
-                    return;
-                };
-            } else {
-                if (entity.app.terrain) |*terrain| {
-                    terrain.deinit();
-                }
-                entity.app.terrain = null;
-            }
-        }
+    // const terrain_collapsible = Imui.widgets.collapsible.create(imui, "Terrain", null, key ++ .{@src()});
+    // const terrain_collapsible_open, _ = imui.get_widget_data(bool, terrain_collapsible.id) catch .{ &false, .Cont };
+    // if (terrain_collapsible_open.*) {
+    //     var enable_terrain_value: bool = entity.app.terrain != null;
+    //     const enable_terrain_checkbox = Imui.widgets.checkbox.create(imui, &enable_terrain_value, "Enable Terrain", key ++ .{@src()});
+    //     if (enable_terrain_checkbox.clicked) {
+    //         if (entity.app.terrain == null) {
+    //             entity.app.terrain = Terrain.init(eng.get().general_allocator) catch |err| {
+    //                 std.log.err("Failed to create terrain: {}", .{err});
+    //                 return;
+    //             };
+    //         } else {
+    //             if (entity.app.terrain) |*terrain| {
+    //                 terrain.deinit();
+    //             }
+    //             entity.app.terrain = null;
+    //         }
+    //     }
 
-        if (entity.app.terrain) |*terrain| {
-            terrain.editor_ui(entity, key ++ .{@src()});
-        }
+    //     if (entity.app.terrain) |*terrain| {
+    //         terrain.editor_ui(entity, key ++ .{@src()});
+    //     }
 
-        _ = Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber, }, key ++ .{@src()});
-    }
+    //     _ = Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber, }, key ++ .{@src()});
+    // }
 
-    const cloud_volume_collapsible = Imui.widgets.collapsible.create(imui, "Cloud Volume", null, key ++ .{@src()});
-    const cloud_volume_collapsible_open, _ = imui.get_widget_data(bool, cloud_volume_collapsible.id) catch .{ &false, .Cont };
-    if (cloud_volume_collapsible_open.*) {
-        var enable_value: bool = entity.app.cloud_volume != null;
-        const enable_checkbox = Imui.widgets.checkbox.create(imui, &enable_value, "Enable Cloud Volume", key ++ .{@src()});
-        if (enable_checkbox.clicked) {
-            if (entity.app.cloud_volume == null) {
-                entity.app.cloud_volume = 1;
-            } else {
-                entity.app.cloud_volume = null;
-            }
-        }
-    }
+    // const cloud_volume_collapsible = Imui.widgets.collapsible.create(imui, "Cloud Volume", null, key ++ .{@src()});
+    // const cloud_volume_collapsible_open, _ = imui.get_widget_data(bool, cloud_volume_collapsible.id) catch .{ &false, .Cont };
+    // if (cloud_volume_collapsible_open.*) {
+    //     var enable_value: bool = entity.app.cloud_volume != null;
+    //     const enable_checkbox = Imui.widgets.checkbox.create(imui, &enable_value, "Enable Cloud Volume", key ++ .{@src()});
+    //     if (enable_checkbox.clicked) {
+    //         if (entity.app.cloud_volume == null) {
+    //             entity.app.cloud_volume = 1;
+    //         } else {
+    //             entity.app.cloud_volume = null;
+    //         }
+    //     }
+    // }
 }
 
 fn physics_shape_editor_ui(
@@ -1145,10 +1120,9 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
         if (load_button.clicked) {
             if (data.selected_name) |name| {
                 // Remove all existing entities
-                for (eng.get().entities.list.data.items, 0..) |*it, i| {
-                    if (it.item_data) |_| {
-                        eng.get().entities.remove_entity(GenerationalIndex{.index = i, .generation = it.generation}) catch unreachable;
-                    }
+                var entity_iterator = eng.get().ecs.entity_iterator();
+                while (entity_iterator.next()) |entity| {
+                    eng.get().ecs.remove_entity(entity);
                 }
 
                 // Create new entities and set scene name
@@ -1208,24 +1182,22 @@ fn create_scene_entities(scene_name: []const u8) !void {
                 continue;
             };
 
-            var ent = sr.deserialize_value(eng.entity.EntitySuperStruct, eng.get().general_allocator, ent_s) catch |err| {
+            const new_entity = eng.get().ecs.deserialize_to_entity(ent_s) catch |err| {
                 std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
                 continue;
             };
-            // all loaded entities will have this value set to true
-            ent.should_serialize = true;
-
-            const new_entity_id = eng.get().entities.new_entity(ent) catch |err| {
-                std.log.err("Failed to create entity {s}: {}", .{ entry.name, err });
-                continue;
+            
+            // all loaded entities will be serialized so make sure it has the serialization component
+            _ = eng.get().ecs.add_component(eng.entity.SerializationComponent, new_entity) catch |err| {
+                std.log.warn("Unable to add serialization component to new entity: {}", .{err});
             };
-
-            const new_entity = eng.get().entities.get(new_entity_id).?;
 
             // TODO maybe need a post-deserialize in entity super struct?
-            new_entity.physics.update_runtime_data(new_entity_id) catch |err| {
-                std.log.err("Unable to update entity physics: {}", .{err});
-            };
+            // if (eng.get().ecs.get_component(eng.entity.PhysicsComponent, new_entity)) |physics_component| {
+            //     physics_component.update_runtime_data(new_entity) catch |err| {
+            //         std.log.err("Unable to update entity physics: {}", .{err});
+            //     };
+            // }
 
             std.log.info("Loaded entity: {}", .{new_entity});
         }
@@ -1246,29 +1218,28 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
     var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
     defer scene_dir.close();
 
-    var it = eng.get().entities.list.iterator();
 
+    var serialize_component_iterator = eng.get().ecs.component_iterator(eng.entity.SerializationComponent);
     var largest_serialize_id: u32 = 0;
-    while (it.next()) |entity| {
-        if (!entity.should_serialize) continue;
-        largest_serialize_id = @max(largest_serialize_id, entity.serialize_id orelse 0);
+    while (serialize_component_iterator.next()) |serialize_component| {
+        largest_serialize_id = @max(largest_serialize_id, serialize_component.serialize_id orelse 0);
     }
 
-    it.reset();
-    while (it.next()) |entity| {
+    var entity_iterator = eng.get().ecs.entity_iterator();
+    while (entity_iterator.next()) |entity| {
+
         _ = arena.reset(.retain_capacity);
 
-        if (!entity.should_serialize) {
-            continue;
-        }
+        const entity_serialize_component = eng.get().ecs.get_component(eng.entity.SerializationComponent, entity)
+            orelse continue;
 
-        entity.serialize_id = entity.serialize_id orelse blk: {
+        entity_serialize_component.serialize_id = entity_serialize_component.serialize_id orelse blk: {
             largest_serialize_id += 1;
             break :blk largest_serialize_id;
         };
 
-        const entity_s = sr.serialize_value(eng.entity.EntitySuperStruct, arena.allocator(), entity.*) catch |err| {
-            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity.serialize_id.?, err});
+        const entity_s = eng.get().ecs.serialize_entity(arena.allocator(), entity) catch |err| {
+            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
             continue;
         };
 
@@ -1281,12 +1252,12 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
         json.options.whitespace = .indent_2;
 
         json.write(entity_s) catch |err| {
-            std.log.err("unable to produce json for entity {}: {}\n", .{entity.serialize_id.?, err});
+            std.log.err("unable to produce json for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
             continue;
         };
 
-        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity.serialize_id.?}) catch |err| {
-            std.log.err("unable to produce file path for entity {}: {}\n", .{entity.serialize_id.?, err});
+        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity_serialize_component.serialize_id.?}) catch |err| {
+            std.log.err("unable to produce file path for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
             continue;
         };
 
@@ -1295,7 +1266,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             .data = json_writer.written(),
             .flags = .{ .read = false, .truncate = true, },
         }) catch |err| {
-            std.log.err("unable to write file for entity {}: {}\n", .{entity.serialize_id.?, err});
+            std.log.err("unable to write file for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
             continue;
         };
     }
