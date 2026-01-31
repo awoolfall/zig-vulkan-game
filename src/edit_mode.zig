@@ -437,9 +437,6 @@ fn entity_editor_ui(
     const imui = &eng.get().imui;
 
     const entity = self.selected_entity orelse return;
-    
-    var arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
-    defer arena.deinit();
 
     const background_box = imui.push_floating_layout(.Y, 0.0, 0.0, key ++ .{@src()});
     defer imui.pop_layout();
@@ -473,7 +470,6 @@ fn entity_editor_ui(
         entity_editor_title_widget.anchor = .{ 0.5, 0.5 };
         entity_editor_title_widget.pivot = .{ 0.5, 0.5 };
     }
-    //_ = Imui.widgets.checkbox.create(imui, &entity.should_serialize, "should serialize", key ++ .{@src()});
 
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
@@ -503,16 +499,45 @@ fn entity_editor_ui(
         }
     }
 
-    _ = arena.reset(.retain_capacity);
-
+    // render component UIs
     const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
     inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-        if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
-            const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
-            const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
+        const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
+        if (imui.get_widget(collapsible_outer_layout)) |w| {
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
+        }
 
-            if (collapsible_open.*) {
-                eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, component, key ++ .{@src(), idx}) catch |err| {
+        const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
+        const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
+
+        {
+            const maybe_component = eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
+            const add_remove_button = eng.ui.widgets.badge.create(imui, if (maybe_component == null) "+" else "-", key ++ .{@src(), idx});
+            if (add_remove_button.clicked) {
+                if (maybe_component == null) {
+                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
+                        std.log.warn("Unable to add component to entity: {}", .{err});
+                    };
+                } else {
+                    eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
+                }
+            }
+        }
+
+        imui.pop_layout();
+
+        if (collapsible_open.*) {
+            if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
+                const component_outer_layout = imui.push_layout(.Y, key ++ .{@src(), idx});
+                defer imui.pop_layout();
+
+                if (imui.get_widget(component_outer_layout)) |w| {
+                    w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+                    w.padding_px.left = 20.0;
+                    w.children_gap = 5.0;
+                }
+
+                eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, entity, component, key ++ .{@src(), idx}) catch |err| {
                     std.log.warn("Failed to load editor ui for component '{s}': {}", .{@typeName(eng.AppEcsSystem.ComponentTypes[idx]), err});
                 };
             }

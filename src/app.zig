@@ -70,12 +70,13 @@ pub const PlayerCharacterComponent = struct {
         return component;
     }
 
-    pub fn editor_ui(imui: *eng.ui, component: *SelfComponent, key: anytype) !void {
+    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
         _ = imui.push_layout(.Y, key ++ .{@src()});
         defer imui.pop_layout();
 
         {
             // TODO
+            _ = entity;
             _ = component;
         }
     }
@@ -112,12 +113,13 @@ pub const OpponentCharacterComponent = struct {
         return component;
     }
 
-    pub fn editor_ui(imui: *eng.ui, component: *SelfComponent, key: anytype) !void {
+    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
         _ = imui.push_layout(.Y, key ++ .{@src()});
         defer imui.pop_layout();
 
         {
             // TODO
+            _ = entity;
             _ = component;
         }
     }

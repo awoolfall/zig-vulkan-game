@@ -290,7 +290,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
     self.physics_body_id = new_body;
 }
 
-pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: anytype) void {
+pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
     const imui = &eng.get().imui;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
@@ -319,7 +319,8 @@ pub fn editor_ui(self: *Self, entity: *const eng.entity.EntitySuperStruct, key: 
 
         if (enable_physics_checkbox.clicked) {
             if (physics_checkbox) {
-                self.generate_heightmap_physics(entity.transform) catch |err| {
+                const transform: Transform = if (eng.get().ecs.get_component(eng.entity.TransformComponent, entity)) |tc| tc.transform else .{};
+                self.generate_heightmap_physics(transform) catch |err| {
                     std.log.err("Failed to generate heightmap physics: {}", .{err});
                 };
                 std.log.info("Created physics body", .{});
