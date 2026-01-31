@@ -247,32 +247,30 @@ pub const LightComponent = struct {
             }
 
             if (colour_indicator_data.*) {
-                // TODO imui compositor
+                const picker_floating_layout = imui.push_floating_layout_with_priority(.Y, 10.0, 10.0, 100, key ++ .{@src()});
+                defer imui.pop_layout();
 
-                // const picker_floating_layout = imui.push_floating_layout(.Y, 10.0, 10.0, key ++ .{@src()});
-                // defer imui.pop_layout();
+                if (imui.get_widget(picker_floating_layout)) |w| {
+                    set_background_widget_layout(w);
+                    w.semantic_size[0].minimum_pixel_size = 350;
+                    w.semantic_size[1].minimum_pixel_size = 350;
+                }
 
-                // if (imui.get_widget(picker_floating_layout)) |w| {
-                //     set_background_widget_layout(w);
-                //     w.semantic_size[0].minimum_pixel_size = 350;
-                //     w.semantic_size[1].minimum_pixel_size = 350;
-                // }
+                const picker_floating_position, _ = imui.get_widget_data([2]f32, picker_floating_layout) catch unreachable;
+                imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
 
-                // const picker_floating_position, _ = imui.get_widget_data([2]f32, picker_floating_layout) catch unreachable;
-                // imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
+                if (imui.generate_widget_signals(picker_floating_layout).dragged) {
+                    picker_floating_position[0] += eng.get().input.mouse_delta[0];
+                    picker_floating_position[1] += eng.get().input.mouse_delta[1];
+                }
 
-                // if (imui.generate_widget_signals(picker_floating_layout).dragged) {
-                //     picker_floating_position[0] += eng.get().input.mouse_delta[0];
-                //     picker_floating_position[1] += eng.get().input.mouse_delta[1];
-                // }
-
-                // _ = eng.ui.widgets.label.create(imui, "colour picker");
-                // const picker_signals = eng.ui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
-                // if (picker_signals.data_changed) {
-                //     if (colour) |c| {
-                //         component.light.colour = c;
-                //     }
-                // }
+                _ = eng.ui.widgets.label.create(imui, "colour picker");
+                const picker_signals = eng.ui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+                if (picker_signals.data_changed) {
+                    if (colour) |c| {
+                        component.light.colour = c;
+                    }
+                }
             }
             //_ = Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
 
@@ -294,6 +292,17 @@ pub const LightComponent = struct {
         }
     }
 };
+
+fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {
+    background_widget.semantic_size[0].minimum_pixel_size = 400;
+    background_widget.flags.clickable = true;
+    background_widget.flags.render = true;
+    background_widget.flags.hover_effect = false;
+    background_widget.border_width_px = .all(3);
+    background_widget.padding_px = .all(10);
+    background_widget.corner_radii_px = .all(10);
+    background_widget.children_gap = 5;
+}
 
 fn create_form_number_slider(
     text: []const u8,
