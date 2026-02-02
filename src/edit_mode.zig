@@ -429,6 +429,39 @@ const PhysicsData = struct {
     }
 };
 
+const ItemSearchData = struct {
+    options: std.ArrayList([]u8),
+    dropdown_is_open: bool = false,
+
+    pub fn deinit(self: *ItemSearchData, alloc: std.mem.Allocator) void {
+        for (self.options.items) |o| {
+            alloc.free(o);
+        }
+        self.options.deinit(alloc);
+    }
+
+    pub fn init(alloc: std.mem.Allocator) !ItemSearchData {
+        _ = alloc;
+        return ItemSearchData {
+            .options = .empty,
+        };
+    }
+
+    pub fn clone(self: *ItemSearchData, alloc: std.mem.Allocator) !ItemSearchData {
+        var new_options = std.ArrayList([]u8).empty;
+        errdefer new_options.deinit(alloc);
+
+        for (self.options.items) |o| {
+            try new_options.append(alloc, try alloc.dupe(u8, o));
+        }
+
+        return ItemSearchData {
+            .options = new_options,
+            .dropdown_is_open = self.dropdown_is_open,
+        };
+    }
+};
+
 const EntityEditorTabWidth = 10;
 fn entity_editor_ui(
     self: *Self,
@@ -499,35 +532,148 @@ fn entity_editor_ui(
         }
     }
 
-    // render component UIs
     const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
-    inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-        const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
-        if (imui.get_widget(collapsible_outer_layout)) |w| {
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
+
+    {
+        const component_add_layout = imui.push_layout(.X, key ++ .{@src()});
+        defer imui.pop_layout();
+        {
+            const w = component_add_layout.get();
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+            w.children_gap = 2.0;
         }
 
-        const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
-        const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
+        const data, const data_state = component_add_layout.get_widget_data(ItemSearchData, imui) catch unreachable;
 
-        {
-            const maybe_component = eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
-            const add_remove_button = eng.ui.widgets.badge.create(imui, if (maybe_component == null) "+" else "-", key ++ .{@src(), idx});
-            if (add_remove_button.clicked) {
-                if (maybe_component == null) {
-                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
-                        std.log.warn("Unable to add component to entity: {}", .{err});
-                    };
-                } else {
-                    eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
-                }
+        if (data_state == .Init) {
+            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+                const option_text = imui.widget_allocator().dupe(u8, @typeName(eng.AppEcsSystem.ComponentTypes[idx])) catch unreachable;
+                errdefer imui.widget_allocator().free(option_text);
+
+                data.options.append(imui.widget_allocator(), option_text) catch unreachable;
             }
         }
 
-        imui.pop_layout();
+        const component_search_line_edit = eng.ui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
+        const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.ui.widgets.line_edit.TextInputState, imui) catch unreachable;
+        {
+            const w = component_search_line_edit.id.box.get();
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+        }
 
-        if (collapsible_open.*) {
-            if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
+        if (imui.focus_item) |focus_item| {
+            data.dropdown_is_open = (
+                focus_item == component_search_line_edit.id.box.get().key or
+                focus_item == component_search_line_edit.id.text.get().key
+            );
+        } else {
+            data.dropdown_is_open = false;
+        }
+
+        const component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
+        if (component_add_button.clicked) {
+            // add component with the same name as what is in the line edit
+            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+                if (std.mem.eql(u8, line_edit_data.text.items, @typeName(eng.AppEcsSystem.ComponentTypes[idx]))) {
+                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
+                        std.log.err("Unable to add component '{s}' to entity: {}", .{@typeName(eng.AppEcsSystem.ComponentTypes[idx]), err});
+                    };
+                    break;
+                }
+            }
+            line_edit_data.text.clearRetainingCapacity();
+        }
+
+        // if the dropdown should be shown then render it
+        dropdown_is_open: { if (data.dropdown_is_open) {
+            // determine the position of the dropdown options based on the primary combobox rect
+            const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b| 
+                .{ b.rect().left, b.rect().bottom + 4 }
+                else break :dropdown_is_open;
+
+            // push the options background layout
+            const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
+            if (imui.get_widget(options_background)) |options_background_widget| {
+                options_background_widget.semantic_size[0] = .{
+                    .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
+                };
+                options_background_widget.semantic_size[1] = .{
+                    .kind = .ChildrenSize, .value = 1.0, .shrinkable = true,
+                };
+
+                options_background_widget.flags.render = true;
+                options_background_widget.border_width_px = .all(1);
+                options_background_widget.padding_px = .all(4);
+                options_background_widget.children_gap = 2;
+                options_background_widget.corner_radii_px = .all(4);
+            }
+
+            // push each of the options into the dropdown menu
+            const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
+            defer eng.get().frame_allocator.free(lower_line_edit_text);
+
+            for (data.options.items, 0..) |option, i| {
+                const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
+                defer eng.get().frame_allocator.free(lower_option);
+
+                //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
+                if (lower_line_edit_text.len > 0) {
+                    if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) { continue; }
+                }
+
+                const option_background = imui.push_layout(.X, key ++ .{@src(), i});
+                defer imui.pop_layout();
+
+                // give the option a hover effect
+                if (imui.get_widget(option_background)) |option_background_widget| {
+                    option_background_widget.semantic_size[0] = .{
+                        .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
+                    };
+                    option_background_widget.flags.clickable = true;
+                    option_background_widget.flags.render = true;
+                    option_background_widget.padding_px = .all(4);
+                    option_background_widget.corner_radii_px = .all(4);
+                }
+
+                // if the option is clicked then set text field
+                if (imui.generate_widget_signals(option_background).clicked) {
+                    line_edit_data.text.clearRetainingCapacity();
+                    line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                }
+                
+                _ = eng.ui.widgets.label.create(imui, option);
+            }
+
+            imui.pop_layout(); // options background layout
+        } }
+    }
+
+    // render component UIs
+    inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+        if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
+            const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
+            if (imui.get_widget(collapsible_outer_layout)) |w| {
+                w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
+            }
+
+            const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
+            const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
+
+            // add remove component button
+            const remove_button = eng.ui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
+
+            // dont enable remove button functionality for the transform component.
+            // we dont want to make it possible to remove the transform component.
+            // TODO make this visible by greying out the button
+            if (eng.AppEcsSystem.ComponentTypes[idx] != eng.entity.TransformComponent) {
+                if (remove_button.clicked) {
+                    eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
+                }
+            }
+
+            imui.pop_layout();
+
+            if (collapsible_open.*) {
                 const component_outer_layout = imui.push_layout(.Y, key ++ .{@src(), idx});
                 defer imui.pop_layout();
 
