@@ -15,7 +15,7 @@ const MAP_LENGTH_M = 256;
 const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 
 const ShaderPath = "../../src/ocean/ocean_render.slang";
-const CLIPMAP_QUAD_COUNT = 128;
+const CLIPMAP_QUAD_COUNT = 127;
 
 const MAX_SHALLOW_SPOTS = 4;
 
@@ -38,6 +38,7 @@ const JacobianPushConstantData = extern struct {
 
 const RenderPushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
+    model_matrix: zm.Mat,
     camera_position: zm.F32x4,
 
     spectrum_image_size: f32,
@@ -1104,6 +1105,7 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
         },
         .topology = .TriangleList,
         .rasterization_fill_mode = .Fill,
+        .front_face = .Clockwise,
         .descriptor_set_layouts = &.{
             self.render_descriptor_layout,
         },
@@ -1465,31 +1467,99 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
 
     var push_constant_data = RenderPushConstantData {
         .view_projection_matrix = zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(gfx.GfxState.get().swapchain_aspect())),
+        .model_matrix = zm.identity(),
         .camera_position = camera.transform.position,
 
         .spectrum_image_size = Self.fN,
         .map_length_m = Self.MAP_LENGTH_M,
         .map_height_scale = 1.0,
 
-        .clipmap_level = 1.0,
+        .clipmap_level = 0.0,
     };
 
-    // draw center level
-    cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
-        .offset = 0,
-        .data = std.mem.asBytes(&push_constant_data),
-    });
+    for (self.clipmap_mesh.middle_model_matrices) |mat| {
+        push_constant_data.model_matrix = mat;
 
-    cmd.cmd_draw_indexed(.{
-        .index_count = self.clipmap_mesh.full_ring_indices_count,
-    });
+        // draw center quads
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constant_data),
+        });
 
-    // draw clipmap levels
-    const CLIPMAP_LEVELS = 4;
+        cmd.cmd_draw_indexed(.{
+            .index_count = self.clipmap_mesh.mxm_indices_cout,
+        });
+    }
 
-    for (0..CLIPMAP_LEVELS) |_| {
-        push_constant_data.clipmap_level += 1.0;
+    // draw trim around center level quads
+    {
+        // draw trim (pz px)
+        push_constant_data.model_matrix = self.clipmap_mesh.interior_trim_locations.pz_px;
+
+        // draw center level
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constant_data),
+        });
+
+        cmd.cmd_draw_indexed(.{
+            .first_index = self.clipmap_mesh.interior_trim_indices_base,
+            .index_count = self.clipmap_mesh.interior_trim_indices_count,
+        });
+
+        // draw trim (nz nx) (skipping first and last quad since that is drawn in pz px)
+        push_constant_data.model_matrix = self.clipmap_mesh.interior_trim_locations.nz_nx;
+
+        // draw center level
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constant_data),
+        });
+
+        cmd.cmd_draw_indexed(.{
+            .first_index = self.clipmap_mesh.interior_trim_indices_base,
+            .index_count = self.clipmap_mesh.interior_trim_indices_count,
+        });
+    }
+
+    for (0..4) |level| {
+        push_constant_data.clipmap_level = @floatFromInt(level);
+
+        for (self.clipmap_mesh.mxm_model_matrices) |mat| {
+            push_constant_data.model_matrix = mat;
+
+            // draw mxm ring quads
+            cmd.cmd_push_constants(.{
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .data = std.mem.asBytes(&push_constant_data),
+            });
+
+            cmd.cmd_draw_indexed(.{
+                .index_count = self.clipmap_mesh.mxm_indices_cout,
+            });
+        }
+
+        for (self.clipmap_mesh.fixup_model_matrices) |mat| {
+            push_constant_data.model_matrix = mat;
+
+            // draw ring fixups
+            cmd.cmd_push_constants(.{
+                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .offset = 0,
+                .data = std.mem.asBytes(&push_constant_data),
+            });
+
+            cmd.cmd_draw_indexed(.{
+                .index_count = self.clipmap_mesh.fixup_indices_count,
+            });
+        }
+
+        // draw degenerate triangles
+        push_constant_data.model_matrix = zm.identity();
 
         cmd.cmd_push_constants(.{
             .shader_stages = .{ .Vertex = true, .Pixel = true, },
@@ -1498,7 +1568,8 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         });
 
         cmd.cmd_draw_indexed(.{
-            .index_count = self.clipmap_mesh.outer_ring_indices_count,
+            .first_index = self.clipmap_mesh.degenerate_triangles_indices_base,
+            .index_count = self.clipmap_mesh.degenerate_triangles_indices_count,
         });
     }
 

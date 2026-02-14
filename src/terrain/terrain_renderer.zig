@@ -18,7 +18,7 @@ const StandardRenderer = @import("../render.zig");
 
 const ShaderFilePath = "../../src/terrain/terrain.slang";
 
-const CLIPMAP_QUAD_COUNT = 128;
+const CLIPMAP_QUAD_COUNT = 127;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
@@ -513,7 +513,7 @@ pub fn render(
     });
 
     cmd.cmd_draw_indexed(.{
-        .index_count = self.clipmap_mesh.full_ring_indices_count,
+        .index_count = self.clipmap_mesh.mxm_indices_cout,
     });
 
     // draw clipmap levels
@@ -529,7 +529,7 @@ pub fn render(
         });
 
         cmd.cmd_draw_indexed(.{
-            .index_count = self.clipmap_mesh.outer_ring_indices_count,
+            .index_count = self.clipmap_mesh.mxm_indices_cout,
         });
     }
 }

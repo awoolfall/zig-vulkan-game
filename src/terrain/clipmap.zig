@@ -1,41 +1,47 @@
 const std = @import("std");
 const eng = @import("engine");
 const gf = eng.gfx;
+const zm = eng.zmath;
 
 const Self = @This();
 
 // TODO improve skirt transition. Reduce quad section size by 1 and improve rounding in shader so that clipmap levels dont overlap.
 // TODO split clipmaps into segments https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-2-terrain-rendering-using-gpu-based-geometry
+alloc: std.mem.Allocator,
 
 vertices_buffer: gf.Buffer.Ref,
 indices_buffer: gf.Buffer.Ref,
-outer_ring_indices_count: u32,
-full_ring_indices_count: u32,
+
+mxm_indices_cout: u32,
+mxm_model_matrices: []zm.Mat,
+
+fixup_indices_count: u32,
+fixup_model_matrices: []zm.Mat,
+
+middle_model_matrices: []zm.Mat,
+
+interior_trim_indices_base: u32,
+interior_trim_indices_count: u32,
+
+degenerate_triangles_indices_base: u32,
+degenerate_triangles_indices_count: u32,
+
+interior_trim_locations: struct {
+    pz_px: zm.Mat,
+    pz_nx: zm.Mat,
+    nz_px: zm.Mat,
+    nz_nx: zm.Mat,
+},
 
 pub fn deinit(self: *const Self) void {
     self.vertices_buffer.deinit();
     self.indices_buffer.deinit();
+    self.alloc.free(self.mxm_model_matrices);
+    self.alloc.free(self.fixup_model_matrices);
+    self.alloc.free(self.middle_model_matrices);
 }
 
 pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
-    const side_length_f32: f32 = @floatFromInt(side_length);
-    const quad_vertices_count = (side_length + 1) * (side_length + 1);
-    const quad_indices_count = side_length * side_length * 6;
-    
-    const skirt_segment_positions: [9][3]f32 = .{
-        .{ 0.0, 0.0, 0.0 },
-        .{ 1.0, 0.0, 0.0 },
-        .{ 0.0, 0.0, 1.0 },
-        
-        .{ 0.0, 0.0, 1.0 },
-        .{ 1.0, 0.0, 0.0 },
-        .{ 2.0, 0.0, 1.0 },
-
-        .{ 2.0, 0.0, 1.0 },
-        .{ 1.0, 0.0, 0.0 },
-        .{ 2.0, 0.0, 0.0 },
-    };
-
     const quad_verts_a: [6][2]u32 = .{
         .{ 0, 0 },
         .{ 1, 0 },
@@ -53,149 +59,232 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         .{ 1, 0 },
     };
 
-    const num_skirt_segments_per_side = side_length / 2;
+    const m = @divExact(side_length + 1, 4);
+    const fix_up_edge_length = (side_length - 1) - ((m - 1) * 4);
+
+    const m_f32_m1: f32 = @floatFromInt(m - 1);
+    const side_length_quads_f32: f32 = @floatFromInt(side_length - 1);
+
+    var vertices_list = try std.ArrayList([3]f32).initCapacity(alloc, 32);
+    defer vertices_list.deinit(alloc);
+
+    var indices_list = try std.ArrayList(u32).initCapacity(alloc, 32);
+    defer indices_list.deinit(alloc);
+
+    for (0..m) |i| {
+        for (0..m) |j| {
+            const vert = zm.f32x4(@floatFromInt(i), 0.0, @floatFromInt(j), 0.0);
+            try vertices_list.append(alloc, zm.vecToArr3(vert));
+        }
+    }
+
+    for (0..(m-1)) |i| {
+        for (0..(m-1)) |j| {
+            for (0..6) |vti| {
+                _ = quad_verts_b;
+                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast((i * m) + j);
+                try indices_list.append(alloc, base_index + (quad_verts[0] * m) + quad_verts[1]);
+            }
+        }
+    }
     
-    const skirt_segment_vertices_count =
-        (9 * num_skirt_segments_per_side * 4)   // edge skirt segment for each side
-        + (6 * 4);                              // quad for each corner
+    const mxm_indices_count = (m-1) * (m-1) * 6;
+    const fix_up_indices_count = (m-1) * fix_up_edge_length * 6;
 
-    const vertices = try alloc.alloc([3]f32, quad_vertices_count + skirt_segment_vertices_count);
-    defer alloc.free(vertices);
-    var vertices_list = std.ArrayList([3]f32).initBuffer(vertices);
+    // interior trim (top)
+    const interior_trim_base_index: u32 = @intCast(indices_list.items.len);
 
-    const indices = try alloc.alloc(u32, quad_indices_count + skirt_segment_vertices_count);
-    defer alloc.free(indices);
-    var indices_list = std.ArrayList(u32).initBuffer(indices);
+    var interior_trim_base_vertex = vertices_list.items.len;
+    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
+    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
 
-    // Add skirt vertices
-
-    // top skirt
-    for (0..num_skirt_segments_per_side) |i| {
-        const base_position = [3]f32 { (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32, 0.0, 0.0 };
-        var it = std.mem.reverseIterator(&skirt_segment_positions);
-        while (it.next()) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] + p[0] / side_length_f32, base_position[1] + p[1], base_position[2] - p[2] / side_length_f32 });
+    for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
+        for (0..6) |vti| {
+            const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+            const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+            try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
+        }
+    }
+    
+    // interior trim (right)
+    interior_trim_base_vertex = vertices_list.items.len;
+    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
+    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
+    
+    for (1..(((m-1) * 2) + fix_up_edge_length)) |i| {
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i), 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i), 0.0)));
+        for (0..6) |vti| {
+            const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+            const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+            try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
         }
     }
 
-    // bottom skirt
-    for (0..num_skirt_segments_per_side) |i| {
-        const base_position = [3]f32 { (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32, 0.0, 1.0 };
-        for (skirt_segment_positions) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] + p[0] / side_length_f32, base_position[1] + p[1], base_position[2] + p[2] / side_length_f32 });
-        }
+    const interior_trim_indices_count = @as(u32, @intCast(indices_list.items.len)) - interior_trim_base_index;
+
+    const degenerate_triangles_start_index: u32 = @intCast(indices_list.items.len);
+
+    // degenerate triangles (top)
+    const degenerate_triangles_per_side = @divExact(side_length - 1, 2);
+    for (0..degenerate_triangles_per_side) |t| {
+        const t_f32: f32 = @floatFromInt(t);
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0 });
+    }
+    // degenerate triangles (bottom)
+    for (0..degenerate_triangles_per_side) |t| {
+        const t_f32: f32 = @floatFromInt(t);
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0 });
+    }
+    // degenerate triangles (left)
+    for (0..degenerate_triangles_per_side) |t| {
+        const t_f32: f32 = @floatFromInt(t);
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0, 0.0, -side_length_quads_f32 / 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0, 0.0, -side_length_quads_f32 / 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0, 0.0, -side_length_quads_f32 / 2.0 });
+    }
+    // degenerate triangles (right)
+    for (0..degenerate_triangles_per_side) |t| {
+        const t_f32: f32 = @floatFromInt(t);
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0, 0.0, side_length_quads_f32 / 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0, 0.0, side_length_quads_f32 / 2.0 });
+
+        try indices_list.append(alloc, @intCast(vertices_list.items.len));
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0, 0.0, side_length_quads_f32 / 2.0 });
     }
 
-    // left skirt
-    for (0..num_skirt_segments_per_side) |i| {
-        const base_position = [3]f32 { 0.0, 0.0, (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32 };
-        for (skirt_segment_positions) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] - p[2] / side_length_f32, base_position[1] + p[1], base_position[2] + p[0] / side_length_f32 });
-        }
-    }
+    const degenerate_triangles_indices_count = @as(u32, @intCast(indices_list.items.len)) - degenerate_triangles_start_index;
 
-    // right skirt
-    for (0..num_skirt_segments_per_side) |i| {
-        const base_position = [3]f32 { 1.0, 0.0, (@as(f32, @floatFromInt(i)) * 2.0) / side_length_f32 };
-        var it = std.mem.reverseIterator(&skirt_segment_positions);
-        while (it.next()) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] + p[2] / side_length_f32, base_position[1] + p[1], base_position[2] + p[0] / side_length_f32 });
-        }
-    }
+    // see: https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-2-terrain-rendering-using-gpu-based-geometry
+    // mxm quad locations
+    // |------------|
+    // |1 2      3 4|
+    // |5          6|
+    // |            |
+    // |7          8|
+    // |9 10   11 12|
+    // |------------|
 
-    // top right quad
-    {
-        const base_position = [3]f32 { 1.0, 0.0, 0.0 };
-        var it = std.mem.reverseIterator(&quad_verts_a);
-        while (it.next()) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] + @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] - @as(f32, @floatFromInt(p[1])) / side_length_f32 });
-        }
-    }
+    const mxm_quad_model_matrices = try alloc.alloc(zm.Mat, 12);
+    errdefer alloc.free(mxm_quad_model_matrices);
+    var mxm_quad_model_matrices_list = std.ArrayList(zm.Mat).initBuffer(mxm_quad_model_matrices);
 
-    // bottom right quad
-    {
-        const base_position = [3]f32 { 1.0, 0.0, 1.0 };
-        for (quad_verts_a) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] + @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] + @as(f32, @floatFromInt(p[1])) / side_length_f32 });
-        }
-    }
+    // 1, 2, 3, 4
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation(-side_length_quads_f32 / 2.0, 0.0, -side_length_quads_f32 / 2.0));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((-side_length_quads_f32 / 2.0) + m_f32_m1, 0.0, -side_length_quads_f32 / 2.0));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - m_f32_m1, 0.0, -side_length_quads_f32 / 2.0));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), 0.0, -side_length_quads_f32 / 2.0));
 
-    // top left quad
-    {
-        const base_position = [3]f32 { 0.0, 0.0, 0.0 };
-        for (quad_verts_a) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] - @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] - @as(f32, @floatFromInt(p[1])) / side_length_f32 });
-        }
-    }
+    // 5, 6
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation(-side_length_quads_f32 / 2.0, 0.0, (-side_length_quads_f32 / 2.0) + m_f32_m1));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - m_f32_m1, 0.0, (-side_length_quads_f32 / 2.0) + m_f32_m1));
 
-    // bottom left quad
-    {
-        const base_position = [3]f32 { 0.0, 0.0, 1.0 };
-        var it = std.mem.reverseIterator(&quad_verts_a);
-        while (it.next()) |p| {
-            try vertices_list.appendBounded([3]f32 { base_position[0] - @as(f32, @floatFromInt(p[0])) / side_length_f32, base_position[1], base_position[2] + @as(f32, @floatFromInt(p[1])) / side_length_f32 });
-        }
-    }
+    // 7, 8
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation(-side_length_quads_f32 / 2.0, 0.0, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0)));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - m_f32_m1, 0.0, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0)));
 
-    const quad_base_vertex = vertices_list.items.len;
+    // 9, 10, 11, 12
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation(-side_length_quads_f32 / 2.0, 0.0, (side_length_quads_f32 / 2.0) - m_f32_m1));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((-side_length_quads_f32 / 2.0) + m_f32_m1, 0.0, (side_length_quads_f32 / 2.0) - m_f32_m1));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - m_f32_m1, 0.0, (side_length_quads_f32 / 2.0) - m_f32_m1));
+    try mxm_quad_model_matrices_list.appendBounded(zm.translation((side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), 0.0, (side_length_quads_f32 / 2.0) - m_f32_m1));
 
-    for (0..skirt_segment_vertices_count) |i| {
-        try indices_list.appendBounded(@intCast(i));
-    }
+    // fixup locations
+    const fixup_model_matrices = try alloc.alloc(zm.Mat, 4);
+    errdefer alloc.free(fixup_model_matrices);
+    var fixup_model_matrices_list = std.ArrayList(zm.Mat).initBuffer(fixup_model_matrices);
 
-    const quad_base_index = indices_list.items.len;
+    const fixup_translation = zm.translation(-1.0, 0.0, -side_length_quads_f32 / 2.0);
 
-    for (0..(side_length + 1)) |i| {
-        for (0..(side_length + 1)) |j| {
-            vertices[quad_base_vertex + (i * (side_length + 1)) + j] = [3]f32 { @as(f32, @floatFromInt(i)) / side_length_f32, 0.0, @as(f32, @floatFromInt(j)) / side_length_f32 };
-        }
-    }
+    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(0.0 * std.math.pi / 2.0)));
+    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(1.0 * std.math.pi / 2.0)));
+    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(2.0 * std.math.pi / 2.0)));
+    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(3.0 * std.math.pi / 2.0)));
 
-    const SIDE_LENGTH_ON_4 = side_length / 4;
+    // middle locations
+    const middle_model_matrices = try alloc.alloc(zm.Mat, 4);
+    errdefer alloc.free(middle_model_matrices);
+    var middle_model_matrices_list = std.ArrayList(zm.Mat).initBuffer(middle_model_matrices);
 
-    for (0..side_length) |i| {
-        for (0..side_length) |j| {
-            if (i >= SIDE_LENGTH_ON_4 and i < (3 * SIDE_LENGTH_ON_4) and j >= SIDE_LENGTH_ON_4 and j < (3 * SIDE_LENGTH_ON_4)) {
-                continue;
-            }
-            for (0..6) |vti| {
-                const quad_verts = (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
-                const base_index: u32 = @intCast(quad_base_index + (i * (side_length + 1)) + j);
-                try indices_list.appendBounded(base_index + (quad_verts[0] * (side_length + 1)) + quad_verts[1]);
-            }
-        }
-    }
+    try middle_model_matrices_list.appendBounded(zm.translation(-m_f32_m1, 0.0, -m_f32_m1));
+    try middle_model_matrices_list.appendBounded(zm.translation(0.0, 0.0, -m_f32_m1));
+    try middle_model_matrices_list.appendBounded(zm.translation(-m_f32_m1, 0.0, 0.0));
+    try middle_model_matrices_list.appendBounded(zm.translation(0.0, 0.0, 0.0));
 
-    const outer_ring_indices_count: u32 = @intCast(indices_list.items.len);
-
-    for (SIDE_LENGTH_ON_4 .. (3 * SIDE_LENGTH_ON_4)) |i| {
-        for (SIDE_LENGTH_ON_4 .. (3 * SIDE_LENGTH_ON_4)) |j| {
-            for (0..6) |vti| {
-                const quad_verts = (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
-                const base_index: u32 = @intCast(quad_base_index + (i * (side_length + 1)) + j);
-                try indices_list.appendBounded(base_index + (quad_verts[0] * (side_length + 1)) + quad_verts[1]);
-            }
-        }
-    }
+    // trim locations
+    const trim_location_nz_nx = zm.translation(-@as(f32, @floatFromInt(m)), 0.0, -@as(f32, @floatFromInt(m)));
+    const trim_location_pz_nx = zm.mul(trim_location_nz_nx, zm.rotationY(1.0 * std.math.pi / 2.0));
+    const trim_location_pz_px = zm.mul(trim_location_nz_nx, zm.rotationY(2.0 * std.math.pi / 2.0));
+    const trim_location_nz_px = zm.mul(trim_location_nz_nx, zm.rotationY(3.0 * std.math.pi / 2.0));
 
     const vertices_buffer = try gf.Buffer.init_with_data(
-        std.mem.sliceAsBytes(vertices),
+        std.mem.sliceAsBytes(vertices_list.items),
         .{ .VertexBuffer = true, },
         .{}
     );
     errdefer vertices_buffer.deinit();
 
     const indices_buffer = try gf.Buffer.init_with_data(
-        std.mem.sliceAsBytes(indices),
+        std.mem.sliceAsBytes(indices_list.items),
         .{ .IndexBuffer = true, },
         .{}
     );
     errdefer indices_buffer.deinit();
 
     return Self {
+        .alloc = alloc,
+        
         .vertices_buffer = vertices_buffer,
         .indices_buffer = indices_buffer,
-        .outer_ring_indices_count = outer_ring_indices_count,
-        .full_ring_indices_count = quad_indices_count + skirt_segment_vertices_count,
+
+        .mxm_indices_cout = mxm_indices_count,
+        .mxm_model_matrices = mxm_quad_model_matrices,
+
+        .fixup_indices_count = fix_up_indices_count,
+        .fixup_model_matrices = fixup_model_matrices,
+
+        .middle_model_matrices = middle_model_matrices,
+
+        .interior_trim_indices_base = interior_trim_base_index,
+        .interior_trim_indices_count = interior_trim_indices_count,
+
+        .interior_trim_locations = .{
+            .nz_nx = trim_location_nz_nx,
+            .pz_nx = trim_location_pz_nx,
+            .nz_px = trim_location_nz_px,
+            .pz_px = trim_location_pz_px,
+        },
+
+        .degenerate_triangles_indices_base = degenerate_triangles_start_index,
+        .degenerate_triangles_indices_count = degenerate_triangles_indices_count,
     };
 }

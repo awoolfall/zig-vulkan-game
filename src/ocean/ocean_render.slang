@@ -19,6 +19,7 @@
 struct PushConstants
 {
     float4x4 view_projection_matrix;
+    float4x4 model_matrix;
     float4 camera_pos;
 
     float spectrum_image_size;
@@ -97,24 +98,16 @@ vs_out vs_main(vs_in input)
 {
     vs_out output = (vs_out)0;
 
-    float clipmap_scale = pow(2, push_constant.clipmap_level) * 100.0;
-    float upper_level_clipmap_scale = pow(2, push_constant.clipmap_level + 1) * 100.0;
+    const float level_scale = pow(2.0, push_constant.clipmap_level);
 
-    bool is_skirt_vert = input.pos.x > 1.0 || input.pos.x < 0.0 || input.pos.z > 1.0 || input.pos.z < 0.0;
+    const float quant_level_scale = pow(2.0, push_constant.clipmap_level + 1);
+    float4 quantised_camera_position = (floor(push_constant.camera_pos / quant_level_scale) + 0.5) * quant_level_scale;
+    
+    output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
-    output.world_position = float4(input.pos.xyz, 1.0);
-    output.world_position.xz -= 0.5;
-    output.world_position.z *= -1.0;
-    output.world_position.xz *= clipmap_scale;
-
-    float quad_scale = (clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
-    float upper_level_quad_scale = (upper_level_clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
-
-    if (is_skirt_vert) {
-        output.world_position.xz += round(push_constant.camera_pos.xz / upper_level_quad_scale) * upper_level_quad_scale;
-    } else {
-        output.world_position.xz += round(push_constant.camera_pos.xz / quad_scale) * quad_scale;
-    }
+    output.world_position = mul(float4(input.pos.xyz, 1.0), push_constant.model_matrix);
+    output.world_position.xz *= level_scale;
+    output.world_position.xz += quantised_camera_position.xz;
 
     float mult_mask = 1.0;
     inline for (int i = 0; i < shallow_spots.getCount(); i++) {
@@ -134,13 +127,13 @@ vs_out vs_main(vs_in input)
         displacement += displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz;
     }
 
-    output.world_position.y = -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
-    output.world_position.xz -= displacement.xz * mult_mask;
+    //output.world_position.y += -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
+    //output.world_position.xz -= displacement.xz * mult_mask;
 
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
     float cc = mult_mask;
-    output.colour.rgb = float3(cc, displacement.y, cc);
+    output.colour.rgb = float3(cc, displacement.y, 0.0);
 
     return output;
 }
@@ -234,6 +227,7 @@ ps_out ps_main(vs_out input)
     float3 fog_colour = pow(float3(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0), 2.2);
     output.colour = lerp(output.colour, float4(fog_colour, 1.0), fog_amount);
 
+    output.colour.r = input.colour.b;
     output.colour.a = 1.0;
     return output;
 }
