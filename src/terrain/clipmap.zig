@@ -12,16 +12,27 @@ alloc: std.mem.Allocator,
 vertices_buffer: gf.Buffer.Ref,
 indices_buffer: gf.Buffer.Ref,
 
+mxm_indices_base: u32,
 mxm_indices_cout: u32,
 mxm_model_matrices: []zm.Mat,
 
-fixup_indices_count: u32,
+fixup_indices: struct {
+    base: u32,
+    count: u32,
+    reversed_base: u32,
+    reversed_count: u32,
+},
+
 fixup_model_matrices: []zm.Mat,
 
 middle_model_matrices: []zm.Mat,
 
-interior_trim_indices_base: u32,
-interior_trim_indices_count: u32,
+interior_trim_indices: struct {
+    base: u32,
+    count: u32,
+    reversed_base: u32,
+    reversed_count: u32,
+},
 
 degenerate_triangles_indices_base: u32,
 degenerate_triangles_indices_count: u32,
@@ -81,7 +92,6 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
     for (0..(m-1)) |i| {
         for (0..(m-1)) |j| {
             for (0..6) |vti| {
-                _ = quad_verts_b;
                 const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast((i * m) + j);
                 try indices_list.append(alloc, base_index + (quad_verts[0] * m) + quad_verts[1]);
@@ -89,42 +99,110 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         }
     }
     
+    const mxm_indices_base = 0;
     const mxm_indices_count = (m-1) * (m-1) * 6;
+
+    const fix_up_indices_base = 0;
     const fix_up_indices_count = (m-1) * fix_up_edge_length * 6;
 
-    // interior trim (top)
-    const interior_trim_base_index: u32 = @intCast(indices_list.items.len);
+    const fix_up_r_indices_base: u32 = @intCast(indices_list.items.len);
 
-    var interior_trim_base_vertex = vertices_list.items.len;
-    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
-    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
-
-    for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
-        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
-        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
-        for (0..6) |vti| {
-            const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
-            const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
-            try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
-        }
-    }
-    
-    // interior trim (right)
-    interior_trim_base_vertex = vertices_list.items.len;
-    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
-    try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
-    
-    for (1..(((m-1) * 2) + fix_up_edge_length)) |i| {
-        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i), 0.0)));
-        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i), 0.0)));
-        for (0..6) |vti| {
-            const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
-            const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
-            try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
+    for (0..m) |i| {
+        for (0..m) |j| {
+            const vert = zm.f32x4(@floatFromInt(i), 0.0, @floatFromInt(j), 0.0);
+            try vertices_list.append(alloc, zm.vecToArr3(vert));
         }
     }
 
-    const interior_trim_indices_count = @as(u32, @intCast(indices_list.items.len)) - interior_trim_base_index;
+    for (0..(m-1)) |i| {
+        for (0..(m-1)) |j| {
+            for (0..6) |vti| {
+                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast((i * m) + j);
+                try indices_list.append(alloc, base_index + (quad_verts[0] * m) + quad_verts[1]);
+            }
+        }
+    }
+
+    const fix_up_r_indices_count = (m-1) * fix_up_edge_length * 6;
+
+    // interior trim
+    const interior_trim_indices_base, const interior_trim_indices_count = blk: {
+        // interior trim (top)
+        const trim_base_index: u32 = @intCast(indices_list.items.len);
+
+        var interior_trim_base_vertex = vertices_list.items.len;
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
+
+        for (0..(((m-1) * 2) + fix_up_edge_length + 1)) |i| {
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
+            for (0..6) |vti| {
+                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+                try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
+            }
+        }
+        
+        // interior trim (right)
+        interior_trim_base_vertex = vertices_list.items.len;
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
+        
+        for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i + 2), 0.0)));
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i + 2), 0.0)));
+            for (0..6) |vti| {
+                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+                try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
+            }
+        }
+
+        const indices_count = @as(u32, @intCast(indices_list.items.len)) - trim_base_index;
+
+        break :blk .{ trim_base_index, indices_count };
+    };
+
+    // interior trim reversed
+    const interior_trim_r_indices_base, const interior_trim_r_indices_count = blk: {
+        // interior trim (top)
+        const trim_base_index: u32 = @intCast(indices_list.items.len);
+
+        var interior_trim_base_vertex = vertices_list.items.len;
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
+
+        for (0..(((m-1) * 2) + fix_up_edge_length + 1)) |i| {
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
+            for (0..6) |vti| {
+                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+                try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
+            }
+        }
+        
+        // interior trim (right)
+        interior_trim_base_vertex = vertices_list.items.len;
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
+        try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
+        
+        for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i + 2), 0.0)));
+            try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i + 2), 0.0)));
+            for (0..6) |vti| {
+                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
+                try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
+            }
+        }
+
+        const indices_count = @as(u32, @intCast(indices_list.items.len)) - trim_base_index;
+
+        break :blk .{ trim_base_index, indices_count };
+    };
 
     const degenerate_triangles_start_index: u32 = @intCast(indices_list.items.len);
 
@@ -137,10 +215,10 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0 });
 
         try indices_list.append(alloc, @intCast(vertices_list.items.len));
-        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0 });
+        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0 });
 
         try indices_list.append(alloc, @intCast(vertices_list.items.len));
-        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0 });
+        try vertices_list.append(alloc, .{ -side_length_quads_f32 / 2.0, 0.0, (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0 });
     }
     // degenerate triangles (bottom)
     for (0..degenerate_triangles_per_side) |t| {
@@ -176,10 +254,10 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 0.0, 0.0, side_length_quads_f32 / 2.0 });
 
         try indices_list.append(alloc, @intCast(vertices_list.items.len));
-        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0, 0.0, side_length_quads_f32 / 2.0 });
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0, 0.0, side_length_quads_f32 / 2.0 });
 
         try indices_list.append(alloc, @intCast(vertices_list.items.len));
-        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 1.0, 0.0, side_length_quads_f32 / 2.0 });
+        try vertices_list.append(alloc, .{ (t_f32 * 2.0) + (-side_length_quads_f32 / 2.0) + 2.0, 0.0, side_length_quads_f32 / 2.0 });
     }
 
     const degenerate_triangles_indices_count = @as(u32, @intCast(indices_list.items.len)) - degenerate_triangles_start_index;
@@ -225,9 +303,10 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
 
     const fixup_translation = zm.translation(-1.0, 0.0, -side_length_quads_f32 / 2.0);
 
+    // first two are normal, last two are reversed
     try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(0.0 * std.math.pi / 2.0)));
-    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(1.0 * std.math.pi / 2.0)));
     try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(2.0 * std.math.pi / 2.0)));
+    try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(1.0 * std.math.pi / 2.0)));
     try fixup_model_matrices_list.appendBounded(zm.mul(fixup_translation, zm.rotationY(3.0 * std.math.pi / 2.0)));
 
     // middle locations
@@ -266,16 +345,26 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         .vertices_buffer = vertices_buffer,
         .indices_buffer = indices_buffer,
 
+        .mxm_indices_base = mxm_indices_base,
         .mxm_indices_cout = mxm_indices_count,
         .mxm_model_matrices = mxm_quad_model_matrices,
 
-        .fixup_indices_count = fix_up_indices_count,
+        .fixup_indices = .{
+            .base = fix_up_indices_base,
+            .count = fix_up_indices_count,
+            .reversed_base = fix_up_r_indices_base,
+            .reversed_count = fix_up_r_indices_count,
+        },
         .fixup_model_matrices = fixup_model_matrices,
 
         .middle_model_matrices = middle_model_matrices,
 
-        .interior_trim_indices_base = interior_trim_base_index,
-        .interior_trim_indices_count = interior_trim_indices_count,
+        .interior_trim_indices = .{
+            .base = interior_trim_indices_base,
+            .count = interior_trim_indices_count,
+            .reversed_base = interior_trim_r_indices_base,
+            .reversed_count = interior_trim_r_indices_count,
+        },
 
         .interior_trim_locations = .{
             .nz_nx = trim_location_nz_nx,

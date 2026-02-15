@@ -1505,8 +1505,8 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         });
 
         cmd.cmd_draw_indexed(.{
-            .first_index = self.clipmap_mesh.interior_trim_indices_base,
-            .index_count = self.clipmap_mesh.interior_trim_indices_count,
+            .first_index = self.clipmap_mesh.interior_trim_indices.base,
+            .index_count = self.clipmap_mesh.interior_trim_indices.count,
         });
 
         // draw trim (nz nx) (skipping first and last quad since that is drawn in pz px)
@@ -1520,8 +1520,8 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         });
 
         cmd.cmd_draw_indexed(.{
-            .first_index = self.clipmap_mesh.interior_trim_indices_base,
-            .index_count = self.clipmap_mesh.interior_trim_indices_count,
+            .first_index = self.clipmap_mesh.interior_trim_indices.base,
+            .index_count = self.clipmap_mesh.interior_trim_indices.count,
         });
     }
 
@@ -1543,7 +1543,7 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
             });
         }
 
-        for (self.clipmap_mesh.fixup_model_matrices) |mat| {
+        for (self.clipmap_mesh.fixup_model_matrices, 0..) |mat, idx| {
             push_constant_data.model_matrix = mat;
 
             // draw ring fixups
@@ -1554,7 +1554,8 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
             });
 
             cmd.cmd_draw_indexed(.{
-                .index_count = self.clipmap_mesh.fixup_indices_count,
+                .first_index = if (idx < 2) self.clipmap_mesh.fixup_indices.base else self.clipmap_mesh.fixup_indices.reversed_base,
+                .index_count = if (idx < 2) self.clipmap_mesh.fixup_indices.count else self.clipmap_mesh.fixup_indices.reversed_count,
             });
         }
 
@@ -1570,6 +1571,34 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         cmd.cmd_draw_indexed(.{
             .first_index = self.clipmap_mesh.degenerate_triangles_indices_base,
             .index_count = self.clipmap_mesh.degenerate_triangles_indices_count,
+        });
+
+        // draw inner trim
+        const quant_level_scale_l0 = std.math.pow(f32, 2.0, push_constant_data.clipmap_level + 0.0);
+        const quantised_camera_position_l0 = (zm.floor(push_constant_data.camera_position / zm.f32x4s(quant_level_scale_l0)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l0);
+        
+        const quant_level_scale_l1 = std.math.pow(f32, 2.0, push_constant_data.clipmap_level + 1.0);
+        const quantised_camera_position_l1 = (zm.floor(push_constant_data.camera_position / zm.f32x4s(quant_level_scale_l1)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l1);
+
+        const quantised_camera_larger = quantised_camera_position_l0 > quantised_camera_position_l1;
+
+        const trim_model_matrix, const trim_reversed = 
+            if (quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.nz_nx, false }
+            else if (quantised_camera_larger[0] and !quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.pz_nx, true }
+            else if (!quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.nz_px, true }
+            else .{ self.clipmap_mesh.interior_trim_locations.pz_px, false };
+            
+        push_constant_data.model_matrix = trim_model_matrix;
+
+        cmd.cmd_push_constants(.{
+            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .offset = 0,
+            .data = std.mem.asBytes(&push_constant_data),
+        });
+
+        cmd.cmd_draw_indexed(.{
+            .first_index = if (!trim_reversed) self.clipmap_mesh.interior_trim_indices.base else self.clipmap_mesh.interior_trim_indices.reversed_base,
+            .index_count = if (!trim_reversed) self.clipmap_mesh.interior_trim_indices.count else self.clipmap_mesh.interior_trim_indices.reversed_count,
         });
     }
 

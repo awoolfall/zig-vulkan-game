@@ -127,8 +127,8 @@ vs_out vs_main(vs_in input)
         displacement += displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz;
     }
 
-    //output.world_position.y += -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
-    //output.world_position.xz -= displacement.xz * mult_mask;
+    output.world_position.y += -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
+    output.world_position.xz -= displacement.xz * mult_mask;
 
     output.position = mul(output.world_position, push_constant.view_projection_matrix);
 
@@ -227,7 +227,6 @@ ps_out ps_main(vs_out input)
     float3 fog_colour = pow(float3(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0), 2.2);
     output.colour = lerp(output.colour, float4(fog_colour, 1.0), fog_amount);
 
-    output.colour.r = input.colour.b;
     output.colour.a = 1.0;
     return output;
 }
