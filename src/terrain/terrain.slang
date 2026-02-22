@@ -13,22 +13,20 @@ struct PushConstants
     float4x4 view_projection_matrix;
     float4 camera_pos;
 
-    float4 origin; // worldspace origin of the terrain. grid position (0, 0).
+    float3 origin; // worldspace origin of the terrain. grid position (0, 0).
 
     float terrain_grid_length; // vertices along each edge of grid square
 
-    float terrain_length_m;    // meters along the length of heightmap
     float terrain_length_scale;
-
-    float terrain_height_m;
     float terrain_height_scale;
-
-    float clipmap_level;
 
     // float4 modify_cells;
     // float2 modify_center;
     // float modify_radius;
     // float modify_strength;
+
+    float2 clipmap_translation;
+    uint32_t clipmap_packed_data;
 }
 
 [[vk::push_constant]]
@@ -65,31 +63,43 @@ struct vs_out
     float2 grid_position : TEXCOORD1;
 };
 
+float4 clipmap_geometry_to_world_position(float3 input_position, float3 camera_pos, float2 clipmap_translation, uint32_t clipmap_packed_data) {
+    const uint32_t clipmap_rotations_90 = (uint32_t)((clipmap_packed_data) & 0xff);
+    const uint32_t clipmap_level = (uint32_t)((clipmap_packed_data >> 8) & 0xff);
+
+    const float level_scale = pow(2.0, clipmap_level);
+
+    const float quant_level_scale = pow(2.0, clipmap_level + 1);
+    const float3 quantised_camera_position = (floor(camera_pos / quant_level_scale) + 0.5) * quant_level_scale;
+
+    const float clipmap_rotation = (float)(clipmap_rotations_90) * (3.14159265359 / 2.0);
+    const float4x4 clipmap_rotation_matrix = float4x4(
+        float4(cos(clipmap_rotation), 0.0, sin(clipmap_rotation), 0.0),
+        float4(0.0, 1.0, 0.0, 0.0),
+        float4(-sin(clipmap_rotation), 0.0, cos(clipmap_rotation), 0.0),
+        float4(0.0, 0.0, 0.0, 1.0)
+    );
+
+    float4 world_position = mul(float4(input_position.xyz + float3(clipmap_translation.x, 0.0, clipmap_translation.y), 1.0), clipmap_rotation_matrix);
+    world_position.xz *= level_scale;
+    world_position.xz += quantised_camera_position.xz;
+
+    return world_position;
+}
+
 [shader("vertex")]
 vs_out vs_main(vs_in input)
 {
     vs_out output = (vs_out)0;
 
-    float clipmap_scale = pow(2, push_constant.clipmap_level) * 100.0;
-    float upper_level_clipmap_scale = pow(2, push_constant.clipmap_level + 1) * 100.0;
+    output.world_position = clipmap_geometry_to_world_position(
+        input.pos,
+        push_constant.camera_pos.xyz,
+        push_constant.clipmap_translation,
+        push_constant.clipmap_packed_data
+    );
 
-    bool is_skirt_vert = input.pos.x > 1.0 || input.pos.x < 0.0 || input.pos.z > 1.0 || input.pos.z < 0.0;
-
-    output.world_position = float4(input.pos.xyz, 1.0);
-    output.world_position.xz -= 0.5;
-    output.world_position.z *= -1.0;
-    output.world_position.xz *= clipmap_scale;
-
-    float quad_scale = (clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
-    float upper_level_quad_scale = (upper_level_clipmap_scale * 2) / CLIPMAP_QUAD_COUNT;
-
-    if (is_skirt_vert) {
-        output.world_position.xz += round(push_constant.camera_pos.xz / upper_level_quad_scale) * upper_level_quad_scale;
-    } else {
-        output.world_position.xz += round(push_constant.camera_pos.xz / quad_scale) * quad_scale;
-    }
-
-    output.tex_coord = (output.world_position.xz - push_constant.origin.xz) / (push_constant.terrain_length_m * push_constant.terrain_length_scale);
+    output.tex_coord = (output.world_position.xz - push_constant.origin.xz) / (push_constant.terrain_length_scale);
 
     // apply heightmap height
     // TODO mip levels need improvement, calculate quad size and compare it to texel size to determine mip level
@@ -97,7 +107,7 @@ vs_out vs_main(vs_in input)
     mip_level = clamp(mip_level, 0.0, 7.0);
 
     float height = heightmap_textures.SampleLevel(diffuse_sampler, float3(output.tex_coord, 0.0), mip_level).r;
-    output.world_position.y = height * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    output.world_position.y = height * push_constant.terrain_height_scale;
 
     output.world_position.y += push_constant.origin.y;
 
@@ -153,13 +163,13 @@ ps_out ps_main(vs_out input)
     float texel = 1.0 / 4097; // one texel in UV-space
 
     // world-space horizontal spacing per texel (meters)
-    float spacing = (push_constant.terrain_length_m * push_constant.terrain_length_scale) / 4097;
+    float spacing = (push_constant.terrain_length_scale) / 4097;
 
     // Sample neighbor heights (convert sampled [0,1] to world meters)
-    float hL = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(-texel, 0.0), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hR = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(+texel, 0.0), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hU = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, -texel), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
-    float hD = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, +texel), 0.0)).r * push_constant.terrain_height_m * push_constant.terrain_height_scale;
+    float hL = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(-texel, 0.0), 0.0)).r * push_constant.terrain_height_scale;
+    float hR = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(+texel, 0.0), 0.0)).r * push_constant.terrain_height_scale;
+    float hU = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, -texel), 0.0)).r * push_constant.terrain_height_scale;
+    float hD = heightmap_textures.Sample(diffuse_sampler, float3(uv.xy + float2(0.0, +texel), 0.0)).r * push_constant.terrain_height_scale;
 
     // central differences -> slopes (rise / run)
     float dx = (hR - hL) / (2.0 * spacing);

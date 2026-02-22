@@ -19,14 +19,15 @@
 struct PushConstants
 {
     float4x4 view_projection_matrix;
-    float4x4 model_matrix;
     float4 camera_pos;
 
     float spectrum_image_size;
     float map_length_m;
     float map_height_scale;
+    float _pad0;
 
-    float clipmap_level;
+    float2 clipmap_translation;
+    uint32_t clipmap_packed_data;
 };
 
 [[vk::push_constant]]
@@ -93,21 +94,41 @@ float calculate_layer_map_length(float layer_0_map_length, float layer) {
     return layer_0_map_length / pow(2.0, layer);
 }
 
+float4 clipmap_geometry_to_world_position(float3 input_position, float3 camera_pos, float2 clipmap_translation, uint32_t clipmap_packed_data) {
+    const uint32_t clipmap_rotations_90 = (uint32_t)((clipmap_packed_data) & 0xff);
+    const uint32_t clipmap_level = (uint32_t)((clipmap_packed_data >> 8) & 0xff);
+
+    const float level_scale = pow(2.0, clipmap_level);
+
+    const float quant_level_scale = pow(2.0, clipmap_level + 1);
+    const float3 quantised_camera_position = (floor(camera_pos / quant_level_scale) + 0.5) * quant_level_scale;
+
+    const float clipmap_rotation = (float)(clipmap_rotations_90) * (3.14159265359 / 2.0);
+    const float4x4 clipmap_rotation_matrix = float4x4(
+        float4(cos(clipmap_rotation), 0.0, sin(clipmap_rotation), 0.0),
+        float4(0.0, 1.0, 0.0, 0.0),
+        float4(-sin(clipmap_rotation), 0.0, cos(clipmap_rotation), 0.0),
+        float4(0.0, 0.0, 0.0, 1.0)
+    );
+
+    float4 world_position = mul(float4(input_position.xyz + float3(clipmap_translation.x, 0.0, clipmap_translation.y), 1.0), clipmap_rotation_matrix);
+    world_position.xz *= level_scale;
+    world_position.xz += quantised_camera_position.xz;
+
+    return world_position;
+}
+
 [shader("vertex")]
 vs_out vs_main(vs_in input)
 {
     vs_out output = (vs_out)0;
 
-    const float level_scale = pow(2.0, push_constant.clipmap_level);
-
-    const float quant_level_scale = pow(2.0, push_constant.clipmap_level + 1);
-    float4 quantised_camera_position = (floor(push_constant.camera_pos / quant_level_scale) + 0.5) * quant_level_scale;
-    
-    output.position = mul(output.world_position, push_constant.view_projection_matrix);
-
-    output.world_position = mul(float4(input.pos.xyz, 1.0), push_constant.model_matrix);
-    output.world_position.xz *= level_scale;
-    output.world_position.xz += quantised_camera_position.xz;
+    output.world_position = clipmap_geometry_to_world_position(
+        input.pos, 
+        push_constant.camera_pos.xyz, 
+        push_constant.clipmap_translation, 
+        push_constant.clipmap_packed_data
+    );
 
     float mult_mask = 1.0;
     inline for (int i = 0; i < shallow_spots.getCount(); i++) {

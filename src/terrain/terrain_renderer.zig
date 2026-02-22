@@ -24,17 +24,14 @@ const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
     camera_pos: zm.F32x4, 
 
-    origin: zm.F32x4,           // origin of the heightmap mesh
+    origin: [3]f32,           // origin of the heightmap mesh
 
     terrain_grid_length: f32,   // vertices along each edge of grid square
 
-    terrain_length_m: f32,      // length of the heightmap in meters
-    terrain_length_scale: f32,  // length scale of the heightmap
+    terrain_length_scale: f32,  // length of the heightmap in meters * length scale of the heightmap
+    terrain_height_scale: f32,  // difference between minimum and maximum height of the heightmap * height scale of the heightmap
 
-    terrain_height_m: f32,      // difference between minimum and maximum height of the heightmap
-    terrain_height_scale: f32,  // height scale of the heightmap
-
-    clipmap_level: f32,
+    clipmap_data: ClipmapMesh.ClipmapPushConstant,
 };
 
 const ImagesDescriptorSetData = struct {
@@ -337,6 +334,7 @@ fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
         },
         .topology = .TriangleList,
         .rasterization_fill_mode = .Fill,
+        .front_face = .Clockwise,
         .descriptor_set_layouts = &.{
             self.lights_descriptor_layout,
             self.images_descriptor_layout,
@@ -463,19 +461,6 @@ pub fn render(
         },
     });
 
-    cmd.cmd_bind_vertex_buffers(.{
-        .buffers = &.{
-            gf.VertexBufferInput {
-                .buffer = self.clipmap_mesh.vertices_buffer,
-            },
-        }
-    });
-
-    cmd.cmd_bind_index_buffer(.{
-        .index_format = .U32,
-        .buffer = self.clipmap_mesh.indices_buffer,
-    });
-
     var push_constant_data = PushConstantData {
         .view_projection_matrix = zm.mul(
             camera.transform.generate_view_matrix(),
@@ -483,53 +468,27 @@ pub fn render(
         ),
         .camera_pos = camera.transform.position,
 
-        .origin = transform.position,
+        .origin = zm.vecToArr3(transform.position),
 
-        .terrain_length_m = terrain.map_length_m,
-        .terrain_length_scale = terrain.map_length_scale,
-
-        .terrain_height_m = terrain.map_maximum_height - terrain.map_minimum_height,
-        .terrain_height_scale = terrain.map_height_scale,
+        .terrain_length_scale = terrain.map_length_m * terrain.map_length_scale,
+        .terrain_height_scale = (terrain.map_maximum_height - terrain.map_minimum_height) * terrain.map_height_scale,
 
         .terrain_grid_length = 2048,// @as(f32, @floatFromInt(HeightFieldModelSize)),
 
-        .clipmap_level = 1.0,
-
-        // .modify_cells = zm.f32x4(
-        //     terrain.dbg_modify_cells[0][0], 
-        //     terrain.dbg_modify_cells[0][1], 
-        //     terrain.dbg_modify_cells[1][0], 
-        //     terrain.dbg_modify_cells[1][1]),
-        // .modify_center = terrain.dbg_modify_center,
-        // .modify_radius = terrain.modify_radius,
-        // .modify_strength = 1.0,
+        .clipmap_data = undefined,
     };
 
-    // draw center level
     cmd.cmd_push_constants(.{
         .shader_stages = .{ .Vertex = true, .Pixel = true, },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{
-        .index_count = self.clipmap_mesh.mxm_indices_cout,
-    });
-
-    // draw clipmap levels
-    const CLIPMAP_LEVELS = 4;
-
-    for (0..CLIPMAP_LEVELS) |_| {
-        push_constant_data.clipmap_level += 1.0;
-
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .index_count = self.clipmap_mesh.mxm_indices_cout,
-        });
-    }
+    self.clipmap_mesh.render_clipmap_geometry(
+        cmd,
+        6,
+        .{ .Vertex = true, .Pixel = true, },
+        @offsetOf(PushConstantData, "clipmap_data"),
+        push_constant_data.camera_pos
+    );
 }

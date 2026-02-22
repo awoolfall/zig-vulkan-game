@@ -38,14 +38,14 @@ const JacobianPushConstantData = extern struct {
 
 const RenderPushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
-    model_matrix: zm.Mat,
     camera_position: zm.F32x4,
 
     spectrum_image_size: f32,
     map_length_m: f32,
     map_height_scale: f32,
+    _pad0: f32 = 0.0,
 
-    clipmap_level: f32,
+    clipmap_data: ClipmapMesh.ClipmapPushConstant,
 };
 
 const ShallowSpot = extern struct {
@@ -1418,16 +1418,6 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
     
     cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
 
-    cmd.cmd_bind_vertex_buffers(.{
-        .buffers = &.{
-            .{ .buffer = self.clipmap_mesh.vertices_buffer, },
-        },
-    });
-    cmd.cmd_bind_index_buffer(.{
-        .buffer = self.clipmap_mesh.indices_buffer,
-        .index_format = .U32,
-    });
-
     (blk: {
         const lights_buffer = self.render_lights_buffer.get() catch break :blk error.UnableToGetBuffer;
         const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
@@ -1467,140 +1457,28 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
 
     var push_constant_data = RenderPushConstantData {
         .view_projection_matrix = zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(gfx.GfxState.get().swapchain_aspect())),
-        .model_matrix = zm.identity(),
         .camera_position = camera.transform.position,
 
         .spectrum_image_size = Self.fN,
         .map_length_m = Self.MAP_LENGTH_M,
         .map_height_scale = 1.0,
 
-        .clipmap_level = 0.0,
+        .clipmap_data = undefined,
     };
 
-    for (self.clipmap_mesh.middle_model_matrices) |mat| {
-        push_constant_data.model_matrix = mat;
+    cmd.cmd_push_constants(.{
+        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .offset = 0,
+        .data = std.mem.asBytes(&push_constant_data),
+    });
 
-        // draw center quads
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .index_count = self.clipmap_mesh.mxm_indices_cout,
-        });
-    }
-
-    // draw trim around center level quads
-    {
-        // draw trim (pz px)
-        push_constant_data.model_matrix = self.clipmap_mesh.interior_trim_locations.pz_px;
-
-        // draw center level
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .first_index = self.clipmap_mesh.interior_trim_indices.base,
-            .index_count = self.clipmap_mesh.interior_trim_indices.count,
-        });
-
-        // draw trim (nz nx) (skipping first and last quad since that is drawn in pz px)
-        push_constant_data.model_matrix = self.clipmap_mesh.interior_trim_locations.nz_nx;
-
-        // draw center level
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .first_index = self.clipmap_mesh.interior_trim_indices.base,
-            .index_count = self.clipmap_mesh.interior_trim_indices.count,
-        });
-    }
-
-    for (0..4) |level| {
-        push_constant_data.clipmap_level = @floatFromInt(level);
-
-        for (self.clipmap_mesh.mxm_model_matrices) |mat| {
-            push_constant_data.model_matrix = mat;
-
-            // draw mxm ring quads
-            cmd.cmd_push_constants(.{
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
-                .offset = 0,
-                .data = std.mem.asBytes(&push_constant_data),
-            });
-
-            cmd.cmd_draw_indexed(.{
-                .index_count = self.clipmap_mesh.mxm_indices_cout,
-            });
-        }
-
-        for (self.clipmap_mesh.fixup_model_matrices, 0..) |mat, idx| {
-            push_constant_data.model_matrix = mat;
-
-            // draw ring fixups
-            cmd.cmd_push_constants(.{
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
-                .offset = 0,
-                .data = std.mem.asBytes(&push_constant_data),
-            });
-
-            cmd.cmd_draw_indexed(.{
-                .first_index = if (idx < 2) self.clipmap_mesh.fixup_indices.base else self.clipmap_mesh.fixup_indices.reversed_base,
-                .index_count = if (idx < 2) self.clipmap_mesh.fixup_indices.count else self.clipmap_mesh.fixup_indices.reversed_count,
-            });
-        }
-
-        // draw degenerate triangles
-        push_constant_data.model_matrix = zm.identity();
-
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .first_index = self.clipmap_mesh.degenerate_triangles_indices_base,
-            .index_count = self.clipmap_mesh.degenerate_triangles_indices_count,
-        });
-
-        // draw inner trim
-        const quant_level_scale_l0 = std.math.pow(f32, 2.0, push_constant_data.clipmap_level + 0.0);
-        const quantised_camera_position_l0 = (zm.floor(push_constant_data.camera_position / zm.f32x4s(quant_level_scale_l0)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l0);
-        
-        const quant_level_scale_l1 = std.math.pow(f32, 2.0, push_constant_data.clipmap_level + 1.0);
-        const quantised_camera_position_l1 = (zm.floor(push_constant_data.camera_position / zm.f32x4s(quant_level_scale_l1)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l1);
-
-        const quantised_camera_larger = quantised_camera_position_l0 > quantised_camera_position_l1;
-
-        const trim_model_matrix, const trim_reversed = 
-            if (quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.nz_nx, false }
-            else if (quantised_camera_larger[0] and !quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.pz_nx, true }
-            else if (!quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.clipmap_mesh.interior_trim_locations.nz_px, true }
-            else .{ self.clipmap_mesh.interior_trim_locations.pz_px, false };
-            
-        push_constant_data.model_matrix = trim_model_matrix;
-
-        cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
-            .offset = 0,
-            .data = std.mem.asBytes(&push_constant_data),
-        });
-
-        cmd.cmd_draw_indexed(.{
-            .first_index = if (!trim_reversed) self.clipmap_mesh.interior_trim_indices.base else self.clipmap_mesh.interior_trim_indices.reversed_base,
-            .index_count = if (!trim_reversed) self.clipmap_mesh.interior_trim_indices.count else self.clipmap_mesh.interior_trim_indices.reversed_count,
-        });
-    }
+    self.clipmap_mesh.render_clipmap_geometry(
+        cmd,
+        6,
+        .{ .Vertex = true, .Pixel = true, },
+        @offsetOf(RenderPushConstantData, "clipmap_data"),
+        push_constant_data.camera_position
+    );
 
     // clear shallow spots ready for next frame
     self.render_shallow_spots_list.clearRetainingCapacity();
