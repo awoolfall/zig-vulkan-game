@@ -43,6 +43,10 @@
         .name = "block",
         .path = .{ .Model = .{ .Path = "block.glb" } },
     },
+    .{
+        .name = "camera",
+        .path = .{ .Model = .{ .Path = "SM_Icon_Camera.glb" } },
+    },
 
     // Terrain image???
     .{

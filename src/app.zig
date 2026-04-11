@@ -23,6 +23,8 @@ const StandardRenderer = @import("render.zig");
 const Ocean = @import("ocean/ocean.zig");
 const Clouds = @import("clouds/clouds.zig");
 const EditMode = @import("edit_mode.zig");
+const player_character = @import("player_character.zig");
+const opponent_character = @import("opponent_character.zig");
 
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
@@ -35,98 +37,10 @@ pub const EntityComponents = .{
     entity_components.LightComponent,
     entity_components.TerrainComponent,
     entity_components.CloudVolumeComponent,
-    PlayerCharacterComponent,
-    OpponentCharacterComponent,
+    entity_components.CameraComponent,
+    player_character.PlayerCharacterComponent,
+    opponent_character.OpponentCharacterComponent,
 };
-
-pub const PlayerCharacterComponent = struct {
-    const SelfComponent = @This();
-
-    pub fn deinit(self: *SelfComponent) void {
-        _ = self;
-    }
-
-    pub fn init(alloc: std.mem.Allocator) !SelfComponent {
-        _ = alloc;
-        return .{};
-    }
-
-    pub fn serialize(alloc: std.mem.Allocator, value: SelfComponent) !std.json.Value {
-        var object = std.json.ObjectMap.init(alloc);
-        errdefer object.deinit();
-
-        _ = value;
-
-        return std.json.Value { .object = object };
-    }
-
-    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !SelfComponent {
-        const component: SelfComponent = .{};
-        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
-        _ = alloc;
-        _ = object;
-
-        return component;
-    }
-
-    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
-        _ = imui.push_layout(.Y, key ++ .{@src()});
-        defer imui.pop_layout();
-
-        {
-            // TODO
-            _ = entity;
-            _ = component;
-        }
-    }
-};
-
-pub const OpponentCharacterComponent = struct {
-    const SelfComponent = @This();
-
-    pub fn deinit(self: *SelfComponent) void {
-        _ = self;
-    }
-
-    pub fn init(alloc: std.mem.Allocator) !SelfComponent {
-        _ = alloc;
-        return .{};
-    }
-
-    pub fn serialize(alloc: std.mem.Allocator, value: SelfComponent) !std.json.Value {
-        var object = std.json.ObjectMap.init(alloc);
-        errdefer object.deinit();
-
-        _ = value;
-
-        return std.json.Value { .object = object };
-    }
-
-    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !SelfComponent {
-        const component: SelfComponent = .{};
-        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
-        _ = alloc;
-        _ = object;
-
-        return component;
-    }
-
-    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
-        _ = imui.push_layout(.Y, key ++ .{@src()});
-        defer imui.pop_layout();
-
-        {
-            // TODO
-            _ = entity;
-            _ = component;
-        }
-    }
-};
-
-camera: eng.camera.Camera,
-target_old_pos: zm.F32x4 = zm.f32x4s(0.0),
 
 character_entity: ?eng.ecs.Entity = null,
 
@@ -271,7 +185,7 @@ pub fn init() !Self {
     var terrain_renderer = try TerrainRenderer.init();
     errdefer terrain_renderer.deinit();
 
-    var ocean = try Ocean.init();
+    var ocean = try Ocean.init(.{ .amplitude = 0.08, .wind = .{ 9.0, 0.0 } });
     errdefer ocean.deinit();
 
     var clouds = try Clouds.init(eng.get().general_allocator);
@@ -284,17 +198,6 @@ pub fn init() !Self {
     errdefer edit_mode.deinit();
 
     return Self {
-        .camera = eng.camera.Camera {
-            .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), engine.gfx.swapchain_aspect()),
-            .near_field = 0.3,
-            .far_field = 10_000.0,
-            .move_speed = 10.0,
-            .mouse_sensitivity = 0.001,
-            .max_orbit_distance = 10.0,
-            .min_orbit_distance = 1.0,
-            .orbit_distance = 5.0,
-        },
-
         .app_life_asset_pack_id = asset_pack_id,
 
         .player_attack_particle_system = player_attack_particle_system,
@@ -316,6 +219,8 @@ pub fn init() !Self {
 fn update(self: *Self) !void {
     const engine = eng.get();
 
+    const _profile_context = engine.profiler.start_context("app::update");
+
     // switch modes
     if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.F1)) {
         switch (self.current_mode) {
@@ -325,26 +230,23 @@ fn update(self: *Self) !void {
             },
             .Play => {
                 self.current_mode = .Edit;
-                self.edit_mode.editor_camera.transform = self.camera.transform;
                 engine.time.time_scale = 0.01;
+
+                blk: {
+                    var camera_query = eng.get().ecs.query_iterator(.{ entity_components.CameraComponent, eng.entity.TransformComponent });
+                    const camera_component: *entity_components.CameraComponent,
+                    const camera_transform: *eng.entity.TransformComponent = camera_query.next() orelse break :blk;
+
+                    _ = camera_component;
+                    self.edit_mode.editor_camera.transform = camera_transform.transform;
+                }
             },
         }
     }
 
-    // update particle systems
-    var particle_system_iter = engine.ecs.query_iterator(.{ eng.entity.TransformComponent, entity_components.ParticleSystemComponent });
-    while (particle_system_iter.next()) |components| {
-        const entity_transform: *eng.entity.TransformComponent,
-        const entity_particle_system: *entity_components.ParticleSystemComponent = components;
-
-        entity_particle_system.particle_system.settings.spawn_origin = entity_transform.transform.position;
-        entity_particle_system.particle_system.update(&engine.time);
-    }
-
-    self.player_attack_particle_system.update(&engine.time);
-
+    var render_camera: *eng.camera.Camera = &self.edit_mode.editor_camera;
+    
     // update
-    var render_camera: *eng.camera.Camera = undefined;
     switch (self.current_mode) {
         .Edit => {
             self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer, &self.ocean) catch |err| {
@@ -359,293 +261,43 @@ fn update(self: *Self) !void {
                 if (self.character_entity == null) {
                     // spawn character
                     const character_spawner_entity = eng.get().ecs.find_first_entity_with_name("character-spawner") orelse break :blk;
-
                     const spawner_transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, character_spawner_entity) orelse break :blk;
                     const character_spawner_transform = spawner_transform_component.transform;
 
-                    const chara_shape = ph.ShapeSettings {
-                        .shape = .{ .Capsule = .{
-                            .half_height = 0.7,
-                            .radius = 0.2,
-                        } },
-                        .offset_transform = Transform {
-                            .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
-                            .rotation = zm.qidentity(),
-                        },
+                    self.character_entity = player_character.spawn_character(eng.Transform {
+                        .position = character_spawner_transform.position,
+                        .rotation = character_spawner_transform.rotation,
+                    }) catch |err| {
+                        std.log.err("Unable to spawn player character: {}", .{err});
+                        break :blk;
                     };
-
-                    const character_virtual_settings = ph.CharacterVirtualSettings {
-                        .base = ph.CharacterBaseSettings {
-                            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-                            .max_slope_angle = 70.0,
-                            .shape = chara_shape,
-                        },
-                        .mass = 70.0,
-                        .character_padding = 0.02,
-                    };
-
-                    const new_character_entity = try eng.get().ecs.create_new_entity();
-                    errdefer eng.get().ecs.remove_entity(new_character_entity);
-
-                    {
-                        try eng.get().ecs.set_entity_name(new_character_entity, "character entity");
-
-                        const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, new_character_entity);
-                        transform_component.transform = Transform {
-                            .position = character_spawner_transform.position,
-                            .rotation = character_spawner_transform.rotation,
-                        };
-
-                        const model_component = try eng.get().ecs.add_component(eng.entity.ModelComponent, new_character_entity);
-                        model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
-
-                        const anim_component = try eng.get().ecs.add_component(entity_components.AnimControllerComponent, new_character_entity);
-                        try setup_character_anim_controller(&anim_component.anim_controller);
-
-                        const physics_component = try eng.get().ecs.add_component(eng.entity.PhysicsComponent, new_character_entity);
-                        physics_component.settings = .{ .CharacterVirtual = .{
-                            .settings = character_virtual_settings,
-                            .create_character = true,
-                            .extended_update_settings = .{},
-                        } };
-                        try physics_component.update_runtime_data(new_character_entity);
-
-                        const health_point_component = try eng.get().ecs.add_component(entity_components.HealthPointComponent, new_character_entity);
-                        health_point_component.health_points = 100;
-
-                        _ = try eng.get().ecs.add_component(PlayerCharacterComponent, new_character_entity);
-                    }
-
-                    self.character_entity = new_character_entity;
                 }
             }
 
             blk: {
-                if (eng.get().ecs.get_component_count(OpponentCharacterComponent) == 0) {
+                if (eng.get().ecs.get_component_count(opponent_character.OpponentCharacterComponent) == 0) {
                     // spawn character
                     const spawner_entity = eng.get().ecs.find_first_entity_with_name("opponent-spawner") orelse break :blk;
                     const spawner_transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, spawner_entity) orelse break :blk;
                     const spawner_transform = spawner_transform_component.transform;
 
-                    const chara_shape = ph.ShapeSettings {
-                        .shape = .{ .Capsule = .{
-                            .half_height = 0.7,
-                            .radius = 0.2,
-                        } },
-                        .offset_transform = Transform {
-                            .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
-                            .rotation = zm.qidentity(),
-                        },
-                    };
-
-                    const character_virtual_settings = ph.CharacterVirtualSettings {
-                        .base = ph.CharacterBaseSettings {
-                            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-                            .max_slope_angle = 70.0,
-                            .shape = chara_shape,
-                        },
-                        .mass = 70.0,
-                        .character_padding = 0.02,
-                    };
-
-                    const new_entity = try eng.get().ecs.create_new_entity();
-                    errdefer eng.get().ecs.remove_entity(new_entity);
-
-                    try eng.get().ecs.set_entity_name(new_entity, "opponent entity");
-
-                    const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, new_entity);
-                    transform_component.transform = Transform {
+                    _ = opponent_character.spawn_opponent_character(.{
                         .position = spawner_transform.position,
                         .rotation = spawner_transform.rotation,
+                    }) catch |err| {
+                        std.log.err("Unable to spawn opponent character: {}", .{err});
+                        break :blk;
                     };
-
-                    const model_component = try eng.get().ecs.add_component(eng.entity.ModelComponent, new_entity);
-                    model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
-
-                    const anim_component = try eng.get().ecs.add_component(entity_components.AnimControllerComponent, new_entity);
-                    try setup_character_anim_controller(&anim_component.anim_controller);
-
-                    const physics_component = try eng.get().ecs.add_component(eng.entity.PhysicsComponent, new_entity);
-                    physics_component.settings = .{ .CharacterVirtual = .{
-                        .settings = character_virtual_settings,
-                        .create_character = true,
-                        .extended_update_settings = .{},
-                    } };
-                    try physics_component.update_runtime_data(new_entity);
-
-                    const health_points_component = try eng.get().ecs.add_component(entity_components.HealthPointComponent, new_entity);
-                    health_points_component.health_points = 100;
                 }
             }
 
-            // Input to move the model around
-            if (self.character_entity) |character_entity| character_movement_blk: {
-                var movement_direction = zm.f32x4s(0.0);
-                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.W)) {
-                    movement_direction[2] += 1.0;
-                }
-                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.S)) {
-                    movement_direction[2] -= 1.0;
-                }
-                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.D)) {
-                    movement_direction[0] += 1.0;
-                }
-                if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.A)) {
-                    movement_direction[0] -= 1.0;
-                }
+            player_character.player_control_update() catch |err| {
+                std.log.err("Unable to update player control: {}", .{err});
+            };
 
-                if (!zm.all(movement_direction == zm.f32x4s(0.0), 3)) {
-                    movement_direction = zm.normalize3(movement_direction);
-                }
-
-                const is_running = (!engine.imui.has_focus() and engine.input.get_key(KeyCode.Shift));
-                if (is_running) {
-                    movement_direction *= zm.f32x4s(2.0);
-                }
-
-                // Move slower walking backwards
-                if (!is_running and movement_direction[2] < 0.0) {
-                    movement_direction[2] *= 0.8;
-                }
-
-                const camera_right = self.camera.transform.right_direction();
-                const camera_forward_no_pitch = zm.cross3(zm.f32x4(0.0, 1.0, 0.0, 0.0), camera_right);
-
-                var world_movement_direction = 
-                    camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
-                    + camera_right * zm.f32x4s(movement_direction[0]);
-
-                // engine.debug.draw_line(.{
-                //     .p0 = character_entity.transform.position,
-                //     .p1 = character_entity.transform.position + zm.normalize3(movement_direction),
-                //     .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
-                // });
-
-                // disable movement when attacking
-                blk: {
-                    const anim_component = eng.get().ecs.get_component(entity_components.AnimControllerComponent, character_entity) orelse break :blk;
-                    if (anim_component.anim_controller.active_node == 2) {
-                        world_movement_direction = zm.f32x4s(0.0);
-                    }
-                }
-
-                const character_physics_component = eng.get().ecs.get_component(eng.entity.PhysicsComponent, character_entity) orelse break :character_movement_blk;
-                const character = character_physics_component.runtime_data.CharacterVirtual.virtual;
-
-                const character_transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, character_entity) orelse break :character_movement_blk;
-
-                var character_velocity = zm.loadArr3(character.getLinearVelocity());
-
-                if (character_is_supported(character)) {
-                    // remove any gravity
-                    character_velocity[1] = 0.0;
-
-                    const character_movement_speed = 4.0;
-                    //const friction = 8.0;
-
-                    // apply supported movement
-                    if (zm.length3(world_movement_direction)[0] > 0.0) {
-                        character_velocity = zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(character_movement_speed), 0.5);
-                    } else {
-                        // apply friction TODO FIX
-                        character_velocity = zm.lerp(character_velocity, zm.f32x4s(0.0), 0.5);
-                    }
-                } else {
-                    // if not supported then apply gravity
-                    character_velocity = character_velocity
-                        + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.physics.PhysicsSystem.UpdateRateS * eng.physics.PhysicsSystem.UpdateRateS);
-                }
-
-                character.setLinearVelocity(zm.vecToArr3(character_velocity));
-
-                // Rotate character model to match the input desired direction
-                // If no input desired direction (normalized to nan) then remain in last rotation
-                const rotate_towards_dir = if (!is_running) blk: {
-                    break :blk zm.normalize3(camera_forward_no_pitch + world_movement_direction);
-                } else blk: {
-                    break :blk zm.normalize3(world_movement_direction);
-                };
-
-                if (!std.math.isNan(rotate_towards_dir[0])) {
-                    const rot = zm.lookAtRh(
-                        zm.f32x4s(0.0),
-                        rotate_towards_dir * zm.f32x4(1.0, 1.0, -1.0, 0.0),
-                        zm.f32x4(0.0, 1.0, 0.0, 0.0)
-                    );
-                    character.setRotation(
-                        zm.slerp(character_transform_component.transform.rotation, zm.matToQuat(rot), 0.1)
-                    );
-                }
-
-                if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.MouseLeft)) {
-                    var collector = eng.physics.util.CollideShapeCollector.init(engine.frame_allocator) catch |err| {
-                        std.log.warn("Unable to create physics collector: {}", .{err});
-                        unreachable;
-                    };
-                    defer collector.deinit();
-
-                    const box_shape_settings = zphy.BoxShapeSettings.create([3]f32{0.5, 0.5, 0.5}) catch unreachable;
-                    defer box_shape_settings.asShapeSettings().release();
-
-                    const box_shape = box_shape_settings.asShapeSettings().createShape() catch unreachable;
-                    defer box_shape.release();
-
-                    var camera_forward_2d = self.camera.transform.forward_direction();
-                    camera_forward_2d[1] = 0.0;
-                    camera_forward_2d = zm.normalize3(camera_forward_2d);
-
-                    const shape_position = character_transform_component.transform.position + zm.f32x4(0.0, 0.6, 0.0, 0.0) + (camera_forward_2d);
-
-                    const matrix = zm.matToArr((Transform {
-                        .position = shape_position
-                    }).generate_model_matrix());
-
-                    if (eng.get().ecs.get_component(entity_components.AnimControllerComponent, character_entity)) |anim_component| {
-                        anim_component.anim_controller.trigger_event("character attack");
-                    }
-
-                    // particles!
-                    self.player_attack_particle_system.settings.spawn_origin = shape_position;
-                    self.player_attack_particle_system.settings.spawn_offset = camera_right;
-                    self.player_attack_particle_system.settings.initial_velocity = zm.f32x4s(0.0); //camera_forward_2d * zm.f32x4s(10.0);
-                    self.player_attack_particle_system.emit_particle_burst();
-
-                    engine.physics.zphy.getNarrowPhaseQuery().collideShape(
-                        box_shape,
-                        [3]f32{1.0, 1.0, 1.0},
-                        matrix,
-                        [3]zphy.Real{0.0, 0.0, 0.0},
-                        @ptrCast(&collector),
-                        .{}
-                    );
-
-                    std.log.info("hits: {}", .{collector.hits.items.len});
-                    for (collector.hits.items) |hit| {
-                        var read_lock = engine.physics.init_body_read_lock(hit.body2_id) catch unreachable;
-                        defer read_lock.deinit();
-
-                        const user_data = ph.PhysicsSystem.extract_entity_from_user_data(read_lock.body.getUserData());
-                        hitblk: {
-                            const hit_entity = eng.ecs.Entity{.idx = user_data.entity };
-                            const hit_entity_name = eng.get().ecs.get_entity_name(hit_entity) orelse "unnamed";
-                            std.log.info("- {s}", .{ hit_entity_name });
-
-                            const healthpoint_component = eng.get().ecs.get_component(entity_components.HealthPointComponent, hit_entity) orelse break :hitblk;
-                            healthpoint_component.health_points -= 10;
-
-                            if (healthpoint_component.health_points <= 0) {
-                                std.log.info("'{s}' fainted!", .{ hit_entity_name });
-                            }
-                        }
-                    }
-                }
-
-                // Update character animation parameters
-                if (eng.get().ecs.get_component(entity_components.AnimControllerComponent, character_entity)) |anim_component| {
-                    anim_component.anim_controller.set_variable("character speed", zm.length3(character_velocity)[0]);
-                    anim_component.anim_controller.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
-                }
-            }
+            opponent_character.opponent_character_update() catch |err| {
+                std.log.err("Unable to update opponent characters: {}", .{err});
+            };
 
             var vel_buf: [128]u8 = [_]u8{0} ** 128;
             var vel_text: []u8 = vel_buf[0..0];
@@ -653,10 +305,9 @@ fn update(self: *Self) !void {
                 const physics_component = eng.get().ecs.get_component(eng.entity.PhysicsComponent, character_entity) orelse break :blk;
                 const character = physics_component.runtime_data.CharacterVirtual.virtual;
                 const character_velocity = zm.loadArr3(character.getLinearVelocity());
-                vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}\nis supported: {}", .{
+                vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}", .{
                     zm.length3(character_velocity)[0],
                     character_velocity,
-                    character_is_supported(character),
                 }) catch unreachable;
 
                 {
@@ -671,79 +322,80 @@ fn update(self: *Self) !void {
                 }
             }
 
-            // blk: {
-            //     const opponent = engine.entities.get(self.opponent_idx) orelse break :blk;
-            //     const character = engine.entities.get(self.character_idx) orelse break :blk;
-
-            //     var desired_movement_direction = zm.f32x4s(0.0);
-
-            //     const pos_diff = character.transform.position - opponent.transform.position;
-            //     const desired_distance = 5.0;
-            //     if (zm.length3(pos_diff)[0] > desired_distance) {
-            //         desired_movement_direction += zm.normalize3(pos_diff);
-            //     }
-
-            //     const opponent_physics = opponent.physics.runtime_data.CharacterVirtual.virtual;
-
-            //     if (zm.length3(desired_movement_direction)[0] != 0.0) {
-            //         desired_movement_direction = zm.normalize3(desired_movement_direction);
-
-            //         var character_velocity = zm.loadArr3(opponent_physics.getLinearVelocity());
-
-            //         if (character_is_supported(opponent_physics)) {
-            //             // remove any gravity
-            //             character_velocity[1] = 0.0;
-
-            //             const character_movement_speed = 4.0;
-            //             const friction = 8.0;
-
-            //             character_velocity = character_velocity
-            //                 // apply supported movement
-            //                 + desired_movement_direction * zm.f32x4s(character_movement_speed * friction * engine.time.delta_time_f32())
-            //                 // apply friction
-            //                 - character_velocity * zm.f32x4s(friction * engine.time.delta_time_f32());
-            //         } else {
-            //             // if not supported then apply gravity
-            //             character_velocity = character_velocity
-            //                 + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
-            //         }
-
-            //         opponent_physics.setLinearVelocity(zm.vecToArr3(character_velocity));
-            //     } else {
-            //         opponent_physics.setLinearVelocity(.{ 0.0, 0.0, 0.0 });
-            //     }
-
-            //     // Rotate to face character
-            //     const rot = zm.lookAtRh(zm.f32x4s(0.0), zm.normalize3(pos_diff), zm.f32x4(0.0, 1.0, 0.0, 0.0));
-            //     opponent_physics.setRotation(
-            //         zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)
-            //     );
-            // }
-
-            // // Cast ray from camera
-            // if (engine.entities.get(self.camera_idx)) |camera_entity| {
-            //     var raycast_result = engine.physics.zphy.getNarrowPhaseQuery().castRay(.{
-            //         .origin = camera_entity.transform.position,
-            //         .direction = camera_entity.transform.forward_direction(),
-            //     }, .{});
-            //     if (raycast_result.has_hit) {
-            //         std.log.info("  raycast hit! id:{}", .{raycast_result.hit.body_id});
-            //     }
-            // }
-
             // update camera position to track the character entity's visual location
-            var target_pos = zm.f32x4s(0.0);
-            if (self.character_entity) |character_entity| {
-                const visual_transform = engine.physics.calculate_entity_visual_transform(character_entity);
-                target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
-            }
-            self.camera.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
+            blk: {
+                var camera_query = eng.get().ecs.query_iterator(.{ entity_components.CameraComponent, eng.entity.TransformComponent });
+                const camera_component: *entity_components.CameraComponent,
+                const camera_transform: *eng.entity.TransformComponent = camera_query.next() orelse break :blk;
 
-            render_camera = &self.camera;
+                var target_pos = zm.f32x4s(0.0);
+                if (self.character_entity) |character_entity| {
+                    const visual_transform = engine.physics.calculate_entity_visual_transform(character_entity);
+                    target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
+                }
+
+                camera_component.camera_data.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
+                camera_transform.transform = camera_component.camera_data.transform; // TODO: we shouldn't use two transforms. convert camera update to use ecs
+
+                render_camera = &camera_component.camera_data;
+            }
 
             try self.push_all_entities_for_rendering();
         },
     }
+
+    // update particle systems
+    var particle_system_iter = engine.ecs.query_iterator(.{ eng.entity.TransformComponent, entity_components.ParticleSystemComponent });
+    while (particle_system_iter.next()) |components| {
+        const entity_transform: *eng.entity.TransformComponent,
+        const entity_particle_system: *entity_components.ParticleSystemComponent = components;
+
+        entity_particle_system.particle_system.settings.spawn_origin = entity_transform.transform.position;
+        entity_particle_system.particle_system.update(&engine.time);
+    }
+
+    // end profile context, usually we can defer this but in app update we have to also print results
+    _profile_context.end_context();
+
+    {
+        var profiler_text = std.ArrayList(u8).initCapacity(eng.get().frame_allocator, 32) catch unreachable;
+        defer profiler_text.deinit(eng.get().frame_allocator);
+
+        profiler_text.appendSlice(eng.get().frame_allocator, "Profiler:\n") catch unreachable;
+
+        var profile_contexts = engine.profiler.contexts_map.valueIterator();
+        while (profile_contexts.next()) |context| {
+            if (context.end_time) |end_time| {
+                const context_text = std.fmt.allocPrint(eng.get().frame_allocator, 
+                    "- {s}: {} ms\n", 
+                    .{
+                        context.name,
+                        @as(f64, @floatFromInt(end_time.since(context.start_time))) / @as(f64, @floatFromInt(std.time.ns_per_ms))
+                    }
+                ) catch unreachable;
+                defer eng.get().frame_allocator.free(context_text);
+
+                profiler_text.appendSlice(eng.get().frame_allocator, context_text) catch unreachable;
+            }
+        }
+
+        _ = engine.imui.push_floating_layout(
+            .Y, 
+            200.0, 
+            25.0 + engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            .{@src()}
+        );
+        const l = Imui.widgets.label.create(&eng.get().imui, profiler_text.items);
+        if (engine.imui.get_widget(l.id)) |tw| {
+            tw.text_content.?.font = .GeistMono;
+            tw.text_content.?.size = 12;
+            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
+        }
+        _ = engine.imui.pop_layout();
+    }
+
+    // end frame here, we record render timing one frame early into next frame's profiler
+    engine.profiler.end_frame();
 
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
     const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
@@ -910,9 +562,11 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render debug: {}", .{err});
     };
 
+    const _imui_render_profiler_context = engine.profiler.start_context("imui::render");
     engine.imui.render_imui(cmd) catch |err| {
         std.log.warn("Unable to render imui: {}", .{err});
     };
+    _imui_render_profiler_context.end_context();
 
     // Finish command buffer
     cmd.cmd_end() catch |err| {
@@ -934,10 +588,12 @@ fn update(self: *Self) !void {
     };
 
     // Present
+    const _present_profiler_context = engine.profiler.start_context("present");
     engine.gfx.present(&.{ uber_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
+    _present_profiler_context.end_context();
 }
 
 pub fn push_all_entities_for_rendering(
@@ -955,7 +611,7 @@ pub fn push_all_entities_for_rendering(
             const defualt_model_component = eng.entity.ModelComponent {
                 .model = try assets.ModelAssetId.from_string_identifier("core|sphere"),
             };
-            const model_component = eng.get().ecs.get_component(eng.entity.ModelComponent, entity) orelse &defualt_model_component;
+            const model_component = eng.get().ecs.get_component(eng.entity.ModelComponent, entity) orelse (if (self.current_mode == .Edit) &defualt_model_component else break :blk);
             const maybe_anim_component = eng.get().ecs.get_component(entity_components.AnimControllerComponent, entity);
 
             const transform = eng.get().physics.calculate_entity_visual_transform(entity);
@@ -1144,99 +800,4 @@ pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void
         },
         else => {},
     }
-}
-
-fn character_is_supported(chr: *zphy.CharacterVirtual) bool {
-    return chr.getGroundState() == zphy.CharacterGroundState.on_ground;
-}
-
-fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void {
-    const engine = eng.get();
-    
-    const character_animation_idle_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
-        catch unreachable;
-    const character_animation_walk_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.walk")
-        catch unreachable;
-    const character_animation_run_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.run")
-        catch unreachable;
-    const character_animation_attack_id = engine.asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
-        catch unreachable;
-
-    const alloc = eng.get().general_allocator;
-
-    const anim_nodes = [_]anim.Node{
-        .{
-            .node = .{ .Basic = .{
-                .animation = character_animation_idle_id,
-            } },
-            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 1,
-                    .condition = anim.TransitionCondition{ .Float = .{
-                        .variable_id = anim.AnimController.hash_variable("character speed"),
-                        .comparison = .GreaterThan,
-                        .value = 0.05,
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-                anim.NodeTransition{
-                    .node = 2,
-                    .condition = anim.TransitionCondition{ .Event = .{
-                        .variable_id = anim.AnimController.hash_variable("character attack"),
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            }),
-        },
-        .{
-            .node = .{ .Blend1D = .{
-                .left_animation = character_animation_walk_id,
-                .right_animation = character_animation_run_id,
-                .variable = anim.AnimController.hash_variable("character speed"),
-                .left_value = 4.0,
-                .right_value = 8.0,
-                .left_strength_variable = anim.AnimController.hash_variable("character walk speed norm"),
-            } },
-            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 0,
-                    .condition = anim.TransitionCondition{ .Float = .{
-                        .variable_id = anim.AnimController.hash_variable("character speed"),
-                        .comparison = .LessThan,
-                        .value = 0.05,
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-                anim.NodeTransition{
-                    .node = 2,
-                    .condition = anim.TransitionCondition{ .Event = .{
-                        .variable_id = anim.AnimController.hash_variable("character attack"),
-                    } },
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            }),
-        },
-        .{
-            .node = .{ .Basic = .{
-                .animation = character_animation_attack_id,
-            } },
-            .next = try alloc.dupe(anim.NodeTransition, &[_]anim.NodeTransition{
-                anim.NodeTransition{
-                    .node = 0,
-                    .condition = anim.TransitionCondition.Always,
-                    .transition_duration = 0.1,
-                    .transition_easing = es.Easing.OutLinear,
-                },
-            }),
-        },
-    };
-
-    anim_controller.clear_nodes();
-    try anim_controller.nodes.appendSlice(alloc, anim_nodes[0..]);
-
-    anim_controller.base_animation = character_animation_idle_id;
 }

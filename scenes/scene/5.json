@@ -1,35 +1,28 @@
 {
-  "serialize_id": 5,
-  "name": "sea-house",
-  "transform": {
-    "position": [
-      -2.9133875370025635,
-      -0.0018447507172822952,
-      4.306135654449463,
-      0
-    ],
-    "rotation": [
-      0,
-      0,
-      0,
-      1
-    ],
-    "scale": [
-      0.07000032067298889,
-      0.07000061869621277,
-      0.06999960541725159,
-      1
-    ]
+  "name": "character-spawner",
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 5
   },
-  "model": "default|model",
-  "physics": {
-    "None": {}
-  },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        19.85711097717285,
+        2.70137357711792,
+        -16.1717472076416,
+        1
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
   }
 }

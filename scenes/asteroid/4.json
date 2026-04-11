@@ -1,36 +1,31 @@
 {
-  "serialize_id": 4,
-  "name": "new entity",
-  "transform": {
-    "position": [
-      6.613068580627441,
-      -2.5297980308532715,
-      0.00006145238876342773,
-      1
-    ],
-    "rotation": [
-      0,
-      0.00000004502536654626965,
-      0,
-      1
-    ],
-    "scale": [
-      0.33000054955482483,
-      5.730014324188232,
-      0.5200003981590271,
-      1
-    ]
+  "name": null,
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 4
   },
-  "model": "default|cube",
-  "physics": {
-    "None": {}
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        21.973264694213867,
+        8.289013862609863,
+        26.571073532104492,
+        1
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
   },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null,
-    "cloud_volume": null
+  "entity.CloudVolumeComponent": {
+    "int": 0
   }
 }

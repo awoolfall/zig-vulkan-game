@@ -1,59 +1,6 @@
 {
-  "serialize_id": 1,
   "name": "new entity",
-  "transform": {
-    "position": [
-      2.2900164127349854,
-      4.575151443481445,
-      -8.26700496673584,
-      1
-    ],
-    "rotation": [
-      0.49347424507141113,
-      0.13401658833026886,
-      -0.07726889848709106,
-      0.855893075466156
-    ],
-    "scale": [
-      1,
-      1,
-      1,
-      1
-    ]
-  },
-  "model": null,
-  "physics": {
-    "None": {}
-  },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": {
-      "position": [
-        2.2900164127349854,
-        4.575151443481445,
-        -8.26700496673584,
-        1
-      ],
-      "direction": [
-        -0.15314731001853943,
-        0.8654330372810364,
-        -0.4770454168319702,
-        0
-      ],
-      "colour": [
-        1,
-        1,
-        1,
-        1
-      ],
-      "intensity": 1.049989938735962,
-      "umbra": 0.3490658402442932,
-      "delta_penumbra": 0.008726646192371845,
-      "light_type": "Sun"
-    },
-    "terrain": null,
-    "cloud_volume": null
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 1
   }
 }

@@ -1,36 +1,95 @@
 {
-  "serialize_id": 3,
-  "name": "new entity",
-  "transform": {
-    "position": [
-      -7.5881218910217285,
-      -2.6267330646514893,
-      0.00006145238876342773,
-      1
-    ],
-    "rotation": [
-      0,
-      0.00000004502536654626965,
-      0,
-      1
-    ],
-    "scale": [
-      0.33000054955482483,
-      5.830004692077637,
-      0.5200003981590271,
-      1
-    ]
+  "name": null,
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 3
   },
-  "model": "default|cube",
-  "physics": {
-    "None": {}
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        12.001093864440918,
+        5.2635602951049805,
+        29.449003219604492,
+        1
+      ],
+      "rotation": [
+        0.3339318633079529,
+        0,
+        0,
+        0.9425971508026123
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
   },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null,
-    "cloud_volume": null
+  "entity.HealthPointComponent": {
+    "health_points": 0
+  },
+  "entity.ParticleSystemComponent": {
+    "particle_system_settings": {
+      "max_particles": 1000,
+      "alignment": {
+        "Transform": {}
+      },
+      "shape": {
+        "Box": {}
+      },
+      "spawn_origin": [
+        12.001093864440918,
+        5.2635602951049805,
+        29.449003219604492,
+        1
+      ],
+      "spawn_offset": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "spawn_radius": 1,
+      "spawn_rate": 1,
+      "spawn_rate_variance": 0,
+      "burst_count": 1,
+      "particle_lifetime": 1,
+      "particle_lifetime_variance": 0,
+      "initial_velocity": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scale_keys": [],
+      "colour_keys": [],
+      "forces": []
+    }
+  },
+  "entity.LightComponent": {
+    "light": {
+      "position": [
+        12.001093864440918,
+        5.2635602951049805,
+        29.449003219604492,
+        1
+      ],
+      "direction": [
+        0,
+        0.6295264363288879,
+        -0.7769790291786194,
+        0
+      ],
+      "colour": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "intensity": 2.409998893737793,
+      "umbra": 0.3490658402442932,
+      "delta_penumbra": 0.008726646192371845,
+      "light_type": "Directional"
+    }
   }
 }

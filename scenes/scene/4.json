@@ -1,35 +1,54 @@
 {
-  "serialize_id": 4,
-  "name": "character-spawner",
-  "transform": {
-    "position": [
-      18.935131072998047,
-      2.449751615524292,
-      -14.585468292236328,
-      0
-    ],
-    "rotation": [
-      0,
-      0,
-      0,
-      1
-    ],
-    "scale": [
-      1,
-      1,
-      1,
-      1
-    ]
+  "name": null,
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 4
   },
-  "model": null,
-  "physics": {
-    "None": {}
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        22.662561416625977,
+        4.250607013702393,
+        2.1785998344421387,
+        1
+      ],
+      "rotation": [
+        0.357573002576828,
+        0,
+        0,
+        0.9338851571083069
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
   },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null
+  "entity.LightComponent": {
+    "light": {
+      "position": [
+        22.662561416625977,
+        4.250607013702393,
+        2.1785998344421387,
+        1
+      ],
+      "direction": [
+        0,
+        0.6678642630577087,
+        -0.7442830801010132,
+        0
+      ],
+      "colour": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "intensity": 1.0200008153915405,
+      "umbra": 0.3490658402442932,
+      "delta_penumbra": 0.008726646192371845,
+      "light_type": "Sun"
+    }
   }
 }

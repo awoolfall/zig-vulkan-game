@@ -294,11 +294,12 @@ pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
     const imui = &eng.get().imui;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
+    defer imui.pop_layout();
+    
     if (imui.get_widget(container)) |w| {
         w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
         w.children_gap = 4;
     }
-    defer imui.pop_layout();
 
     {
         _ = imui.push_form_layout_item(key ++ .{@src()});

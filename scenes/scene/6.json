@@ -1,67 +1,85 @@
 {
-  "serialize_id": 6,
-  "name": "ramp",
-  "transform": {
-    "position": [
-      19.816946029663086,
-      1.7657859325408936,
-      -6.779545307159424,
-      1
-    ],
-    "rotation": [
-      -0.2039659321308136,
-      0,
-      0,
-      0.9789782166481018
-    ],
-    "scale": [
-      7.001399993896484,
-      0.5871227979660034,
-      10.387809753417969,
-      1
-    ]
+  "name": null,
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 6
   },
-  "model": "default|cube",
-  "physics": {
-    "Body": {
-      "settings": {
-        "shape": {
-          "Box": {
-            "width": 1,
-            "height": 1,
-            "depth": 1
-          }
-        },
-        "offset_transform": {
-          "position": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1,
-            1
-          ]
-        }
-      },
-      "is_static": true,
-      "is_sensor": false
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        9.119698524475098,
+        1.2794065475463867,
+        9.13263988494873,
+        1
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
     }
   },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null
+  "entity.CameraComponent": {
+    "camera_data": {
+      "field_of_view_y": 1.024778962135315,
+      "near_field": 0.30000001192092896,
+      "far_field": 10000,
+      "mouse_sensitivity": 0.0010000000474974513,
+      "move_speed": 10,
+      "max_orbit_distance": 10,
+      "min_orbit_distance": 1,
+      "orbit_distance": 5,
+      "damping_movement": [
+        0,
+        0
+      ],
+      "damping_amount": 10,
+      "local_transform": {
+        "position": [
+          0,
+          0,
+          -1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "transform": {
+        "position": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    }
   }
 }

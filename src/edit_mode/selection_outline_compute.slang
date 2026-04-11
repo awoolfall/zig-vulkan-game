@@ -15,28 +15,17 @@ struct PushConstants {
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> push_constant;
 
-bool kernel_any(uint3 dtid) {
+bool kernel_any_but_not_all(uint3 dtid) {
+    bool any = false;
+    bool all = true;
     inline for (int i = -1; i <= 1; i++) {
         inline for (int j = -1; j <= 1; j++) {
             uint id = in_image.Load(uint3(dtid.xy + uint2(i, j), 0));
-            if (id == push_constant.selected_id) {
-                return true;
-            }
+            any = any || (id == push_constant.selected_id);
+            all = all && (id == push_constant.selected_id);
         }
     }
-    return false;
-}
-
-bool kernel_all(uint3 dtid) {
-    inline for (int i = -1; i <= 1; i++) {
-        inline for (int j = -1; j <= 1; j++) {
-            uint id = in_image.Load(uint3(dtid.xy + uint2(i, j), 0));
-            if (id != push_constant.selected_id) {
-                return false;
-            }
-        }
-    }
-    return true;
+    return (any && !all);
 }
 
 [shader("compute")]
@@ -51,6 +40,6 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
         return;
     }
 
-    bool is_selected = kernel_any(dtid) && !kernel_all(dtid);
+    bool is_selected = kernel_any_but_not_all(dtid);//  kernel_any(dtid) && !kernel_all(dtid);
     out_image.Store(dtid.xy, is_selected ? 1 : 0);
 }

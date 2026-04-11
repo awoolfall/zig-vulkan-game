@@ -228,7 +228,7 @@ pub fn deinit(self: *Self) void {
     self.render_shader_file_watcher.deinit();
 }
 
-pub fn init() !Self {
+pub fn init(settings: OceanSettings) !Self {
     const alloc = eng.get().general_allocator;
     
     var arena_alloc = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
@@ -977,7 +977,7 @@ pub fn init() !Self {
         defer cmd.deinit();
 
         try cmd.cmd_begin(.{ .one_time_submit = true, });
-        self.recreate_h0_image(&cmd, .{ .amplitude = 0.1, .wind = .{ 15.0, 0.0 } });
+        self.recreate_h0_image(&cmd, settings);
         try cmd.cmd_end();
 
         var fence = try gfx.Fence.init(.{});

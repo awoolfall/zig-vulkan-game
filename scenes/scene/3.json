@@ -1,67 +1,68 @@
 {
-  "serialize_id": 3,
-  "name": "new entity",
-  "transform": {
-    "position": [
-      0.0019706059247255325,
-      -0.00007854960858821869,
-      -0.002724871039390564,
-      1
-    ],
-    "rotation": [
-      0,
-      0,
-      0,
-      1
-    ],
-    "scale": [
-      100.02991485595703,
-      0.2500007152557373,
-      100.00015258789062,
-      1
-    ]
+  "name": null,
+  "engine.entity.SerializationComponent": {
+    "serialize_id": 3
   },
-  "model": "default|cube",
-  "physics": {
-    "Body": {
-      "settings": {
-        "shape": {
-          "Box": {
-            "width": 1,
-            "height": 1,
-            "depth": 1
-          }
-        },
-        "offset_transform": {
-          "position": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1,
-            1
-          ]
-        }
-      },
-      "is_static": true,
-      "is_sensor": false
+  "engine.entity.TransformComponent": {
+    "transform": {
+      "position": [
+        10.546886444091797,
+        -1.2061889171600342,
+        -2.7013466358184814,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        61.53999710083008,
+        0.500002384185791,
+        73.5999755859375,
+        1
+      ]
     }
   },
-  "app": {
-    "health_points": null,
-    "anim_constroller": null,
-    "particle_system_settings": null,
-    "light": null,
-    "terrain": null
+  "engine.entity.PhysicsComponent": {
+    "settings": {
+      "Body": {
+        "settings": {
+          "shape": {
+            "Box": {
+              "width": 1.0000061988830566,
+              "height": 1,
+              "depth": 1
+            }
+          },
+          "offset_transform": {
+            "position": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "is_static": true,
+        "is_sensor": false
+      }
+    }
+  },
+  "engine.entity.ModelComponent": {
+    "model": "default|cube"
   }
 }
