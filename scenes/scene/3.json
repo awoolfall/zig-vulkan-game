@@ -1,15 +1,17 @@
 {
-  "name": null,
-  "engine.entity.SerializationComponent": {
+  "name": "character-spawner",
+  "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
+    "_ecs_COMPONENT_NAME": "Serialization",
     "serialize_id": 3
   },
-  "engine.entity.TransformComponent": {
+  "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
+    "_ecs_COMPONENT_NAME": "Transform",
     "transform": {
       "position": [
-        10.546886444091797,
-        -1.2061889171600342,
-        -2.7013466358184814,
-        0
+        -31.69689178466797,
+        3.321516275405884,
+        -12.981036186218262,
+        1
       ],
       "rotation": [
         0,
@@ -18,51 +20,11 @@
         1
       ],
       "scale": [
-        61.53999710083008,
-        0.500002384185791,
-        73.5999755859375,
+        1,
+        1,
+        1,
         1
       ]
     }
-  },
-  "engine.entity.PhysicsComponent": {
-    "settings": {
-      "Body": {
-        "settings": {
-          "shape": {
-            "Box": {
-              "width": 1.0000061988830566,
-              "height": 1,
-              "depth": 1
-            }
-          },
-          "offset_transform": {
-            "position": [
-              0,
-              0,
-              0,
-              1
-            ],
-            "rotation": [
-              0,
-              0,
-              0,
-              1
-            ],
-            "scale": [
-              1,
-              1,
-              1,
-              1
-            ]
-          }
-        },
-        "is_static": true,
-        "is_sensor": false
-      }
-    }
-  },
-  "engine.entity.ModelComponent": {
-    "model": "default|cube"
   }
 }

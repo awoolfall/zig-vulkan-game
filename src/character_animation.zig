@@ -1,8 +1,8 @@
 const std = @import("std");
 const eng = @import("engine");
 const assets = eng.assets;
-const anim = eng.animation;
-const es = eng.easings;
+const anim = eng.animation_controller;
+const es = eng.util.easings;
 
 pub fn setup_character_anim_controller(anim_controller: *anim.AnimController) !void {
     const engine = eng.get();

@@ -198,7 +198,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     errdefer framebuffer.deinit();
 
     // compute shader file watcher
-    const compute_path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
+    const compute_path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
     defer compute_path.deinit();
 
     const compute_path_resolved = try compute_path.resolve_path(alloc);
@@ -208,7 +208,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     errdefer compute_shader_file_watcher.deinit();
 
     // render shader file watcher
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);
@@ -252,7 +252,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
 fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);
@@ -305,7 +305,7 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
 fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);

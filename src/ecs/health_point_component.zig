@@ -18,18 +18,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     return .{};
 }
 
-pub fn serialize(alloc: std.mem.Allocator, value: Self) !std.json.Value {
-    var object = std.json.ObjectMap.init(alloc);
-    errdefer object.deinit();
-
-    try object.put("health_points", try sr.serialize_value(i32, alloc, value.health_points));
-
-    return std.json.Value { .object = object };
+pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
+    _ = entity;
+    try object.put("health_points", try sr.serialize_value(i32, alloc, self.health_points));
 }
 
-pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
+pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
+    _ = entity;
     var component: Self = .{};
-    const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
     component.health_points = try sr.deserialize_value(i32, alloc, object.get("health_points"));
 

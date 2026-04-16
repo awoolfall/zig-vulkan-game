@@ -5,7 +5,6 @@ const eng = @import("engine");
 const zm = eng.zmath;
 const ms = eng.mesh;
 const gfx = eng.gfx;
-const path = eng.path;
 const cm = eng.camera;
 const sr = eng.serialize;
 const SelectionTextures = @import("selection_textures.zig");
@@ -241,7 +240,7 @@ pub fn init() !Self {
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
-    const shader_path = try path.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.slang"});
+    const shader_path = try eng.util.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.slang"});
     defer shader_path.deinit();
 
     const full_shader_path = try shader_path.resolve_path(eng.get().frame_allocator);
@@ -584,7 +583,7 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
     });
     defer static_vertex_input.deinit();
     
-    const shader_path = try path.Path.init(alloc, .{.ExeRelative = "../../src/shader.slang"});
+    const shader_path = try eng.util.Path.init(alloc, .{.ExeRelative = "../../src/shader.slang"});
     defer shader_path.deinit();
 
     const resolved_shader_path = try shader_path.resolve_path(alloc);

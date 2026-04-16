@@ -235,7 +235,7 @@ pub fn init() !Self {
     });
     errdefer sampler.deinit();
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);
@@ -273,7 +273,7 @@ pub fn init() !Self {
 fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);

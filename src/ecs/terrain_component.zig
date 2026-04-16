@@ -23,18 +23,13 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     };
 }
 
-pub fn serialize(alloc: std.mem.Allocator, value: Self) !std.json.Value {
-    var object = std.json.ObjectMap.init(alloc);
-    errdefer object.deinit();
-
-    try object.put("terrain", try sr.serialize_value(Terrain, alloc, value.terrain));
-
-    return std.json.Value { .object = object };
+pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
+    _ = entity;
+    try object.put("terrain", try sr.serialize_value(Terrain, alloc, self.terrain));
 }
 
-pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
-    const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
+pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
+    _ = entity;
     const terrain = try sr.deserialize_value(Terrain, alloc, object.get("terrain"));
     errdefer terrain.deinit();
 

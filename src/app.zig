@@ -652,7 +652,7 @@ pub fn push_model_for_rendering(
     entity: eng.ecs.Entity,
     model: assets.ModelAssetId,
     transform: Transform,
-    maybe_anim_controller: ?*anim.AnimController,
+    maybe_anim_controller: ?*eng.animation_controller.AnimController,
 ) !void {
     const engine = eng.get();
 

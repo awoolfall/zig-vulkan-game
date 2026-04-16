@@ -886,7 +886,7 @@ pub fn init(settings: OceanSettings) !Self {
     errdefer framebuffer.deinit();
 
     // render shader file watcher
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);
@@ -1043,7 +1043,7 @@ fn init_fft_rw_image_and_view(comptime side_length: u32, alloc: std.mem.Allocato
 fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.path.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
+    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
     defer path.deinit();
 
     const path_resolved = try path.resolve_path(alloc);

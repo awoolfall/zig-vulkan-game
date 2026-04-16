@@ -130,26 +130,40 @@ pub fn player_control_system() !void {
 
             const character = physics_component.runtime_data.CharacterVirtual.virtual;
 
-            var character_velocity = zm.loadArr3(character.getLinearVelocity());
+            var character_velocity = physics_component.velocity;// zm.loadArr3(character.getLinearVelocity());
 
             if (character_is_supported(character)) {
                 // remove any gravity
-                character_velocity[1] = 0.0;
+                if (character_velocity[1] < 0.0) {
+                    character_velocity[1] = 0.0;
+                }
 
                 // apply supported movement
                 if (zm.length3(world_movement_direction)[0] > 0.0) {
-                    character_velocity = zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed), 0.5);
+                    character_velocity = 
+                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) + 
+                        (zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed), 0.5) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                 } else {
                     // apply friction TODO FIX
-                    character_velocity = zm.lerp(character_velocity, zm.f32x4s(0.0), 0.5);
+                    character_velocity = 
+                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) + 
+                        (zm.lerp(character_velocity, zm.f32x4s(0.0), 0.5) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                 }
             } else {
                 // if not supported then apply gravity
                 character_velocity = character_velocity
                     + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.physics.PhysicsSystem.UpdateRateS * eng.physics.PhysicsSystem.UpdateRateS);
             }
+            
+            if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.Space)) {
+                if (character_is_supported(character)) {
+                    const jump_velocity = 10.0;
+                    character_velocity[1] = jump_velocity;
+                }
+            }
 
-            character.setLinearVelocity(zm.vecToArr3(character_velocity));
+            physics_component.velocity = character_velocity;
+            //character.setLinearVelocity(zm.vecToArr3(character_velocity));
 
             // Rotate character model to match the input desired direction
             // If no input desired direction (normalized to nan) then remain in last rotation

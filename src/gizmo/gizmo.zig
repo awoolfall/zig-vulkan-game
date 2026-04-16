@@ -111,7 +111,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer selection_textures.deinit();
     
     // Shaders
-    const shader_path = try eng.path.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
+    const shader_path = try eng.util.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
     defer shader_path.deinit();
 
     const shader_resolved_path = try shader_path.resolve_path(alloc);

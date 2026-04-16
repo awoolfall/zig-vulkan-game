@@ -1,0 +1,57 @@
+{
+  "name": "sun",
+  "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
+    "_ecs_COMPONENT_NAME": "Serialization",
+    "serialize_id": 2
+  },
+  "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
+    "_ecs_COMPONENT_NAME": "Transform",
+    "transform": {
+      "position": [
+        -24.139266967773438,
+        8.266812324523926,
+        19.664405822753906,
+        1
+      ],
+      "rotation": [
+        -0.4891839027404785,
+        0,
+        0,
+        -0.8721806406974792
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  },
+  "c9cb8354-6c2c-47ee-9d13-e9ef0a5e8ad5": {
+    "_ecs_COMPONENT_NAME": "Light",
+    "light": {
+      "position": [
+        -24.139266967773438,
+        8.266812324523926,
+        19.664405822753906,
+        1
+      ],
+      "direction": [
+        0,
+        0.8533134460449219,
+        -0.5213981866836548,
+        0
+      ],
+      "colour": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "intensity": 1.0899999141693115,
+      "umbra": 0.3490658402442932,
+      "delta_penumbra": 0.008726646192371845,
+      "light_type": "Sun"
+    }
+  }
+}

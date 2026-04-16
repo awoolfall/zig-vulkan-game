@@ -18,19 +18,17 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     return .{};
 }
 
-pub fn serialize(alloc: std.mem.Allocator, value: Self) !std.json.Value {
-    var object = std.json.ObjectMap.init(alloc);
-    errdefer object.deinit();
-
-    _ = value;
-
-    return std.json.Value { .object = object };
+pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
+    _ = self;
+    _ = alloc;
+    _ = entity;
+    _ = object;
 }
 
-pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
+pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     const component: Self = .{};
-    const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
 
+    _ = entity;
     _ = alloc;
     _ = object;
 

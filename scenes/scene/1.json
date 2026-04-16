@@ -1,6 +1,72 @@
 {
-  "name": "new entity",
-  "engine.entity.SerializationComponent": {
+  "name": "floor",
+  "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
+    "_ecs_COMPONENT_NAME": "Serialization",
     "serialize_id": 1
+  },
+  "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
+    "_ecs_COMPONENT_NAME": "Transform",
+    "transform": {
+      "position": [
+        0.8059861660003662,
+        -2.111210346221924,
+        -3.2137274742126465,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        100.199951171875,
+        1,
+        100.06999206542969,
+        1
+      ]
+    }
+  },
+  "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
+    "_ecs_COMPONENT_NAME": "Model",
+    "model": "default|cube"
+  },
+  "71e2a14f-8a22-43ee-aed4-65592fe637ea": {
+    "_ecs_COMPONENT_NAME": "Physics",
+    "settings": {
+      "Body": {
+        "settings": {
+          "shape": {
+            "Box": {
+              "width": 1,
+              "height": 1,
+              "depth": 1
+            }
+          },
+          "offset_transform": {
+            "position": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "is_static": true,
+        "is_sensor": false
+      }
+    }
   }
 }

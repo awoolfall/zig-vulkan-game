@@ -1,54 +1,72 @@
 {
-  "name": null,
-  "engine.entity.SerializationComponent": {
+  "name": "ramp",
+  "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
+    "_ecs_COMPONENT_NAME": "Serialization",
     "serialize_id": 4
   },
-  "engine.entity.TransformComponent": {
+  "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
+    "_ecs_COMPONENT_NAME": "Transform",
     "transform": {
       "position": [
-        22.662561416625977,
-        4.250607013702393,
-        2.1785998344421387,
-        1
+        -8.897348403930664,
+        -0.8590675592422485,
+        -5.66020393371582,
+        0
       ],
       "rotation": [
-        0.357573002576828,
         0,
         0,
-        0.9338851571083069
+        0.14165103435516357,
+        0.9899166226387024
       ],
       "scale": [
-        1,
-        1,
-        1,
+        8.050004959106445,
+        0.5800004005432129,
+        3.759998083114624,
         1
       ]
     }
   },
-  "entity.LightComponent": {
-    "light": {
-      "position": [
-        22.662561416625977,
-        4.250607013702393,
-        2.1785998344421387,
-        1
-      ],
-      "direction": [
-        0,
-        0.6678642630577087,
-        -0.7442830801010132,
-        0
-      ],
-      "colour": [
-        1,
-        1,
-        1,
-        1
-      ],
-      "intensity": 1.0200008153915405,
-      "umbra": 0.3490658402442932,
-      "delta_penumbra": 0.008726646192371845,
-      "light_type": "Sun"
+  "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
+    "_ecs_COMPONENT_NAME": "Model",
+    "model": "default|cube"
+  },
+  "71e2a14f-8a22-43ee-aed4-65592fe637ea": {
+    "_ecs_COMPONENT_NAME": "Physics",
+    "settings": {
+      "Body": {
+        "settings": {
+          "shape": {
+            "Box": {
+              "width": 1,
+              "height": 1,
+              "depth": 1
+            }
+          },
+          "offset_transform": {
+            "position": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "is_static": true,
+        "is_sensor": false
+      }
     }
   }
 }

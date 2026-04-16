@@ -7,14 +7,14 @@ pub const COMPONENT_NAME = "Animation Controller";
 
 const Self = @This();
 
-anim_controller: eng.animation.AnimController,
+anim_controller: eng.animation_controller.AnimController,
 
 pub fn deinit(self: *Self) void {
     self.anim_controller.deinit();
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
-    const anim_controller = try eng.animation.AnimController.init(alloc);
+    const anim_controller = try eng.animation_controller.AnimController.init(alloc);
     errdefer anim_controller.deinit();
 
     return .{
@@ -22,19 +22,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     };
 }
 
-pub fn serialize(alloc: std.mem.Allocator, value: Self) !std.json.Value {
-    var object = std.json.ObjectMap.init(alloc);
-    errdefer object.deinit();
-
-    try object.put("anim_controller", try sr.serialize_value(eng.animation.AnimController, alloc, value.anim_controller));
-
-    return std.json.Value { .object = object };
+pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
+    _ = entity;
+    try object.put("anim_controller", try sr.serialize_value(eng.animation_controller.AnimController, alloc, self.anim_controller));
 }
 
-pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
-    const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
-    const anim_controller = try sr.deserialize_value(eng.animation.AnimController, alloc, object.get("anim_controller"));
+pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
+    _ = entity;
+    const anim_controller = try sr.deserialize_value(eng.animation_controller.AnimController, alloc, object.get("anim_controller"));
     errdefer anim_controller.deinit();
 
     return Self {
