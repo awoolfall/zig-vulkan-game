@@ -161,7 +161,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .name = "selection",
             .format = gf.ImageFormat.R32_Uint,
             .blend_type = .None,
-            .clear_value = zm.f32x4s(0.0),
+            .clear_value = gf.ClearValue { .u32x4 = [4]u32{0, 0, 0, 0} },
             .load_op = .Clear,
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
@@ -174,7 +174,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .final_layout = .DepthStencilAttachmentOptimal,
             .load_op = .Clear,
             .stencil_load_op = .Clear,
-            .clear_value = zm.f32x4s(0.0),
+            .clear_value = gf.ClearValue { .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
         },
     };
 

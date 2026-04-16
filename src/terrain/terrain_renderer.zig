@@ -190,7 +190,7 @@ pub fn init() !Self {
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
             .load_op = .Clear,
-            .clear_value = zm.f32x4s(-1.0),
+            .clear_value = gf.ClearValue { .f32x4 = zm.f32x4s(-1.0) },
         },
     };
 

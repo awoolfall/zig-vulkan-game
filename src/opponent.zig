@@ -1,54 +1,8 @@
 const std = @import("std");
 const eng = @import("engine");
 const zm = eng.zmath;
-const entity_components = @import("entity.zig");
-const player_component = @import("player_character.zig");
+const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
-
-pub const OpponentCharacterComponent = struct {
-    const SelfComponent = @This();
-
-    movement_speed: f32 = 4.0,
-
-    pub fn deinit(self: *SelfComponent) void {
-        _ = self;
-    }
-
-    pub fn init(alloc: std.mem.Allocator) !SelfComponent {
-        _ = alloc;
-        return .{};
-    }
-
-    pub fn serialize(alloc: std.mem.Allocator, value: SelfComponent) !std.json.Value {
-        var object = std.json.ObjectMap.init(alloc);
-        errdefer object.deinit();
-
-        _ = value;
-
-        return std.json.Value { .object = object };
-    }
-
-    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !SelfComponent {
-        const component: SelfComponent = .{};
-        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
-        _ = alloc;
-        _ = object;
-
-        return component;
-    }
-
-    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
-        _ = imui.push_layout(.Y, key ++ .{@src()});
-        defer imui.pop_layout();
-
-        {
-            // TODO
-            _ = entity;
-            _ = component;
-        }
-    }
-};
 
 pub fn spawn_opponent_character(transform: eng.Transform) !eng.ecs.Entity {
     const chara_shape = eng.physics.ShapeSettings {
@@ -77,18 +31,18 @@ pub fn spawn_opponent_character(transform: eng.Transform) !eng.ecs.Entity {
 
     try eng.get().ecs.set_entity_name(new_entity, "opponent entity");
 
-    _ = try eng.get().ecs.add_component(OpponentCharacterComponent, new_entity);
+    _ = try eng.get().ecs.add_component(ecs.OpponentCharacterComponent, new_entity);
 
-    const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, new_entity);
+    const transform_component = try eng.get().ecs.add_component(eng.ecs.TransformComponent, new_entity);
     transform_component.transform = transform;
 
-    const model_component = try eng.get().ecs.add_component(eng.entity.ModelComponent, new_entity);
+    const model_component = try eng.get().ecs.add_component(eng.ecs.ModelComponent, new_entity);
     model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
 
-    const anim_component = try eng.get().ecs.add_component(entity_components.AnimControllerComponent, new_entity);
+    const anim_component = try eng.get().ecs.add_component(ecs.AnimControllerComponent, new_entity);
     try character_animation.setup_character_anim_controller(&anim_component.anim_controller);
 
-    const physics_component = try eng.get().ecs.add_component(eng.entity.PhysicsComponent, new_entity);
+    const physics_component = try eng.get().ecs.add_component(eng.ecs.PhysicsComponent, new_entity);
     physics_component.settings = .{ .CharacterVirtual = .{
         .settings = character_virtual_settings,
         .create_character = true,
@@ -96,23 +50,23 @@ pub fn spawn_opponent_character(transform: eng.Transform) !eng.ecs.Entity {
     } };
     try physics_component.update_runtime_data(new_entity);
 
-    const health_points_component = try eng.get().ecs.add_component(entity_components.HealthPointComponent, new_entity);
+    const health_points_component = try eng.get().ecs.add_component(ecs.HealthPointComponent, new_entity);
     health_points_component.health_points = 100;
 
     return new_entity;
 }
 
-pub fn opponent_character_update() !void {
-    var player_query = eng.get().ecs.query_iterator(.{ player_component.PlayerCharacterComponent, eng.entity.TransformComponent });
-    const player_character_component: *player_component.PlayerCharacterComponent,
-    const player_transform_component: *eng.entity.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
+pub fn opponent_behaviour_system() !void {
+    var player_query = eng.get().ecs.query_iterator(.{ ecs.PlayerCharacterComponent, eng.ecs.TransformComponent });
+    const player_character_component: *ecs.PlayerCharacterComponent,
+    const player_transform_component: *eng.ecs.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
     _ = player_character_component;
 
-    var query = eng.get().ecs.query_iterator(.{ OpponentCharacterComponent, eng.entity.TransformComponent, eng.entity.PhysicsComponent });
+    var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent });
     while (query.next()) |components| {
-        const opponent_component: *OpponentCharacterComponent,
-        const transform_component: *eng.entity.TransformComponent,
-        const physics_component: *eng.entity.PhysicsComponent = components;
+        const opponent_component: *ecs.OpponentCharacterComponent,
+        const transform_component: *eng.ecs.TransformComponent,
+        const physics_component: *eng.ecs.PhysicsComponent = components;
 
         var desired_movement_direction = zm.f32x4s(0.0);
 

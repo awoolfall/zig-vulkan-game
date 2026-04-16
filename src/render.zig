@@ -397,7 +397,7 @@ pub fn init() !Self {
             .name = "colour_opaque",
             .format = gfx.GfxState.hdr_format,
             .load_op = .Clear,
-            .clear_value = zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)),
+            .clear_value = gfx.ClearValue{ .f32x4 = zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)) },
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
@@ -413,7 +413,7 @@ pub fn init() !Self {
             .name = "entity_clear",
             .format = gfx.ImageFormat.R32_Uint,
             .load_op = .Clear,
-            .clear_value = zm.f32x4s(0.0),
+            .clear_value = gfx.ClearValue { .u32x4 = [1]u32 {std.math.maxInt(u32)} ** 4 },
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
@@ -432,6 +432,7 @@ pub fn init() !Self {
             .stencil_load_op = .Clear,
             .initial_layout = .Undefined,
             .final_layout = .DepthStencilAttachmentOptimal,
+            .clear_value = gfx.ClearValue { .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
         },
     };
 

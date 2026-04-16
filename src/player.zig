@@ -1,54 +1,9 @@
 const std = @import("std");
 const eng = @import("engine");
-const entity_components = @import("entity.zig");
 const zm = eng.zmath;
-const KeyCode = eng.input.KeyCode;
+const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
-
-pub const PlayerCharacterComponent = struct {
-    const SelfComponent = @This();
-
-    movement_speed: f32 = 4.0,
-
-    pub fn deinit(self: *SelfComponent) void {
-        _ = self;
-    }
-
-    pub fn init(alloc: std.mem.Allocator) !SelfComponent {
-        _ = alloc;
-        return .{};
-    }
-
-    pub fn serialize(alloc: std.mem.Allocator, value: SelfComponent) !std.json.Value {
-        var object = std.json.ObjectMap.init(alloc);
-        errdefer object.deinit();
-
-        _ = value;
-
-        return std.json.Value { .object = object };
-    }
-
-    pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !SelfComponent {
-        const component: SelfComponent = .{};
-        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType, };
-
-        _ = alloc;
-        _ = object;
-
-        return component;
-    }
-
-    pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *SelfComponent, key: anytype) !void {
-        _ = imui.push_layout(.Y, key ++ .{@src()});
-        defer imui.pop_layout();
-
-        {
-            // TODO
-            _ = entity;
-            _ = component;
-        }
-    }
-};
+const KeyCode = eng.input.KeyCode;
 
 pub fn spawn_character(transform: eng.Transform) !eng.ecs.Entity {
     const chara_shape = eng.physics.ShapeSettings {
@@ -78,16 +33,16 @@ pub fn spawn_character(transform: eng.Transform) !eng.ecs.Entity {
     {
         try eng.get().ecs.set_entity_name(new_character_entity, "character entity");
 
-        const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, new_character_entity);
+        const transform_component = try eng.get().ecs.add_component(eng.ecs.TransformComponent, new_character_entity);
         transform_component.transform = transform;
 
-        const model_component = try eng.get().ecs.add_component(eng.entity.ModelComponent, new_character_entity);
+        const model_component = try eng.get().ecs.add_component(eng.ecs.ModelComponent, new_character_entity);
         model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
 
-        const anim_component = try eng.get().ecs.add_component(entity_components.AnimControllerComponent, new_character_entity);
+        const anim_component = try eng.get().ecs.add_component(ecs.AnimControllerComponent, new_character_entity);
         try character_animation.setup_character_anim_controller(&anim_component.anim_controller);
 
-        const physics_component = try eng.get().ecs.add_component(eng.entity.PhysicsComponent, new_character_entity);
+        const physics_component = try eng.get().ecs.add_component(eng.ecs.PhysicsComponent, new_character_entity);
         physics_component.settings = .{ .CharacterVirtual = .{
             .settings = character_virtual_settings,
             .create_character = true,
@@ -95,35 +50,35 @@ pub fn spawn_character(transform: eng.Transform) !eng.ecs.Entity {
         } };
         try physics_component.update_runtime_data(new_character_entity);
 
-        const health_point_component = try eng.get().ecs.add_component(entity_components.HealthPointComponent, new_character_entity);
+        const health_point_component = try eng.get().ecs.add_component(ecs.HealthPointComponent, new_character_entity);
         health_point_component.health_points = 100;
 
-        _ = try eng.get().ecs.add_component(PlayerCharacterComponent, new_character_entity);
+        _ = try eng.get().ecs.add_component(ecs.PlayerCharacterComponent, new_character_entity);
     }
 
     return new_character_entity;
 }
 
-pub fn player_control_update() !void {
+pub fn player_control_system() !void {
     const engine = eng.get();
 
-    var camera_query = engine.ecs.query_iterator(.{ entity_components.CameraComponent, eng.entity.TransformComponent });
-    const camera_component: *entity_components.CameraComponent,
-    const camera_transform_component: *eng.entity.TransformComponent = camera_query.next() orelse return error.NoMainCamera;
+    var camera_query = engine.ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
+    const camera_component: *ecs.CameraComponent,
+    const camera_transform_component: *eng.ecs.TransformComponent = camera_query.next() orelse return error.NoMainCamera;
     _ = camera_component;
 
     var query = engine.ecs.query_iterator(.{
-        PlayerCharacterComponent,
-        eng.entity.TransformComponent,
-        eng.entity.PhysicsComponent,
-        entity_components.AnimControllerComponent,
+        ecs.PlayerCharacterComponent,
+        eng.ecs.TransformComponent,
+        eng.ecs.PhysicsComponent,
+        ecs.AnimControllerComponent,
     });
 
     while (query.next()) |components| {
-        const player_character_component: *PlayerCharacterComponent,
-        const transform_component: *eng.entity.TransformComponent,
-        const physics_component: *eng.entity.PhysicsComponent,
-        const anim_controller_component: *entity_components.AnimControllerComponent = components;
+        const player_character_component: *ecs.PlayerCharacterComponent,
+        const transform_component: *eng.ecs.TransformComponent,
+        const physics_component: *eng.ecs.PhysicsComponent,
+        const anim_controller_component: *ecs.AnimControllerComponent = components;
 
         // Input to move the model around
         {
@@ -269,7 +224,7 @@ pub fn player_control_update() !void {
                         const hit_entity_name = eng.get().ecs.get_entity_name(hit_entity) orelse "unnamed";
                         std.log.info("- {s}", .{ hit_entity_name });
 
-                        const healthpoint_component = eng.get().ecs.get_component(entity_components.HealthPointComponent, hit_entity) orelse break :hitblk;
+                        const healthpoint_component = eng.get().ecs.get_component(ecs.HealthPointComponent, hit_entity) orelse break :hitblk;
                         healthpoint_component.health_points -= 10;
 
                         if (healthpoint_component.health_points <= 0) {

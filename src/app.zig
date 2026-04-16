@@ -18,29 +18,19 @@ const assets = eng.assets;
 const sr = eng.serialize;
 const FontEnum = eng.ui.FontEnum;
 
+const ecs = @import("ecs.zig");
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
 const Ocean = @import("ocean/ocean.zig");
 const Clouds = @import("clouds/clouds.zig");
 const EditMode = @import("edit_mode.zig");
-const player_character = @import("player_character.zig");
-const opponent_character = @import("opponent_character.zig");
+const player = @import("player.zig");
+const opponent = @import("opponent.zig");
 
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
 
-pub const entity_components = @import("entity.zig");
-pub const EntityComponents = .{
-    entity_components.HealthPointComponent,
-    entity_components.AnimControllerComponent,
-    entity_components.ParticleSystemComponent,
-    entity_components.LightComponent,
-    entity_components.TerrainComponent,
-    entity_components.CloudVolumeComponent,
-    entity_components.CameraComponent,
-    player_character.PlayerCharacterComponent,
-    opponent_character.OpponentCharacterComponent,
-};
+pub const EntityComponents = ecs.EntityComponents;
 
 character_entity: ?eng.ecs.Entity = null,
 
@@ -233,9 +223,9 @@ fn update(self: *Self) !void {
                 engine.time.time_scale = 0.01;
 
                 blk: {
-                    var camera_query = eng.get().ecs.query_iterator(.{ entity_components.CameraComponent, eng.entity.TransformComponent });
-                    const camera_component: *entity_components.CameraComponent,
-                    const camera_transform: *eng.entity.TransformComponent = camera_query.next() orelse break :blk;
+                    var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
+                    const camera_component: *ecs.CameraComponent,
+                    const camera_transform: *eng.ecs.TransformComponent = camera_query.next() orelse break :blk;
 
                     _ = camera_component;
                     self.edit_mode.editor_camera.transform = camera_transform.transform;
@@ -261,10 +251,10 @@ fn update(self: *Self) !void {
                 if (self.character_entity == null) {
                     // spawn character
                     const character_spawner_entity = eng.get().ecs.find_first_entity_with_name("character-spawner") orelse break :blk;
-                    const spawner_transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, character_spawner_entity) orelse break :blk;
+                    const spawner_transform_component = eng.get().ecs.get_component(eng.ecs.TransformComponent, character_spawner_entity) orelse break :blk;
                     const character_spawner_transform = spawner_transform_component.transform;
 
-                    self.character_entity = player_character.spawn_character(eng.Transform {
+                    self.character_entity = player.spawn_character(eng.Transform {
                         .position = character_spawner_transform.position,
                         .rotation = character_spawner_transform.rotation,
                     }) catch |err| {
@@ -275,13 +265,13 @@ fn update(self: *Self) !void {
             }
 
             blk: {
-                if (eng.get().ecs.get_component_count(opponent_character.OpponentCharacterComponent) == 0) {
+                if (eng.get().ecs.get_component_count(ecs.OpponentCharacterComponent) == 0) {
                     // spawn character
                     const spawner_entity = eng.get().ecs.find_first_entity_with_name("opponent-spawner") orelse break :blk;
-                    const spawner_transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, spawner_entity) orelse break :blk;
+                    const spawner_transform_component = eng.get().ecs.get_component(eng.ecs.TransformComponent, spawner_entity) orelse break :blk;
                     const spawner_transform = spawner_transform_component.transform;
 
-                    _ = opponent_character.spawn_opponent_character(.{
+                    _ = opponent.spawn_opponent_character(.{
                         .position = spawner_transform.position,
                         .rotation = spawner_transform.rotation,
                     }) catch |err| {
@@ -291,18 +281,18 @@ fn update(self: *Self) !void {
                 }
             }
 
-            player_character.player_control_update() catch |err| {
+            player.player_control_system() catch |err| {
                 std.log.err("Unable to update player control: {}", .{err});
             };
 
-            opponent_character.opponent_character_update() catch |err| {
+            opponent.opponent_behaviour_system() catch |err| {
                 std.log.err("Unable to update opponent characters: {}", .{err});
             };
 
             var vel_buf: [128]u8 = [_]u8{0} ** 128;
             var vel_text: []u8 = vel_buf[0..0];
             if (self.character_entity) |character_entity| blk: {
-                const physics_component = eng.get().ecs.get_component(eng.entity.PhysicsComponent, character_entity) orelse break :blk;
+                const physics_component = eng.get().ecs.get_component(eng.ecs.PhysicsComponent, character_entity) orelse break :blk;
                 const character = physics_component.runtime_data.CharacterVirtual.virtual;
                 const character_velocity = zm.loadArr3(character.getLinearVelocity());
                 vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}", .{
@@ -324,9 +314,9 @@ fn update(self: *Self) !void {
 
             // update camera position to track the character entity's visual location
             blk: {
-                var camera_query = eng.get().ecs.query_iterator(.{ entity_components.CameraComponent, eng.entity.TransformComponent });
-                const camera_component: *entity_components.CameraComponent,
-                const camera_transform: *eng.entity.TransformComponent = camera_query.next() orelse break :blk;
+                var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
+                const camera_component: *ecs.CameraComponent,
+                const camera_transform: *eng.ecs.TransformComponent = camera_query.next() orelse break :blk;
 
                 var target_pos = zm.f32x4s(0.0);
                 if (self.character_entity) |character_entity| {
@@ -345,10 +335,10 @@ fn update(self: *Self) !void {
     }
 
     // update particle systems
-    var particle_system_iter = engine.ecs.query_iterator(.{ eng.entity.TransformComponent, entity_components.ParticleSystemComponent });
+    var particle_system_iter = engine.ecs.query_iterator(.{ eng.ecs.TransformComponent, ecs.ParticleSystemComponent });
     while (particle_system_iter.next()) |components| {
-        const entity_transform: *eng.entity.TransformComponent,
-        const entity_particle_system: *entity_components.ParticleSystemComponent = components;
+        const entity_transform: *eng.ecs.TransformComponent,
+        const entity_particle_system: *ecs.ParticleSystemComponent = components;
 
         entity_particle_system.particle_system.settings.spawn_origin = entity_transform.transform.position;
         entity_particle_system.particle_system.update(&engine.time);
@@ -472,10 +462,10 @@ fn update(self: *Self) !void {
     defer self.standard_renderer.clear();
 
     // render terrains
-    var terrain_query_iterator = eng.get().ecs.query_iterator(.{ entity_components.TerrainComponent, eng.entity.TransformComponent });
+    var terrain_query_iterator = eng.get().ecs.query_iterator(.{ ecs.TerrainComponent, eng.ecs.TransformComponent });
     while (terrain_query_iterator.next()) |components| {
-        const terrain_component: *entity_components.TerrainComponent,
-        const transform_component: *eng.entity.TransformComponent = components;
+        const terrain_component: *ecs.TerrainComponent,
+        const transform_component: *eng.ecs.TransformComponent = components;
 
         self.terrain_renderer.render(
             cmd,
@@ -487,10 +477,10 @@ fn update(self: *Self) !void {
     }
 
     // push cloud volumes for rendering
-    var cloud_volume_query_iterator = eng.get().ecs.query_iterator(.{ entity_components.CloudVolumeComponent, eng.entity.TransformComponent });
+    var cloud_volume_query_iterator = eng.get().ecs.query_iterator(.{ ecs.CloudVolumeComponent, eng.ecs.TransformComponent });
     while (cloud_volume_query_iterator.next()) |components| {
         _, //const cloud_volume_component: *entity_components.CloudVolumeComponent,
-        const transform_component: *eng.entity.TransformComponent = components;
+        const transform_component: *eng.ecs.TransformComponent = components;
 
         self.clouds.push_cloud_volume(.{
             .min = zm.vecToArr3(transform_component.transform.position - transform_component.transform.scale),
@@ -608,11 +598,11 @@ pub fn push_all_entities_for_rendering(
         
         // push entity model for rendering
         blk: {
-            const defualt_model_component = eng.entity.ModelComponent {
+            const defualt_model_component = eng.ecs.ModelComponent {
                 .model = try assets.ModelAssetId.from_string_identifier("core|sphere"),
             };
-            const model_component = eng.get().ecs.get_component(eng.entity.ModelComponent, entity) orelse (if (self.current_mode == .Edit) &defualt_model_component else break :blk);
-            const maybe_anim_component = eng.get().ecs.get_component(entity_components.AnimControllerComponent, entity);
+            const model_component = eng.get().ecs.get_component(eng.ecs.ModelComponent, entity) orelse (if (self.current_mode == .Edit) &defualt_model_component else break :blk);
+            const maybe_anim_component = eng.get().ecs.get_component(ecs.AnimControllerComponent, entity);
 
             const transform = eng.get().physics.calculate_entity_visual_transform(entity);
             const maybe_anim_controller = if (maybe_anim_component) |anim_controller_component| &anim_controller_component.anim_controller else null;
@@ -631,8 +621,8 @@ pub fn push_all_entities_for_rendering(
 
         // push entity light for rendering
         blk: {
-            const light_component = eng.get().ecs.get_component(entity_components.LightComponent, entity) orelse break :blk;
-            const transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, entity) orelse break :blk;
+            const light_component = eng.get().ecs.get_component(ecs.LightComponent, entity) orelse break :blk;
+            const transform_component = eng.get().ecs.get_component(eng.ecs.TransformComponent, entity) orelse break :blk;
 
             light_component.light.position = transform_component.transform.position;
             light_component.light.direction = transform_component.transform.forward_direction();
@@ -647,7 +637,7 @@ pub fn push_all_entities_for_rendering(
 
         // push entity particle system for rendering
         blk: {
-            const particle_system_component = eng.get().ecs.get_component(entity_components.ParticleSystemComponent, entity) orelse break :blk;
+            const particle_system_component = eng.get().ecs.get_component(ecs.ParticleSystemComponent, entity) orelse break :blk;
             self.particles_renderer.push_particle_system(&particle_system_component.particle_system) catch |err| {
                 std.log.warn("Failed to push entity particle system for rendering: {}", .{err});
                 break :blk;

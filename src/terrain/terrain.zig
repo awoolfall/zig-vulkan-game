@@ -320,7 +320,7 @@ pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
 
         if (enable_physics_checkbox.clicked) {
             if (physics_checkbox) {
-                const transform: Transform = if (eng.get().ecs.get_component(eng.entity.TransformComponent, entity)) |tc| tc.transform else .{};
+                const transform: Transform = if (eng.get().ecs.get_component(eng.ecs.TransformComponent, entity)) |tc| tc.transform else .{};
                 self.generate_heightmap_physics(transform) catch |err| {
                     std.log.err("Failed to generate heightmap physics: {}", .{err});
                 };

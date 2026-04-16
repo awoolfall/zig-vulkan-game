@@ -22,7 +22,7 @@ const Imui = eng.ui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
 const SelectionOutlineRenderer = @import("edit_mode/selection_outline.zig");
 
-const entity_components = @import("entity.zig");
+const ecs = @import("ecs.zig");
 
 const EditorMode = enum {
     SceneEditor,
@@ -90,7 +90,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
         // focus camera on selected entity
         if (eng.get().input.get_key_down(KeyCode.F)) blk: {
             if (self.selected_entity) |si| {
-                const selected_entity_transform = eng.get().ecs.get_component(eng.entity.TransformComponent, si) orelse break :blk;
+                const selected_entity_transform = eng.get().ecs.get_component(eng.ecs.TransformComponent, si) orelse break :blk;
 
                 self.editor_camera.transform.position = 
                     selected_entity_transform.transform.position -
@@ -116,7 +116,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const entity_transform = eng.get().ecs.get_component(eng.entity.TransformComponent, selected_entity) orelse break :blk;
+                const entity_transform = eng.get().ecs.get_component(eng.ecs.TransformComponent, selected_entity) orelse break :blk;
                 if (self.gizmo.update(&entity_transform.transform)) {
                     interaction_available = false;
                 }
@@ -125,7 +125,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const entity_terrain = eng.get().ecs.get_component(entity_components.TerrainComponent, selected_entity) orelse break :blk;
+                const entity_terrain = eng.get().ecs.get_component(ecs.TerrainComponent, selected_entity) orelse break :blk;
 
                 const modified = entity_terrain.terrain.edit_terrain(terrain_renderer) catch |err| {
                     std.log.err("Failed to edit terrain: {}", .{err});
@@ -145,7 +145,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terra
                 return;
             };
 
-            if (selection_entity_id == 0) {
+            if (selection_entity_id == std.math.maxInt(u32)) {
                 self.selected_entity = null;
             } else if (self.selected_entity != null and self.selected_entity.?.idx.index == selection_entity_id) {
                 self.selected_entity = null;
@@ -346,7 +346,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
 pub fn render_cmd(self: *Self, cmd: *gfx.CommandBuffer) void {
     if (self.selected_entity) |selected_entity| {
         blk: {
-            const transform_component = eng.get().ecs.get_component(eng.entity.TransformComponent, selected_entity) orelse break :blk;
+            const transform_component = eng.get().ecs.get_component(eng.ecs.TransformComponent, selected_entity) orelse break :blk;
             self.gizmo.render_cmd(cmd, &transform_component.transform, &self.editor_camera) catch |err| {
                 std.log.warn("Unable to render edit mode gizmo: {}", .{err});
             };
@@ -365,10 +365,10 @@ fn create_new_entity(self: *Self) !void {
     };
     errdefer eng.get().ecs.remove_entity(entity_id);
 
-    const serialize_component = try eng.get().ecs.add_component(eng.entity.SerializationComponent, entity_id);
+    const serialize_component = try eng.get().ecs.add_component(eng.ecs.SerializationComponent, entity_id);
     serialize_component.serialize_id = null;
 
-    const transform_component = try eng.get().ecs.add_component(eng.entity.TransformComponent, entity_id);
+    const transform_component = try eng.get().ecs.add_component(eng.ecs.TransformComponent, entity_id);
     transform_component.transform = .{
         .position = self.editor_camera.transform.position + zm.normalize3(self.editor_camera.transform.forward_direction()),
     };
@@ -385,7 +385,7 @@ fn duplicate_selected_entity(self: *Self) !void {
         errdefer eng.get().ecs.remove_entity(new_entity);
 
         // clear the serialize id so that it will be generated on the next save
-        const entity_serialize_component = try eng.get().ecs.add_component(eng.entity.SerializationComponent, new_entity);
+        const entity_serialize_component = try eng.get().ecs.add_component(eng.ecs.SerializationComponent, new_entity);
         entity_serialize_component.serialize_id = null;
 
         self.selected_entity = new_entity;
@@ -547,7 +547,7 @@ fn entity_editor_ui(
 
         if (data_state == .Init) {
             inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-                const option_text = imui.widget_allocator().dupe(u8, @typeName(eng.AppEcsSystem.ComponentTypes[idx])) catch unreachable;
+                const option_text = imui.widget_allocator().dupe(u8, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME) catch unreachable;
                 errdefer imui.widget_allocator().free(option_text);
 
                 data.options.append(imui.widget_allocator(), option_text) catch unreachable;
@@ -574,9 +574,9 @@ fn entity_editor_ui(
         if (component_add_button.clicked) {
             // add component with the same name as what is in the line edit
             inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-                if (std.mem.eql(u8, line_edit_data.text.items, @typeName(eng.AppEcsSystem.ComponentTypes[idx]))) {
+                if (std.mem.eql(u8, line_edit_data.text.items, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME)) {
                     _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
-                        std.log.err("Unable to add component '{s}' to entity: {}", .{@typeName(eng.AppEcsSystem.ComponentTypes[idx]), err});
+                        std.log.err("Unable to add component '{s}' to entity: {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
                     };
                     break;
                 }
@@ -656,7 +656,7 @@ fn entity_editor_ui(
                 w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
             }
 
-            const collapsible = Imui.widgets.collapsible.create(imui, @typeName(eng.AppEcsSystem.ComponentTypes[idx]), null, key ++ .{@src(), idx});
+            const collapsible = Imui.widgets.collapsible.create(imui, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, null, key ++ .{@src(), idx});
             const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
 
             // add remove component button
@@ -665,7 +665,7 @@ fn entity_editor_ui(
             // dont enable remove button functionality for the transform component.
             // we dont want to make it possible to remove the transform component.
             // TODO make this visible by greying out the button
-            if (eng.AppEcsSystem.ComponentTypes[idx] != eng.entity.TransformComponent) {
+            if (eng.AppEcsSystem.ComponentTypes[idx] != eng.ecs.TransformComponent) {
                 if (remove_button.clicked) {
                     eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
                 }
@@ -684,7 +684,7 @@ fn entity_editor_ui(
                 }
 
                 eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, entity, component, key ++ .{@src(), idx}) catch |err| {
-                    std.log.warn("Failed to load editor ui for component '{s}': {}", .{@typeName(eng.AppEcsSystem.ComponentTypes[idx]), err});
+                    std.log.warn("Failed to load editor ui for component '{s}': {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
                 };
             }
         }
@@ -1359,7 +1359,7 @@ fn create_scene_entities(scene_name: []const u8) !void {
             };
             
             // all loaded entities will be serialized so make sure it has the serialization component
-            _ = eng.get().ecs.add_component(eng.entity.SerializationComponent, new_entity) catch |err| {
+            _ = eng.get().ecs.add_component(eng.ecs.SerializationComponent, new_entity) catch |err| {
                 std.log.warn("Unable to add serialization component to new entity: {}", .{err});
             };
 
@@ -1390,7 +1390,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
     defer scene_dir.close();
 
 
-    var serialize_component_iterator = eng.get().ecs.component_iterator(eng.entity.SerializationComponent);
+    var serialize_component_iterator = eng.get().ecs.component_iterator(eng.ecs.SerializationComponent);
     var largest_serialize_id: u32 = 0;
     while (serialize_component_iterator.next()) |serialize_component| {
         largest_serialize_id = @max(largest_serialize_id, serialize_component.serialize_id orelse 0);
@@ -1401,7 +1401,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
 
         _ = arena.reset(.retain_capacity);
 
-        const entity_serialize_component = eng.get().ecs.get_component(eng.entity.SerializationComponent, entity)
+        const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity)
             orelse continue;
 
         entity_serialize_component.serialize_id = entity_serialize_component.serialize_id orelse blk: {

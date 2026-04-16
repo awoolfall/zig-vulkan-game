@@ -15,6 +15,10 @@ struct PushConstants {
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> push_constant;
 
+// FIX: there is a bug where selecting entity 0 will also outline to border.
+// this is because values outside of the image dimensions will always return 0, not UINT32_MAX which is the sentinel value.
+// not a major issue though
+
 bool kernel_any_but_not_all(uint3 dtid) {
     bool any = false;
     bool all = true;
