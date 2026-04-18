@@ -4,7 +4,7 @@ const zm = eng.zmath;
 const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
 
-pub fn spawn_opponent_character(transform: eng.Transform) !eng.ecs.Entity {
+pub fn spawn_opponent_character(transform: eng.Transform, animation_graph: *eng.AnimationGraph) !eng.ecs.Entity {
     const chara_shape = eng.physics.ShapeSettings {
         .shape = .{ .Capsule = .{
             .half_height = 0.7,
@@ -39,8 +39,8 @@ pub fn spawn_opponent_character(transform: eng.Transform) !eng.ecs.Entity {
     const model_component = try eng.get().ecs.add_component(eng.ecs.ModelComponent, new_entity);
     model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
 
-    const anim_component = try eng.get().ecs.add_component(ecs.AnimControllerComponent, new_entity);
-    try character_animation.setup_character_anim_controller(&anim_component.anim_controller);
+    const anim_component = try eng.get().ecs.add_component(eng.ecs.AnimationControllerComponent, new_entity);
+    anim_component.graph = animation_graph;
 
     const physics_component = try eng.get().ecs.add_component(eng.ecs.PhysicsComponent, new_entity);
     physics_component.settings = .{ .CharacterVirtual = .{
@@ -81,7 +81,7 @@ pub fn opponent_behaviour_system() !void {
         if (zm.length3(desired_movement_direction)[0] != 0.0) {
             desired_movement_direction = zm.normalize3(desired_movement_direction);
 
-            var character_velocity = zm.loadArr3(opponent_physics.getLinearVelocity());
+            var character_velocity = physics_component.velocity;
 
             if (character_is_supported(opponent_physics)) {
                 // remove any gravity
@@ -100,9 +100,9 @@ pub fn opponent_behaviour_system() !void {
                     + zm.loadArr3(eng.get().physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
             }
 
-            opponent_physics.setLinearVelocity(zm.vecToArr3(character_velocity));
+            physics_component.velocity = character_velocity;
         } else {
-            opponent_physics.setLinearVelocity(.{ 0.0, 0.0, 0.0 });
+            physics_component.velocity = zm.f32x4s(0.0);
         }
 
         // Rotate to face character

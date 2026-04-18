@@ -33,6 +33,7 @@ const gitchanged = eng.gitchanged;
 pub const EntityComponents = ecs.EntityComponents;
 
 character_entity: ?eng.ecs.Entity = null,
+character_animation_graph: eng.AnimationGraph,
 
 app_life_asset_pack_id: assets.AssetPackId,
 
@@ -74,6 +75,8 @@ pub fn deinit(self: *Self) void {
 
     for (self.command_buffers[0..]) |c| { c.deinit(); }
     self.command_pool.deinit();
+
+    self.character_animation_graph.deinit();
 }
 
 pub fn init() !Self {
@@ -150,6 +153,9 @@ pub fn init() !Self {
     var player_attack_particle_system = try eng.particles.ParticleSystem.init(engine.general_allocator, player_attack_particle_system_settings);
     errdefer player_attack_particle_system.deinit();
 
+    var character_animation_graph = try @import("character_animation.zig").character_animation_graph();
+    errdefer character_animation_graph.deinit();
+
     var command_pool = try gfx.CommandPool.init(.{
         .allow_reset_command_buffers = true,
         .queue_family = .Graphics,
@@ -188,6 +194,8 @@ pub fn init() !Self {
     errdefer edit_mode.deinit();
 
     return Self {
+        .character_animation_graph = character_animation_graph,
+
         .app_life_asset_pack_id = asset_pack_id,
 
         .player_attack_particle_system = player_attack_particle_system,
@@ -257,7 +265,7 @@ fn update(self: *Self) !void {
                     self.character_entity = player.spawn_character(eng.Transform {
                         .position = character_spawner_transform.position,
                         .rotation = character_spawner_transform.rotation,
-                    }) catch |err| {
+                    }, &self.character_animation_graph) catch |err| {
                         std.log.err("Unable to spawn player character: {}", .{err});
                         break :blk;
                     };
@@ -274,7 +282,7 @@ fn update(self: *Self) !void {
                     _ = opponent.spawn_opponent_character(.{
                         .position = spawner_transform.position,
                         .rotation = spawner_transform.rotation,
-                    }) catch |err| {
+                    }, &self.character_animation_graph) catch |err| {
                         std.log.err("Unable to spawn opponent character: {}", .{err});
                         break :blk;
                     };
@@ -426,6 +434,12 @@ fn update(self: *Self) !void {
             tw.text_content.?.colour = eng.get().imui.palette().text_dark;
         }
         _ = engine.imui.pop_layout();
+    }
+
+    // Update animation times
+    var animation_component_iterator = eng.get().ecs.component_iterator(eng.ecs.AnimationControllerComponent);
+    while (animation_component_iterator.next()) |component| {
+        eng.AnimationGraph.update(component.graph, &component.control_data);
     }
 
     // Draw frame
@@ -602,17 +616,16 @@ pub fn push_all_entities_for_rendering(
                 .model = try assets.ModelAssetId.from_string_identifier("core|sphere"),
             };
             const model_component = eng.get().ecs.get_component(eng.ecs.ModelComponent, entity) orelse (if (self.current_mode == .Edit) &defualt_model_component else break :blk);
-            const maybe_anim_component = eng.get().ecs.get_component(ecs.AnimControllerComponent, entity);
+            const maybe_anim_component = eng.get().ecs.get_component(eng.ecs.AnimationControllerComponent, entity);
 
             const transform = eng.get().physics.calculate_entity_visual_transform(entity);
-            const maybe_anim_controller = if (maybe_anim_component) |anim_controller_component| &anim_controller_component.anim_controller else null;
             
             self.push_model_for_rendering(
                 bone_arena.allocator(),
                 entity,
                 model_component.model orelse defualt_model_component.model.?,
                 transform,
-                maybe_anim_controller
+                maybe_anim_component
             ) catch |err| {
                 std.log.warn("Failed to render entity model: {}", .{err});
                 break :blk;
@@ -652,7 +665,7 @@ pub fn push_model_for_rendering(
     entity: eng.ecs.Entity,
     model: assets.ModelAssetId,
     transform: Transform,
-    maybe_anim_controller: ?*eng.animation_controller.AnimController,
+    maybe_anim_controller: ?*eng.ecs.AnimationControllerComponent,
 ) !void {
     const engine = eng.get();
 
@@ -664,19 +677,13 @@ pub fn push_model_for_rendering(
 
     const bone_info = blk: {
         if (maybe_anim_controller) |anim_controller| {
-            anim_controller.update(&engine.asset_manager, &engine.time);
-            anim_controller.calculate_bone_transforms(
-                eng.get().general_allocator,
-                &engine.asset_manager,
-                m,
-                pose
-            );
+            anim_controller.graph.calculate_bone_transforms(eng.get().general_allocator, m, &anim_controller.control_data, pose);
 
             const bone_index_info = self.standard_renderer.push_bones(pose[0..]) catch unreachable;
 
             break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
-                .bone_count = pose.len,
                 .bone_offset = bone_index_info.start_idx,
+                .bone_count = bone_index_info.end_idx - bone_index_info.start_idx,
             };
         } else {
             break :blk null;

@@ -5,7 +5,7 @@ const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
 const KeyCode = eng.input.KeyCode;
 
-pub fn spawn_character(transform: eng.Transform) !eng.ecs.Entity {
+pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.AnimationGraph) !eng.ecs.Entity {
     const chara_shape = eng.physics.ShapeSettings {
         .shape = .{ .Capsule = .{
             .half_height = 0.7,
@@ -39,8 +39,8 @@ pub fn spawn_character(transform: eng.Transform) !eng.ecs.Entity {
         const model_component = try eng.get().ecs.add_component(eng.ecs.ModelComponent, new_character_entity);
         model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
 
-        const anim_component = try eng.get().ecs.add_component(ecs.AnimControllerComponent, new_character_entity);
-        try character_animation.setup_character_anim_controller(&anim_component.anim_controller);
+        const anim_component = try eng.get().ecs.add_component(eng.ecs.AnimationControllerComponent, new_character_entity);
+        anim_component.graph = animation_graph;
 
         const physics_component = try eng.get().ecs.add_component(eng.ecs.PhysicsComponent, new_character_entity);
         physics_component.settings = .{ .CharacterVirtual = .{
@@ -71,14 +71,14 @@ pub fn player_control_system() !void {
         ecs.PlayerCharacterComponent,
         eng.ecs.TransformComponent,
         eng.ecs.PhysicsComponent,
-        ecs.AnimControllerComponent,
+        eng.ecs.AnimationControllerComponent,
     });
 
     while (query.next()) |components| {
         const player_character_component: *ecs.PlayerCharacterComponent,
         const transform_component: *eng.ecs.TransformComponent,
         const physics_component: *eng.ecs.PhysicsComponent,
-        const anim_controller_component: *ecs.AnimControllerComponent = components;
+        const anim_controller_component: *eng.ecs.AnimationControllerComponent = components;
 
         // Input to move the model around
         {
@@ -113,7 +113,7 @@ pub fn player_control_system() !void {
             const camera_right = camera_transform_component.transform.right_direction(); // self.camera.transform.right_direction();
             const camera_forward_no_pitch = zm.cross3(zm.f32x4(0.0, 1.0, 0.0, 0.0), camera_right);
 
-            var world_movement_direction = 
+            const world_movement_direction = 
                 camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
                 + camera_right * zm.f32x4s(movement_direction[0]);
 
@@ -122,11 +122,6 @@ pub fn player_control_system() !void {
             //     .p1 = character_entity.transform.position + zm.normalize3(movement_direction),
             //     .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
             // });
-
-            // disable movement when attacking
-            if (anim_controller_component.anim_controller.active_node == 2) {
-                world_movement_direction = zm.f32x4s(0.0);
-            }
 
             const character = physics_component.runtime_data.CharacterVirtual.virtual;
 
@@ -208,7 +203,7 @@ pub fn player_control_system() !void {
                     .position = shape_position
                 }).generate_model_matrix());
 
-                anim_controller_component.anim_controller.trigger_event("character attack");
+                anim_controller_component.trigger_event("character attack");
 
                 // particles!
                 // @TODO: FIX
@@ -249,8 +244,8 @@ pub fn player_control_system() !void {
             }
 
             // Update character animation parameters
-            anim_controller_component.anim_controller.set_variable("character speed", zm.length3(character_velocity)[0]);
-            anim_controller_component.anim_controller.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
+            anim_controller_component.set_variable("character speed", zm.length3(character_velocity)[0]);
+            anim_controller_component.set_variable("character walk speed norm", std.math.clamp(zm.length3(character_velocity)[0] / 4.0, 0.0, 1.0));
         }
     }
 }

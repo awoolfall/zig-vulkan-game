@@ -762,7 +762,7 @@ pub fn push_animated(self: *Self, sro: AnimatedRenderObject) !void {
 pub fn push_bones(self: *Self, bones: []const zm.Mat) !struct { start_idx: usize, end_idx: usize, } {
     const start_idx = self.render_bones.items.len;
     self.render_bones.appendSlice(eng.get().general_allocator, bones) catch unreachable;
-    const end_idx = self.render_bones.items.len;
+    const end_idx = self.render_bones.items.len - 1;
     return .{ .start_idx = start_idx, .end_idx = end_idx, };
 }
 
@@ -1123,7 +1123,7 @@ pub fn render_cmd(
         }
     });
     
-    var start_bone_idx: isize = -Self.MAX_BONES_PER_BUFFER;
+    var start_bone_idx: isize = 0;
 
     for (self.skeletal_render_objects.items) |sro| {
         const ro = sro.standard;
@@ -1243,7 +1243,7 @@ pub fn render_cmd(
         
         // bones
         // if bones are not within the uploaded bone set, then move the window
-        if (sro.bone_info.bone_offset + sro.bone_info.bone_count >= start_bone_idx + Self.MAX_BONES_PER_BUFFER) {
+        if (sro.bone_info.bone_count > (Self.MAX_BONES_PER_BUFFER - start_bone_idx)) {
             current_bones_buffer_index += 1;
 
             if (current_bones_buffer_index == self.bone_buffers.items.len) {

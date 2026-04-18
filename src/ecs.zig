@@ -1,5 +1,4 @@
 pub const HealthPointComponent = @import("ecs/health_point_component.zig");
-pub const AnimControllerComponent = @import("ecs/animation_controller_component.zig");
 pub const ParticleSystemComponent = @import("ecs/particle_system_component.zig");
 pub const LightComponent = @import("ecs/light_component.zig");
 pub const TerrainComponent = @import("ecs/terrain_component.zig");
@@ -10,7 +9,6 @@ pub const OpponentCharacterComponent = @import("ecs/opponent_character_component
 
 pub const EntityComponents = .{
     HealthPointComponent,
-    AnimControllerComponent,
     ParticleSystemComponent,
     LightComponent,
     TerrainComponent,
