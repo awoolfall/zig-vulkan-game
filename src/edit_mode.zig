@@ -53,6 +53,9 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(standard_renderer: *const StandardRenderer) !Self {
+    const _profile_context = eng.get().profiler.start_context("edit_mode_init");
+    defer _profile_context.end_context();
+
     var gizmo = try Gizmo.init(eng.get().general_allocator);
     errdefer gizmo.deinit();
 

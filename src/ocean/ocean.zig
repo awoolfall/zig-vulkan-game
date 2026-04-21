@@ -229,6 +229,9 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(settings: OceanSettings) !Self {
+    const _profile_context = eng.get().profiler.start_context("ocean_init");
+    defer _profile_context.end_context();
+
     const alloc = eng.get().general_allocator;
     
     var arena_alloc = std.heap.ArenaAllocator.init(eng.get().frame_allocator);

@@ -62,11 +62,12 @@ pub fn opponent_behaviour_system() !void {
     const player_transform_component: *eng.ecs.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
     _ = player_character_component;
 
-    var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent });
+    var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent, eng.ecs.AnimationControllerComponent });
     while (query.next()) |components| {
         const opponent_component: *ecs.OpponentCharacterComponent,
         const transform_component: *eng.ecs.TransformComponent,
-        const physics_component: *eng.ecs.PhysicsComponent = components;
+        const physics_component: *eng.ecs.PhysicsComponent,
+        const animation_component: *eng.ecs.AnimationControllerComponent = components;
 
         var desired_movement_direction = zm.f32x4s(0.0);
 
@@ -105,8 +106,10 @@ pub fn opponent_behaviour_system() !void {
             physics_component.velocity = zm.f32x4s(0.0);
         }
 
+        animation_component.set_variable("character speed", zm.length3(physics_component.velocity)[0]);
+
         // Rotate to face character
-        const rot = zm.lookAtRh(zm.f32x4s(0.0), zm.normalize3(pos_diff), zm.f32x4(0.0, 1.0, 0.0, 0.0));
+        const rot = zm.lookAtRh(transform_component.transform.position * zm.f32x4(1.0,1.0,-1.0,1.0), player_transform_component.transform.position * zm.f32x4(1.0,1.0,-1.0,1.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
         transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 0.1);
         // opponent_physics.setRotation(
         //     zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)

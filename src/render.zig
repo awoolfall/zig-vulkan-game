@@ -237,6 +237,9 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
+    const _profile_context = eng.get().profiler.start_context("standard_render_init");
+    defer _profile_context.end_context();
+
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
@@ -1123,7 +1126,7 @@ pub fn render_cmd(
         }
     });
     
-    var start_bone_idx: isize = 0;
+    var start_bone_idx: isize = -Self.MAX_BONES_PER_BUFFER;
 
     for (self.skeletal_render_objects.items) |sro| {
         const ro = sro.standard;
@@ -1243,14 +1246,12 @@ pub fn render_cmd(
         
         // bones
         // if bones are not within the uploaded bone set, then move the window
-        if (sro.bone_info.bone_count > (Self.MAX_BONES_PER_BUFFER - start_bone_idx)) {
+        if ((@as(isize, @intCast(sro.bone_info.bone_offset + sro.bone_info.bone_count)) - start_bone_idx) > Self.MAX_BONES_PER_BUFFER) {
             current_bones_buffer_index += 1;
 
             if (current_bones_buffer_index == self.bone_buffers.items.len) {
                 try self.append_new_bones_buffer();
             }
-
-            start_bone_idx = @intCast(sro.bone_info.bone_offset);
 
             if (current_bones_buffer_index != 0) {
                 mapped_bones_data.unmap();
@@ -1258,11 +1259,13 @@ pub fn render_cmd(
             const new_bones_buffer = self.bone_buffers.items[@intCast(current_bones_buffer_index)].buffer.get() catch unreachable;
             mapped_bones_data = try new_bones_buffer.map(.{ .write = .EveryFrame, });
 
-            const copy_amount: usize = @min(self.render_bones.items.len - @as(usize, @intCast(start_bone_idx)), Self.MAX_BONES_PER_BUFFER);
+            const copy_amount: usize = @min(self.render_bones.items.len - sro.bone_info.bone_offset, Self.MAX_BONES_PER_BUFFER);
             @memcpy(
                 mapped_bones_data.data_array(zm.Mat, Self.MAX_BONES_PER_BUFFER)[0..copy_amount], 
-                self.render_bones.items[@intCast(start_bone_idx)..(@as(usize, @intCast(start_bone_idx)) + copy_amount)]
+                self.render_bones.items[sro.bone_info.bone_offset..(sro.bone_info.bone_offset + copy_amount)]
             );
+
+            start_bone_idx = @intCast(sro.bone_info.bone_offset);
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 4,
@@ -1280,7 +1283,7 @@ pub fn render_cmd(
         const push_constants = PushConstants {
             .instance_index = @intCast(idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER),
             .lights_index = 0,
-            .bone_start_index = @intCast(@max(0, start_bone_idx)),
+            .bone_start_index = @intCast(sro.bone_info.bone_offset - @as(usize, @intCast(start_bone_idx))),
         };
 
         cmd.cmd_push_constants(.{

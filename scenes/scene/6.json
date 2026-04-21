@@ -1,0 +1,30 @@
+{
+  "name": "opponent-spawner",
+  "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
+    "_ecs_COMPONENT_NAME": "Serialization",
+    "serialize_id": 6
+  },
+  "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
+    "_ecs_COMPONENT_NAME": "Transform",
+    "transform": {
+      "position": [
+        2.611285924911499,
+        1.8111426830291748,
+        2.667943000793457,
+        1
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  }
+}

@@ -35,8 +35,6 @@ pub const EntityComponents = ecs.EntityComponents;
 character_entity: ?eng.ecs.Entity = null,
 character_animation_graph: eng.AnimationGraph,
 
-app_life_asset_pack_id: assets.AssetPackId,
-
 player_attack_particle_system: eng.particles.ParticleSystem,
 
 standard_renderer: StandardRenderer,
@@ -57,9 +55,6 @@ pub fn deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
     self.player_attack_particle_system.deinit();
-
-    eng.get().asset_manager.unload_asset_pack(self.app_life_asset_pack_id)
-        catch unreachable;
 
     for (self.uber_cmd_semaphores) |s| {
         s.deinit();
@@ -82,16 +77,6 @@ pub fn deinit(self: *Self) void {
 pub fn init() !Self {
     std.log.info("App init!", .{});
     const engine = eng.get();
-
-    var asset_pack = try assets.AssetPack.init_from_file(engine.general_allocator, "default", "default_asset_pack.zon");
-    errdefer asset_pack.deinit();
-
-    const asset_pack_id = try engine.asset_manager.add_asset_pack(asset_pack);
-    try engine.asset_manager.load_asset_pack(asset_pack_id);
-
-    asset_pack.save_to_file(engine.general_allocator, "zig-out") catch |err| {
-        std.log.err("Unable to save asset pack: {}", .{ err });
-    };
     
     // Print model animation names
     //
@@ -195,8 +180,6 @@ pub fn init() !Self {
 
     return Self {
         .character_animation_graph = character_animation_graph,
-
-        .app_life_asset_pack_id = asset_pack_id,
 
         .player_attack_particle_system = player_attack_particle_system,
 
@@ -361,20 +344,18 @@ fn update(self: *Self) !void {
 
         profiler_text.appendSlice(eng.get().frame_allocator, "Profiler:\n") catch unreachable;
 
-        var profile_contexts = engine.profiler.contexts_map.valueIterator();
-        while (profile_contexts.next()) |context| {
-            if (context.end_time) |end_time| {
-                const context_text = std.fmt.allocPrint(eng.get().frame_allocator, 
-                    "- {s}: {} ms\n", 
-                    .{
-                        context.name,
-                        @as(f64, @floatFromInt(end_time.since(context.start_time))) / @as(f64, @floatFromInt(std.time.ns_per_ms))
-                    }
-                ) catch unreachable;
-                defer eng.get().frame_allocator.free(context_text);
+        for (engine.profiler.contexts_array.items) |context| {
+            const context_name = engine.profiler.context_names_map.get(context.name_hash) orelse "unnamed";
+            const context_text = std.fmt.allocPrint(eng.get().frame_allocator, 
+                "- {s}: {} ms\n", 
+                .{
+                    context_name,
+                    context.result_duration_ms(),
+                }
+            ) catch unreachable;
+            defer eng.get().frame_allocator.free(context_text);
 
-                profiler_text.appendSlice(eng.get().frame_allocator, context_text) catch unreachable;
-            }
+            profiler_text.appendSlice(eng.get().frame_allocator, context_text) catch unreachable;
         }
 
         _ = engine.imui.push_floating_layout(
