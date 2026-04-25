@@ -37,7 +37,7 @@ pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.Animation
         transform_component.transform = transform;
 
         const model_component = try eng.get().ecs.add_component(eng.ecs.ModelComponent, new_character_entity);
-        model_component.model = try eng.assets.ModelAssetId.from_string_identifier("default|character");
+        model_component.model = try eng.get().asset_manager.get_asset_id(eng.assets.ModelAsset, character_animation.character_model_resource);
 
         const anim_component = try eng.get().ecs.add_component(eng.ecs.AnimationControllerComponent, new_character_entity);
         anim_component.graph = animation_graph;

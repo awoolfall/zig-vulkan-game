@@ -7,8 +7,8 @@ const gfx = eng.gfx;
 const StandardRenderer = @import("../render.zig");
 const FileWatcher = eng.assets.FileWatcher;
 
-const ComputeShaderPath = "../../src/clouds/cloud_compute.slang";
-const RenderShaderPath = "../../src/clouds/cloud_render.slang";
+const ComputeShaderUri = "src:/clouds/cloud_compute.slang";
+const RenderShaderUri = "src:/clouds/cloud_render.slang";
 
 const CAMERA_LIGHTING_GRID_IMAGE_SIZE: [3]u32 = .{ 160, 88, 64 };
 const MAX_CLOUD_VOLUMES = 4;
@@ -277,20 +277,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer framebuffer.deinit();
 
     // compute shader file watcher
-    const compute_path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
-    defer compute_path.deinit();
-
-    const compute_path_resolved = try compute_path.resolve_path(alloc);
+    const compute_path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ComputeShaderUri);
     defer alloc.free(compute_path_resolved);
 
     var compute_shader_file_watcher = try FileWatcher.init(alloc, compute_path_resolved, 1000);
     errdefer compute_shader_file_watcher.deinit();
 
     // render shader file watcher
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
-    defer path.deinit();
-
-    const path_resolved = try path.resolve_path(alloc);
+    const path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.RenderShaderUri);
     defer alloc.free(path_resolved);
 
     var render_shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
@@ -337,13 +331,10 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ComputeShaderPath });
-    defer path.deinit();
+    const compute_path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ComputeShaderUri);
+    defer alloc.free(compute_path_resolved);
 
-    const path_resolved = try path.resolve_path(alloc);
-    defer alloc.free(path_resolved);
-
-    const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });
+    const shader_file = try std.fs.openFileAbsolute(compute_path_resolved, .{ .mode = .read_only });
     defer shader_file.close();
 
     const shader_slang = try alloc.alloc(u8, try shader_file.getEndPos());
@@ -390,13 +381,10 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
 fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.RenderShaderPath });
-    defer path.deinit();
+    const render_path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.RenderShaderUri);
+    defer alloc.free(render_path_resolved);
 
-    const path_resolved = try path.resolve_path(alloc);
-    defer alloc.free(path_resolved);
-
-    const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });
+    const shader_file = try std.fs.openFileAbsolute(render_path_resolved, .{ .mode = .read_only });
     defer shader_file.close();
 
     const shader_slang = try alloc.alloc(u8, try shader_file.getEndPos());

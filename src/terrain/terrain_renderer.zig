@@ -16,7 +16,7 @@ const ClipmapMesh = @import("clipmap.zig");
 
 const StandardRenderer = @import("../render.zig");
 
-const ShaderFilePath = "../../src/terrain/terrain.slang";
+const ShaderFileUri = "src:/terrain/terrain.slang";
 
 const CLIPMAP_QUAD_COUNT = 127;
 
@@ -238,10 +238,7 @@ pub fn init() !Self {
     });
     errdefer sampler.deinit();
 
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
-    defer path.deinit();
-
-    const path_resolved = try path.resolve_path(alloc);
+    const path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ShaderFileUri);
     defer alloc.free(path_resolved);
 
     var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
@@ -276,10 +273,7 @@ pub fn init() !Self {
 fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderFilePath });
-    defer path.deinit();
-
-    const path_resolved = try path.resolve_path(alloc);
+    const path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ShaderFileUri);
     defer alloc.free(path_resolved);
 
     const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });

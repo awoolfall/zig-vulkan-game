@@ -51,13 +51,13 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
-    const hmt_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-texture");
+    const hmt_id = try eng.get().asset_manager.get_asset_id(as.ImageAsset, "asset:terrain-texture");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
     
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
 
-    const albedo_id = try eng.get().asset_manager.find_asset_id(as.ImageAsset, "default|terrain-albedo");
+    const albedo_id = try eng.get().asset_manager.get_asset_id(as.ImageAsset, "asset:terrain-albedo");
     const albedo = try eng.get().asset_manager.get_asset(as.ImageAsset, albedo_id);
 
     const albedo_view = try gf.ImageView.init(.{ .image = albedo.*, .view_type = .ImageView2DArray, });

@@ -235,7 +235,9 @@ fn update(self: *Self) !void {
             };
             render_camera = &self.edit_mode.editor_camera;
 
-            try self.push_all_entities_for_rendering();
+            self.push_all_entities_for_rendering() catch |err| {
+                std.log.err("Failed to push all entities for rendering: {}", .{err});
+            };
         },
         .Play => {
             blk: {
@@ -587,15 +589,15 @@ pub fn push_all_entities_for_rendering(
     var bone_arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer bone_arena.deinit();
 
+    const default_model_id = try eng.get().asset_manager.get_asset_id(eng.assets.ModelAsset, "res:block.glb");
+    const defualt_model_component = eng.ecs.ModelComponent { .model = default_model_id, };
+
     var entity_iterator = eng.get().ecs.entity_iterator();
     while (entity_iterator.next()) |entity| {
         _ = bone_arena.reset(.retain_capacity);
         
         // push entity model for rendering
         blk: {
-            const defualt_model_component = eng.ecs.ModelComponent {
-                .model = try assets.ModelAssetId.from_string_identifier("core|sphere"),
-            };
             const model_component = eng.get().ecs.get_component(eng.ecs.ModelComponent, entity) orelse (if (self.current_mode == .Edit) &defualt_model_component else break :blk);
             const maybe_anim_component = eng.get().ecs.get_component(eng.ecs.AnimationControllerComponent, entity);
 

@@ -3,14 +3,16 @@ const eng = @import("engine");
 const assets = eng.assets;
 const es = eng.util.easings;
 
+pub const character_model_resource = "res:KayKit_Adventure/Characters/gltf/Knight.glb";
+
 pub fn character_animation_graph() !eng.AnimationGraph {
-    const character_animation_idle_id = eng.get().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.idle")
+    const character_animation_idle_id = eng.get().asset_manager.get_asset_id(assets.AnimationAsset, character_model_resource ++ "/animations/Idle")
         catch unreachable;
-    const character_animation_walk_id = eng.get().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.walk")
+    const character_animation_walk_id = eng.get().asset_manager.get_asset_id(assets.AnimationAsset, character_model_resource ++ "/animations/Walking_A")
         catch unreachable;
-    const character_animation_run_id = eng.get().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.run")
+    const character_animation_run_id = eng.get().asset_manager.get_asset_id(assets.AnimationAsset, character_model_resource ++ "/animations/Running_A")
         catch unreachable;
-    const character_animation_attack_id = eng.get().asset_manager.find_asset_id(assets.AnimationAsset, "default|character.attack")
+    const character_animation_attack_id = eng.get().asset_manager.get_asset_id(assets.AnimationAsset, character_model_resource ++ "/animations/1H_Melee_Attack_Chop")
         catch unreachable;
 
     const anim_nodes = [_]eng.AnimationGraph.Node {

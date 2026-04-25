@@ -14,7 +14,7 @@ const fN: comptime_float = @floatFromInt(N);
 const MAP_LENGTH_M = 256;
 const COMPUTE_GROUP_COUNT: comptime_int = @divExact(N, 8);
 
-const ShaderPath = "../../src/ocean/ocean_render.slang";
+const ShaderFileUri = "src:/ocean/ocean_render.slang";
 const CLIPMAP_QUAD_COUNT = 127;
 
 const MAX_SHALLOW_SPOTS = 4;
@@ -889,10 +889,7 @@ pub fn init(settings: OceanSettings) !Self {
     errdefer framebuffer.deinit();
 
     // render shader file watcher
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
-    defer path.deinit();
-
-    const path_resolved = try path.resolve_path(alloc);
+    const path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ShaderFileUri);
     defer alloc.free(path_resolved);
 
     var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
@@ -1046,10 +1043,7 @@ fn init_fft_rw_image_and_view(comptime side_length: u32, alloc: std.mem.Allocato
 fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
     const alloc = eng.get().general_allocator;
 
-    const path = try eng.util.Path.init(alloc, .{ .ExeRelative = Self.ShaderPath });
-    defer path.deinit();
-
-    const path_resolved = try path.resolve_path(alloc);
+    const path_resolved = try eng.util.uri.resolve_file_uri(alloc, Self.ShaderFileUri);
     defer alloc.free(path_resolved);
 
     const shader_file = try std.fs.openFileAbsolute(path_resolved, .{ .mode = .read_only });

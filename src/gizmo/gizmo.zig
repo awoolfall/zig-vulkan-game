@@ -111,10 +111,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     errdefer selection_textures.deinit();
     
     // Shaders
-    const shader_path = try eng.util.Path.init(alloc, .{ .ExeRelative = "../../src/gizmo/gizmo.slang" });
-    defer shader_path.deinit();
-
-    const shader_resolved_path = try shader_path.resolve_path(alloc);
+    const shader_resolved_path = try eng.util.uri.resolve_file_uri(alloc, "src:/gizmo/gizmo.slang");
     defer alloc.free(shader_resolved_path);
 
     const slang_shader_file = try std.fs.openFileAbsolute(shader_resolved_path, .{ .mode = .read_only });

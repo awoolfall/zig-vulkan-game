@@ -573,19 +573,7 @@ fn entity_editor_ui(
             data.dropdown_is_open = false;
         }
 
-        const component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
-        if (component_add_button.clicked) {
-            // add component with the same name as what is in the line edit
-            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-                if (std.mem.eql(u8, line_edit_data.text.items, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME)) {
-                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
-                        std.log.err("Unable to add component '{s}' to entity: {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
-                    };
-                    break;
-                }
-            }
-            line_edit_data.text.clearRetainingCapacity();
-        }
+        var component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
 
         // if the dropdown should be shown then render it
         dropdown_is_open: { if (data.dropdown_is_open) {
@@ -615,6 +603,7 @@ fn entity_editor_ui(
             const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
             defer eng.get().frame_allocator.free(lower_line_edit_text);
 
+            var is_first_item = true;
             for (data.options.items, 0..) |option, i| {
                 const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
                 defer eng.get().frame_allocator.free(lower_option);
@@ -638,17 +627,42 @@ fn entity_editor_ui(
                     option_background_widget.corner_radii_px = .all(4);
                 }
 
-                // if the option is clicked then set text field
+                // if the option is clicked then set text field and simulate click on add button
                 if (imui.generate_widget_signals(option_background).clicked) {
                     line_edit_data.text.clearRetainingCapacity();
                     line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                    component_add_button.clicked = true;
+                }
+
+                // if enter is clicked then set the text field to the first item and simulate click on add button
+                if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
+                    if (is_first_item) {
+                        line_edit_data.text.clearRetainingCapacity();
+                        line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                        component_add_button.clicked = true;
+                        imui.focus_item = null;
+                    }
                 }
                 
                 _ = eng.ui.widgets.label.create(imui, option);
+                is_first_item = false;
             }
 
             imui.pop_layout(); // options background layout
         } }
+
+        if (component_add_button.clicked) {
+            // add component with the same name as what is in the line edit
+            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+                if (std.mem.eql(u8, line_edit_data.text.items, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME)) {
+                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
+                        std.log.err("Unable to add component '{s}' to entity: {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
+                    };
+                    break;
+                }
+            }
+            line_edit_data.text.clearRetainingCapacity();
+        }
     }
 
     // render component UIs

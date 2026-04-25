@@ -243,10 +243,7 @@ pub fn init() !Self {
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
 
-    const shader_path = try eng.util.Path.init(eng.get().general_allocator, .{.ExeRelative = "../../src/shader.slang"});
-    defer shader_path.deinit();
-
-    const full_shader_path = try shader_path.resolve_path(eng.get().frame_allocator);
+    const full_shader_path = try eng.util.uri.resolve_file_uri(eng.get().frame_allocator, "src:/shader.slang");
     defer eng.get().frame_allocator.free(full_shader_path);
 
     std.log.info("shader path: '{s}'", .{full_shader_path});
@@ -586,10 +583,7 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
     });
     defer static_vertex_input.deinit();
     
-    const shader_path = try eng.util.Path.init(alloc, .{.ExeRelative = "../../src/shader.slang"});
-    defer shader_path.deinit();
-
-    const resolved_shader_path = try shader_path.resolve_path(alloc);
+    const resolved_shader_path = try eng.util.uri.resolve_file_uri(alloc, "src:/shader.slang");
     defer alloc.free(resolved_shader_path);
 
     const shader_file = try std.fs.openFileAbsolute(resolved_shader_path, .{ .mode = .read_only });
