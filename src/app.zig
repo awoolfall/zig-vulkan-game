@@ -589,7 +589,7 @@ pub fn push_all_entities_for_rendering(
     var bone_arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer bone_arena.deinit();
 
-    const default_model_id = try eng.get().asset_manager.get_asset_id(eng.assets.ModelAsset, "res:block.glb");
+    const default_model_id = try eng.get().asset_manager.get_asset_id("res:block.glb");
     const defualt_model_component = eng.ecs.ModelComponent { .model = default_model_id, };
 
     var entity_iterator = eng.get().ecs.entity_iterator();

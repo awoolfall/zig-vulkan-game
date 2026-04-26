@@ -29,7 +29,7 @@
   },
   "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
     "_ecs_COMPONENT_NAME": "Model",
-    "model": "default|cube"
+    "model": "res:\\cube.glb"
   },
   "71e2a14f-8a22-43ee-aed4-65592fe637ea": {
     "_ecs_COMPONENT_NAME": "Physics",

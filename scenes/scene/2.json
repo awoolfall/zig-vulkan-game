@@ -27,6 +27,10 @@
       ]
     }
   },
+  "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
+    "_ecs_COMPONENT_NAME": "Model",
+    "model": "res:\\cone.glb"
+  },
   "c9cb8354-6c2c-47ee-9d13-e9ef0a5e8ad5": {
     "_ecs_COMPONENT_NAME": "Light",
     "light": {
