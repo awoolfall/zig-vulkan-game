@@ -229,8 +229,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(settings: OceanSettings) !Self {
-    const _profile_context = eng.get().profiler.start_context("ocean_init");
-    defer _profile_context.end_context();
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean init");
+    defer __tracy_zone.End();
 
     const alloc = eng.get().general_allocator;
     
@@ -1192,6 +1192,8 @@ fn calculate_layer_map_length(layer_0_map_length: usize, layer: usize) usize {
 }
 
 pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean update images");
+    defer __tracy_zone.End();
     self.time += (eng.get().time.delta_time_f32() * self.time_scale);
     
     // transition spectrum images from shader reading to compute destination
@@ -1395,6 +1397,9 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
 }
 
 pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const eng.camera.Camera, cmd: *gfx.CommandBuffer) void {
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean render");
+    defer __tracy_zone.End();
+    
     if (self.render_shader_file_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_pipeline() catch |err| {
             std.log.warn("Unable to recreate ocean render pipeline: {}", .{err});

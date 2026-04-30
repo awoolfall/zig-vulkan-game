@@ -237,8 +237,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
-    const _profile_context = eng.get().profiler.start_context("standard_render_init");
-    defer _profile_context.end_context();
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "standard render init");
+    defer __tracy_zone.End();
 
     var selection_textures = try SelectionTextures.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
@@ -899,6 +899,9 @@ pub fn render_cmd(
     },
     cmd: *gfx.CommandBuffer,
 ) !void {
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "standard render cmd");
+    defer __tracy_zone.End();
+
     if (self.shader_watcher.was_modified_since_last_check()) blk: {
         std.log.info("Recreating graphics pipelines for standard renderer", .{});
         

@@ -90,8 +90,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
-    const _profile_context = eng.get().profiler.start_context("terrain_init");
-    defer _profile_context.end_context();
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "terrain init");
+    defer __tracy_zone.End();
 
     const alloc = eng.get().general_allocator;
 

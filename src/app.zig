@@ -75,6 +75,9 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "app init");
+    defer __tracy_zone.End();
+
     std.log.info("App init!", .{});
     const engine = eng.get();
     
@@ -198,9 +201,10 @@ pub fn init() !Self {
 }
 
 fn update(self: *Self) !void {
-    const engine = eng.get();
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "app::update");
+    defer __tracy_zone.End();
 
-    const _profile_context = engine.profiler.start_context("app::update");
+    const engine = eng.get();
 
     // switch modes
     if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.F1)) {
@@ -337,47 +341,6 @@ fn update(self: *Self) !void {
         entity_particle_system.particle_system.update(&engine.time);
     }
 
-    // end profile context, usually we can defer this but in app update we have to also print results
-    _profile_context.end_context();
-
-    {
-        var profiler_text = std.ArrayList(u8).initCapacity(eng.get().frame_allocator, 32) catch unreachable;
-        defer profiler_text.deinit(eng.get().frame_allocator);
-
-        profiler_text.appendSlice(eng.get().frame_allocator, "Profiler:\n") catch unreachable;
-
-        for (engine.profiler.contexts_array.items) |context| {
-            const context_name = engine.profiler.context_names_map.get(context.name_hash) orelse "unnamed";
-            const context_text = std.fmt.allocPrint(eng.get().frame_allocator, 
-                "- {s}: {} ms\n", 
-                .{
-                    context_name,
-                    context.result_duration_ms(),
-                }
-            ) catch unreachable;
-            defer eng.get().frame_allocator.free(context_text);
-
-            profiler_text.appendSlice(eng.get().frame_allocator, context_text) catch unreachable;
-        }
-
-        _ = engine.imui.push_floating_layout(
-            .Y, 
-            200.0, 
-            25.0 + engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
-            .{@src()}
-        );
-        const l = Imui.widgets.label.create(&eng.get().imui, profiler_text.items);
-        if (engine.imui.get_widget(l.id)) |tw| {
-            tw.text_content.?.font = .GeistMono;
-            tw.text_content.?.size = 12;
-            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
-        }
-        _ = engine.imui.pop_layout();
-    }
-
-    // end frame here, we record render timing one frame early into next frame's profiler
-    engine.profiler.end_frame();
-
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
     const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
         engine.time.get_fps(),
@@ -429,7 +392,7 @@ fn update(self: *Self) !void {
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
     const camera_projection_matrix = render_camera.generate_perspective_matrix(engine.gfx.swapchain_aspect());
 
-    const image_available_semaphore = engine.gfx.begin_frame() catch |err| {
+    const frame_ready_semaphore = engine.gfx.begin_frame() catch |err| {
         std.log.warn("Unable to begin frame: {}", .{err});
         return;
     };
@@ -549,11 +512,9 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render debug: {}", .{err});
     };
 
-    const _imui_render_profiler_context = engine.profiler.start_context("imui::render");
     engine.imui.render_imui(cmd) catch |err| {
         std.log.warn("Unable to render imui: {}", .{err});
     };
-    _imui_render_profiler_context.end_context();
 
     // Finish command buffer
     cmd.cmd_end() catch |err| {
@@ -565,7 +526,7 @@ fn update(self: *Self) !void {
     engine.gfx.submit_command_buffer(.{
         .command_buffers = &.{ cmd },
         .wait_semaphores = &.{ .{
-            .semaphore = &image_available_semaphore,
+            .semaphore = &frame_ready_semaphore,
             .dst_stage = gfx.PipelineStageFlags{ .color_attachment_output = true, },
         } },
         .signal_semaphores = &.{ uber_semaphore },
@@ -575,21 +536,22 @@ fn update(self: *Self) !void {
     };
 
     // Present
-    const _present_profiler_context = engine.profiler.start_context("present");
     engine.gfx.present(&.{ uber_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };
-    _present_profiler_context.end_context();
 }
 
 pub fn push_all_entities_for_rendering(
     self: *Self,
 ) !void {
+    const __tracy_zone = eng.ztracy.Zone(@src());
+    defer __tracy_zone.End();
+
     var bone_arena = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer bone_arena.deinit();
 
-    const default_model_id = try eng.get().asset_manager.get_asset_id("res:block.glb");
+    const default_model_id = try eng.get().asset_manager.get_asset_id("res:icosphere.glb");
     const defualt_model_component = eng.ecs.ModelComponent { .model = default_model_id, };
 
     var entity_iterator = eng.get().ecs.entity_iterator();
@@ -697,6 +659,9 @@ pub fn render_model(
     },
     transform: Transform,
 ) !void {
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "render model");
+    defer __tracy_zone.End();
+
     const node_matrix_list = try eng.get().general_allocator.alloc(zm.Mat, model.nodes.len);
     defer eng.get().general_allocator.free(node_matrix_list);
 
@@ -712,6 +677,8 @@ pub fn render_model(
 
         // Apply pose
         if (bones_data) |bd| {
+            const ___tracy_zone = eng.ztracy.ZoneN(@src(), "apply pose");
+            defer ___tracy_zone.End();
             if (node.name) |node_name| {
                 if (model.bones_names_map.get(node_name)) |bone_id| {
                     const bone_data = &model.bones_info[@intCast(bone_id)];

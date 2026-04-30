@@ -87,8 +87,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
-    const _profile_context = eng.get().profiler.start_context("clouds_init");
-    defer _profile_context.end_context();
+    const __tracy_zone = eng.ztracy.ZoneN(@src(), "clouds init");
+    defer __tracy_zone.End();
 
     // cloud density image
     const camera_lighting_grid_image = try gfx.Image.init(.{

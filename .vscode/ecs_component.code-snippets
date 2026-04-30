@@ -72,5 +72,13 @@
 			"}",
 			""
 		],
+	},
+	"Tracy": {
+		"prefix": "tracy zone",
+		"description": "Create new Tracy zone",
+		"body": [
+			"const __tracy_zone = eng.ztracy.ZoneN(@src(), \"${1:unnamed}\");",
+			"defer __tracy_zone.End();"
+		],
 	}
 }
