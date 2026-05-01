@@ -23,6 +23,8 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
     uint3 out_dim;
     out_image.GetDimensions(out_dim.x, out_dim.y, out_dim.z);
 
+    if (dtid.x >= out_dim.x || dtid.y >= out_dim.y || dtid.z >= out_dim.z) return;
+
     uint3 features_large_dim;
     in_features_large.GetDimensions(features_large_dim.x, features_large_dim.y, features_large_dim.z);
 

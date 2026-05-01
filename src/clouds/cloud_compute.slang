@@ -162,7 +162,9 @@ void cs_main(uint3 dtid: SV_DispatchThreadID)
                 float ldensity = 0.0;
                 float lt = 0.0;
                 const float max_length = aabb_end_t;
-                for (lt = 0.0; lt < max_length; lt += small_march_distance) {
+                const int steps = int(ceil(max_length / small_march_distance));
+                for (int step = 0; step < steps; step++) {
+                    lt = float(step) * small_march_distance;
                     const float3 lpos = pos - light_dir * lt;
                     // sample density at lpos (constant here)
                     ldensity += density;

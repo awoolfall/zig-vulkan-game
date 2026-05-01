@@ -638,7 +638,7 @@ fn generate_noise_image(
                     descriptor_set,
                 },
             });
-            cmd.cmd_dispatch(.{ .group_count_x = size_xy, .group_count_y = size_xy, .group_count_z = size_z, });
+            cmd.cmd_dispatch(.{ .group_count_x = size_xy / 8, .group_count_y = size_xy / 8, .group_count_z = size_z / 8, });
 
             cmd.cmd_pipeline_barrier(.{
                 .src_stage = .{ .compute_shader = true, },
