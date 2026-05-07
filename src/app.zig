@@ -234,10 +234,13 @@ fn update(self: *Self) !void {
     // update
     switch (self.current_mode) {
         .Edit => {
-            self.edit_mode.update(&self.standard_renderer.selection_textures, &self.terrain_renderer, &self.ocean) catch |err| {
+            self.edit_mode.update(&self.standard_renderer.selection_textures, &self.standard_renderer, &self.terrain_renderer, &self.ocean) catch |err| {
                 std.log.err("Edit mode update failed: {}", .{err});
             };
-            render_camera = &self.edit_mode.editor_camera;
+            render_camera = switch (self.edit_mode.editor_mode) {
+                .SceneEditor => &self.edit_mode.editor_camera,
+                .FrameDataEditor => &self.edit_mode.frame_data_editor.camera,
+            };
 
             self.push_all_entities_for_rendering() catch |err| {
                 std.log.err("Failed to push all entities for rendering: {}", .{err});

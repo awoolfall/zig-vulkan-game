@@ -4,6 +4,8 @@ const std = @import("std");
 const eng = @import("engine");
 const gfx = eng.gfx;
 
+const FrameDataEditor = @import("edit_mode/frame_data_editor.zig");
+
 const Gizmo = @import("gizmo/gizmo.zig");
 const st = @import("selection_textures.zig");
 const pe = @import("particle_editor.zig");
@@ -26,7 +28,10 @@ const ecs = @import("ecs.zig");
 
 const EditorMode = enum {
     SceneEditor,
+    FrameDataEditor,
 };
+
+editor_mode: EditorMode = .SceneEditor,
 
 editor_camera: Camera,
 gizmo: Gizmo,
@@ -45,7 +50,10 @@ loaded_scene_name: ?[]u8 = null,
 load_scene_popup_data: LoadScenePopup,
 load_scene_popup_is_open: bool = false,
 
+frame_data_editor: FrameDataEditor,
+
 pub fn deinit(self: *Self) void {
+    self.frame_data_editor.deinit();
     self.load_scene_popup_data.deinit();
     self.set_loaded_scene_name(null) catch unreachable;
     self.gizmo.deinit();
@@ -62,6 +70,9 @@ pub fn init(standard_renderer: *const StandardRenderer) !Self {
     var selection_outline_renderer = try SelectionOutlineRenderer.init(eng.get().general_allocator, standard_renderer.selection_textures.image);
     errdefer selection_outline_renderer.deinit();
 
+    var frame_data_editor = try FrameDataEditor.init();
+    errdefer frame_data_editor.deinit();
+
     return Self {
         .gizmo = gizmo,
         .selection_outline_renderer = selection_outline_renderer,
@@ -76,6 +87,7 @@ pub fn init(standard_renderer: *const StandardRenderer) !Self {
             .min_orbit_distance = 1.0,
             .orbit_distance = 0.0,
         },
+        .frame_data_editor = frame_data_editor,
     };
 }
 
@@ -86,7 +98,23 @@ fn set_loaded_scene_name(self: *Self, name: ?[]const u8) !void {
     self.loaded_scene_name = if (name) |n| try eng.get().general_allocator.dupe(u8, n) else null;
 }
 
-pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
+pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), standard_renderer: *StandardRenderer, terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
+    if (eng.get().input.get_key_down(eng.input.KeyCode.M)) {
+        switch (self.editor_mode) {
+            .SceneEditor => self.editor_mode = .FrameDataEditor,
+            .FrameDataEditor => self.editor_mode = .SceneEditor,
+        }
+    }
+
+    switch (self.editor_mode) {
+        .FrameDataEditor => try self.frame_data_editor.update_and_render(standard_renderer),
+        .SceneEditor => try self.update_and_render(selection_textures, standard_renderer, terrain_renderer, ocean),
+    }
+}
+
+fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32), standard_renderer: *StandardRenderer, terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
+    _ = standard_renderer;
+    
     if (!eng.get().imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
 

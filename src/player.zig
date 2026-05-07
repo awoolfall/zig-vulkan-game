@@ -134,20 +134,20 @@ pub fn player_control_system() !void {
                 }
 
                 // apply supported movement
+                const move_t = 1.0 - std.math.exp(-20.0 * engine.time.delta_time_f32());
                 if (zm.length3(world_movement_direction)[0] > 0.0) {
-                    character_velocity = 
-                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) + 
-                        (zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed), 0.5) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
+                    character_velocity =
+                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) +
+                        (zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed), move_t) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                 } else {
-                    // apply friction TODO FIX
-                    character_velocity = 
-                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) + 
-                        (zm.lerp(character_velocity, zm.f32x4s(0.0), 0.5) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
+                    character_velocity =
+                        (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) +
+                        (zm.lerp(character_velocity, zm.f32x4s(0.0), move_t) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                 }
             } else {
                 // if not supported then apply gravity
                 character_velocity = character_velocity
-                    + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(eng.physics.PhysicsSystem.UpdateRateS * eng.physics.PhysicsSystem.UpdateRateS);
+                    + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(engine.time.delta_time_f32());
             }
             
             if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.Space)) {
@@ -174,7 +174,7 @@ pub fn player_control_system() !void {
                     rotate_towards_dir * zm.f32x4(1.0, 1.0, -1.0, 0.0),
                     zm.f32x4(0.0, 1.0, 0.0, 0.0)
                 );
-                transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 0.1);
+                transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 1.0 - std.math.exp(-6.0 * engine.time.delta_time_f32()));
                 // character.setRotation(
                 //     zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 0.1)
                 // );

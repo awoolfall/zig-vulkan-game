@@ -110,7 +110,7 @@ pub fn opponent_behaviour_system() !void {
 
         // Rotate to face character
         const rot = zm.lookAtRh(transform_component.transform.position * zm.f32x4(1.0,1.0,-1.0,1.0), player_transform_component.transform.position * zm.f32x4(1.0,1.0,-1.0,1.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
-        transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 0.1);
+        transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 1.0 - std.math.exp(-6.0 * eng.get().time.delta_time_f32()));
         // opponent_physics.setRotation(
         //     zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)
         // );
