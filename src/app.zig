@@ -23,6 +23,7 @@ const TerrainRenderer = @import("terrain/terrain_renderer.zig");
 const StandardRenderer = @import("render.zig");
 const Ocean = @import("ocean/ocean.zig");
 const Clouds = @import("clouds/clouds.zig");
+const Atmosphere = @import("atmosphere/atmosphere.zig");
 const EditMode = @import("edit_mode.zig");
 const player = @import("player.zig");
 const opponent = @import("opponent.zig");
@@ -41,6 +42,7 @@ standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
 ocean: Ocean,
 clouds: Clouds,
+atmosphere: Atmosphere,
 particles_renderer: eng.particles_renderer.ParticleRenderer,
 
 edit_mode: EditMode,
@@ -65,6 +67,7 @@ pub fn deinit(self: *Self) void {
     self.terrain_renderer.deinit();
     self.ocean.deinit();
     self.clouds.deinit();
+    self.atmosphere.deinit();
     self.particles_renderer.deinit();
     self.edit_mode.deinit();
 
@@ -80,32 +83,6 @@ pub fn init() !Self {
 
     std.log.info("App init!", .{});
     const engine = eng.get();
-    
-    // Print model animation names
-    //
-    // const character_model_id = engine.asset_manager.find_asset_id(assets.ModelAsset, "default|character").?;
-    // const character_model = engine.asset_manager.get_asset(assets.ModelAsset, character_model_id) catch unreachable;
-    // std.log.info("character model animations:", .{});
-    // for (character_model.animations, 0..) |*animation, i| {
-    //     std.log.info("{}. anim: {s}", .{i, animation.name});
-    // }
-
-    // for (0..100) |_| {
-    //     chara_transform.position += zm.f32x4(0.0, 0.5, 0.0, 0.0);
-    //     _ = try engine.entities.new_entity(Engine.EntityDescriptor {
-    //         .name = "opponent entity",
-    //         .should_serialize = true,
-    //         .model = "default|character",
-    //         .transform = chara_transform,
-    //         .physics = .{ .Character = .{
-    //             .settings = character_settings,
-    //         } },
-    //         .app = .{
-    //             .health_points = 100,
-    //             .anim_controller_desc = anim_desc,
-    //         },
-    //         });
-    // }
 
     engine.physics.zphy.optimizeBroadPhase();
 
@@ -175,6 +152,9 @@ pub fn init() !Self {
     var clouds = try Clouds.init(eng.get().general_allocator);
     errdefer clouds.deinit();
 
+    var atmosphere = try Atmosphere.init(.{});
+    errdefer atmosphere.deinit();
+
     var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
     errdefer particles_renderer.deinit();
 
@@ -190,6 +170,7 @@ pub fn init() !Self {
         .terrain_renderer = terrain_renderer,
         .ocean = ocean,
         .clouds = clouds,
+        .atmosphere = atmosphere,
         .particles_renderer = particles_renderer,
         .edit_mode = edit_mode,
 
@@ -412,6 +393,22 @@ fn update(self: *Self) !void {
         return;
     };
 
+    // Derive sun direction from first sun/directional light in scene
+    const atm_sun_dir: [3]f32 = blk: {
+        var light_query = eng.get().ecs.query_iterator(.{ ecs.LightComponent });
+        while (light_query.next()) |components| {
+            const lc = components.@"0";
+            if (lc.light.light_type == .Sun or lc.light.light_type == .Directional) {
+                const d = zm.normalize3(lc.light.direction);
+                break :blk .{ d[0], d[1], d[2] };
+            }
+        }
+        break :blk .{ 0.267, 0.856, 0.445 };
+    };
+
+    // Update per-frame atmosphere LUTs before geometry renders
+    self.atmosphere.update_luts(cmd, render_camera, atm_sun_dir);
+
     // Render to HDR buffer
     // Standard HDR render
     self.standard_renderer.render_cmd(
@@ -467,6 +464,9 @@ fn update(self: *Self) !void {
         std.log.warn("Unable to render particle systems: {}", .{err});
     };
     self.particles_renderer.clear();
+
+    // render atmosphere sky (after geometry/ocean, reads depth to discard non-sky pixels)
+    self.atmosphere.render(cmd, render_camera, atm_sun_dir);
 
     // render clouds
     self.clouds.render(cmd, render_camera, &self.standard_renderer) catch |err| {
