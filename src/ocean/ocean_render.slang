@@ -68,6 +68,9 @@ Texture2DArray slope_jacobian_textures;
 [[vk::binding(4, 0)]]
 SamplerState diffuse_sampler;
 
+[[vk::binding(5, 0)]]
+TextureCube<float4> sky_cubemap;
+
 struct vs_out
 {
     float4 position : SV_POSITION;
@@ -118,6 +121,17 @@ float4 clipmap_geometry_to_world_position(float3 input_position, float3 camera_p
     return world_position;
 }
 
+// Fresnel reflectance for an air-water interface (unpolarised, n_water = 1.34).
+float fresnel_water(float cos_theta_i) {
+    const float n = 1.34;
+    float sin2_t = saturate((1.0 / (n * n)) * (1.0 - cos_theta_i * cos_theta_i));
+    float cos_t  = sqrt(1.0 - sin2_t);
+    float rs = (cos_theta_i - n * cos_t) / (cos_theta_i + n * cos_t);
+    float rp = (n * cos_theta_i - cos_t)  / (n * cos_theta_i + cos_t);
+    return 0.5 * (rs * rs + rp * rp);
+}
+
+
 [shader("vertex")]
 vs_out vs_main(vs_in input)
 {
@@ -142,10 +156,13 @@ vs_out vs_main(vs_in input)
     output.tex_coord = output.world_position.xz / push_constant.map_length_m;
 
     float3 displacement = 0.0;
+    const uint32_t clipmap_level = (uint32_t)((push_constant.clipmap_packed_data >> 8) & 0xff);
     for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
         float p = pow(2.0, i);
         float2 uv = output.tex_coord * p;
-        displacement += displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), 0.0).xyz;
+        // mip = clipmap_level (coarser tile → higher mip) + i (each layer doubles frequency)
+        float disp_lod = float(clipmap_level) + float(i);
+        displacement += displacement_textures.SampleLevel(diffuse_sampler, float3(uv, i), disp_lod).xyz;
     }
 
     output.world_position.y += -5.0 + displacement.y * push_constant.map_height_scale * mult_mask;
@@ -176,15 +193,20 @@ ps_out ps_main(vs_out input)
     float3 normal = float3(0.0, 0.0, 0.0);
     float jacobian = 0.0;
 
+    // Compute base derivatives once so the loop can't corrupt them per-iteration
+    float2 base_dx = ddx(input.tex_coord);
+    float2 base_dy = ddy(input.tex_coord);
     for (int i = 0; i < NUM_OCEAN_LOD_LAYERS; i++) {
         const float facet_size = calculate_layer_map_length(push_constant.map_length_m, i) / push_constant.spectrum_image_size;
         float height_to_horizontal = push_constant.map_height_scale / facet_size;
 
         float p = pow(2.0, i);
-        float2 uv = input.tex_coord * p;
-        float3 sj = slope_jacobian_textures.Sample(diffuse_sampler, float3(uv, i)).xyz;
+        float2 uv    = input.tex_coord * p;
+        float2 uv_dx = base_dx * p;
+        float2 uv_dy = base_dy * p;
+        float3 sj = slope_jacobian_textures.SampleGrad(diffuse_sampler, float3(uv, i), uv_dx, uv_dy).xyz;
         float3 sjn = (float3(sj.x, 0.0, sj.z) / p) * height_to_horizontal;
-        normal += float3(sjn.x, 0.0, sjn.z); // accumulate only X/Z slope
+        normal += float3(sjn.x, 0.0, sjn.z);
         jacobian += sj.y;
     }
 
@@ -216,6 +238,27 @@ ps_out ps_main(vs_out input)
 
     float roughnesss = lerp(0.2, 0.8, foam_mask);
 
+    // Fresnel sky reflection: full unpolarised dielectric (n_water = 1.34)
+    float3 reflect_dir = reflect(-view_dir, normal);
+    float  VdotN       = saturate(dot(view_dir, normal));
+    float  F           = fresnel_water(VdotN);
+
+    // Specular AA: measure how fast the normal varies across pixels and convert to roughness.
+    // At grazing angles many wave-normal texels collapse into few screen pixels, so the
+    // variance spikes exactly where shimmer is worst.
+    float3 dndx = ddx(normal);
+    float3 dndy = ddy(normal);
+    float  normal_variance    = dot(dndx, dndx) + dot(dndy, dndy);
+    float  aa_roughness       = saturate(roughnesss + min(normal_variance * 2.0, 0.8));
+
+    // Secondary boost for pure geometric sensitivity: near VdotN=0 the reflected direction
+    // swings far for any normal perturbation, even when variance is low.
+    float  grazing_boost      = pow(saturate(1.0 - VdotN), 4.0);
+    float  effective_roughness = saturate(aa_roughness + grazing_boost * (1.0 - aa_roughness));
+
+    float3 blurred_dir = normalize(lerp(reflect_dir, normal, effective_roughness * effective_roughness));
+    float3 sky_refl    = sky_cubemap.Sample(diffuse_sampler, blurred_dir).rgb;
+
     // apply lights
     const float3 ambient_colour = float3(1.0, 1.0, 1.0) * 0.01;
     output.colour.rgb = ambient_colour;
@@ -240,13 +283,8 @@ ps_out ps_main(vs_out input)
     float sunnormal = dot(lights_data[0].lights[0].direction.xyz, float3(0.0, 1.0, 0.0));
     output.colour.rgb = output.colour.rgb + saturate(k1 * pow(0.5 - 0.5 * dotsun, 3) * wave_height + k2 * dotnormal) * k3 * (smoothstep(-0.2, 0.5, sunnormal) + ambient_light) * diffuse_colour.rgb;
 
-    // apply fog
-    float fog_distance = (0.3 / input.position.w);
-    float fog_end = 300.0;
-    float fog_begin = 10.0;
-    float fog_amount = 1.0 - clamp((fog_end - fog_distance) / (fog_end - fog_begin), 0.0, 1.0);
-    float3 fog_colour = pow(float3(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0), 2.2);
-    output.colour = lerp(output.colour, float4(fog_colour, 1.0), fog_amount);
+    // Fresnel-blend surface lighting with reflected sky (energy-conserving)
+    output.colour.rgb = lerp(output.colour.rgb, sky_refl, F);
 
     output.colour.a = 1.0;
     return output;

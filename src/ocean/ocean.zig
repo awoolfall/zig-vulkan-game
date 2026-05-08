@@ -118,6 +118,7 @@ render_shallow_spots_list: std.ArrayList(ShallowSpot),
 
 render_displacement_view: gfx.ImageView.Ref,
 render_slope_jacobian_view: gfx.ImageView.Ref,
+render_sky_cubemap_view: gfx.ImageView.Ref,
 
 render_descriptor_layout: gfx.DescriptorLayout.Ref,
 render_descriptor_pool: gfx.DescriptorPool.Ref,
@@ -228,7 +229,7 @@ pub fn deinit(self: *Self) void {
     self.render_shader_file_watcher.deinit();
 }
 
-pub fn init(settings: OceanSettings) !Self {
+pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean init");
     defer __tracy_zone.End();
 
@@ -795,6 +796,11 @@ pub fn init(settings: OceanSettings) !Self {
                 .binding = 4,
                 .binding_type = .Sampler,
             },
+            gfx.DescriptorBindingInfo {
+                .shader_stages = .{ .Pixel = true, },
+                .binding = 5,
+                .binding_type = .ImageView,
+            },
         },
     });
     errdefer render_descriptor_layout.deinit();
@@ -833,6 +839,10 @@ pub fn init(settings: OceanSettings) !Self {
             gfx.DescriptorSetUpdateWriteInfo {
                 .binding = 4,
                 .data = .{ .Sampler = sampler },
+            },
+            gfx.DescriptorSetUpdateWriteInfo {
+                .binding = 5,
+                .data = .{ .ImageView = sky_cubemap },
             },
         },
     });
@@ -947,6 +957,7 @@ pub fn init(settings: OceanSettings) !Self {
 
         .render_displacement_view = render_displacement_view,
         .render_slope_jacobian_view = render_slope_jacobian_view,
+        .render_sky_cubemap_view = sky_cubemap,
 
         .render_descriptor_layout = render_descriptor_layout,
         .render_descriptor_pool = render_descriptor_pool,
@@ -1476,7 +1487,7 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
 
     self.clipmap_mesh.render_clipmap_geometry(
         cmd,
-        6,
+        10,
         .{ .Vertex = true, .Pixel = true, },
         @offsetOf(RenderPushConstantData, "clipmap_data"),
         push_constant_data.camera_position

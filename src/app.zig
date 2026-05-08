@@ -146,14 +146,14 @@ pub fn init() !Self {
     var terrain_renderer = try TerrainRenderer.init();
     errdefer terrain_renderer.deinit();
 
-    var ocean = try Ocean.init(.{ .amplitude = 0.08, .wind = .{ 9.0, 0.0 } });
+    var atmosphere = try Atmosphere.init(.{});
+    errdefer atmosphere.deinit();
+
+    var ocean = try Ocean.init(.{ .amplitude = 0.08, .wind = .{ 9.0, 0.0 } }, atmosphere.cubemap_sampler_view);
     errdefer ocean.deinit();
 
     var clouds = try Clouds.init(eng.get().general_allocator);
     errdefer clouds.deinit();
-
-    var atmosphere = try Atmosphere.init(.{});
-    errdefer atmosphere.deinit();
 
     var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
     errdefer particles_renderer.deinit();
@@ -408,6 +408,7 @@ fn update(self: *Self) !void {
 
     // Update per-frame atmosphere LUTs before geometry renders
     self.atmosphere.update_luts(cmd, render_camera, atm_sun_dir);
+    self.atmosphere.update_cubemap(cmd, render_camera.transform.position[1] / 1000.0, atm_sun_dir);
 
     // Render to HDR buffer
     // Standard HDR render

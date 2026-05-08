@@ -169,13 +169,6 @@ ps_out ps_main(vs_out input)
         output.colour = diffuse_colour;
     }
 
-    float fog_distance = (0.3 / input.position.w);
-    float fog_end = 300.0;
-    float fog_begin = 10.0;
-    float fog_amount = 1.0 - clamp((fog_end - fog_distance) / (fog_end - fog_begin), 0.0, 1.0);
-    float3 fog_colour = pow(float3(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0), 2.2);
-    output.colour = lerp(output.colour, float4(fog_colour, 1.0), fog_amount);
-
     output.colour.a = 1.0;
 
     //output.colour = float4((normalize(input.normal) + 1.0) / 2.0 , 1.0);

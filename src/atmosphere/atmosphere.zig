@@ -6,8 +6,9 @@ const zm = eng.zmath;
 const gfx = eng.gfx;
 const FileWatcher = eng.assets.FileWatcher;
 
-const SkyViewShaderUri = "src:/atmosphere/atmosphere_sky_view.slang";
-const RenderShaderUri  = "src:/atmosphere/atmosphere_render.slang";
+const SkyViewShaderUri    = "src:/atmosphere/atmosphere_sky_view.slang";
+
+const CubemapShaderSrc = @embedFile("atmosphere_cubemap.slang");
 
 // atmosphere_common.slang is prepended to file-watched shaders at compile time.
 const AtmosphereCommonSrc = @embedFile("atmosphere_common.slang");
@@ -18,6 +19,7 @@ const MULTI_SCATTER_SIZE: u32 = 32;
 const SKY_VIEW_W: u32 = 200;
 const SKY_VIEW_H: u32 = 100;
 const AERIAL_SIZE: [3]u32 = .{ 32, 32, 32 };
+const CUBEMAP_FACE_SIZE: u32 = 256;
 
 // GPU-side struct matching AtmosphereParams in the shaders (float4 for vec3 fields).
 const AtmosphereParamsGPU = extern struct {
@@ -45,12 +47,17 @@ const AerialPushConstant = extern struct {
     _pad1:                f32 = 0,
 };
 
-const RenderPushConstant = extern struct {
+const CubemapPushConstant = extern struct {
+    sun_direction:       [3]f32,
+    camera_altitude_km:  f32,
+};
+
+const SkyAerialPushConstant = extern struct {
     inv_view_projection:  zm.Mat,
     sun_direction:        [3]f32,
     _pad0:                f32 = 0,
     camera_position_km:   [3]f32,
-    _pad1:                f32 = 0,
+    aerial_km_per_slice:  f32,
 };
 
 pub const AtmosphereSettings = struct {
@@ -82,6 +89,15 @@ aerial_view:         gfx.ImageView.Ref,
 
 aerial_perspective_lut_view: gfx.ImageView.Ref,
 
+cubemap_image:        gfx.Image.Ref,
+cubemap_storage_view: gfx.ImageView.Ref,
+cubemap_sampler_view: gfx.ImageView.Ref,
+
+cubemap_descriptor_layout: gfx.DescriptorLayout.Ref,
+cubemap_descriptor_pool:   gfx.DescriptorPool.Ref,
+cubemap_descriptor_set:    gfx.DescriptorSet.Ref,
+cubemap_pipeline:          gfx.ComputePipeline.Ref,
+
 lut_sampler: gfx.Sampler.Ref,
 
 transmittance_descriptor_layout: gfx.DescriptorLayout.Ref,
@@ -105,13 +121,10 @@ aerial_descriptor_pool:   gfx.DescriptorPool.Ref,
 aerial_descriptor_set:    gfx.DescriptorSet.Ref,
 aerial_pipeline:          gfx.ComputePipeline.Ref,
 
-render_descriptor_layout: gfx.DescriptorLayout.Ref,
-render_descriptor_pool:   gfx.DescriptorPool.Ref,
-render_descriptor_set:    gfx.DescriptorSet.Ref,
-render_render_pass:        gfx.RenderPass.Ref,
-render_framebuffer:        gfx.FrameBuffer.Ref,
-render_pipeline:           gfx.GraphicsPipeline.Ref,
-render_shader_watcher:     FileWatcher,
+sky_aerial_descriptor_layout: gfx.DescriptorLayout.Ref,
+sky_aerial_descriptor_pool:   gfx.DescriptorPool.Ref,
+sky_aerial_descriptor_set:    gfx.DescriptorSet.Ref,
+sky_aerial_pipeline:          gfx.ComputePipeline.Ref,
 
 pub fn deinit(self: *Self) void {
     self.transmittance_pipeline.deinit();
@@ -135,15 +148,21 @@ pub fn deinit(self: *Self) void {
     self.aerial_descriptor_pool.deinit();
     self.aerial_descriptor_layout.deinit();
 
-    self.render_pipeline.deinit();
-    self.render_framebuffer.deinit();
-    self.render_render_pass.deinit();
-    self.render_descriptor_set.deinit();
-    self.render_descriptor_pool.deinit();
-    self.render_descriptor_layout.deinit();
-    self.render_shader_watcher.deinit();
+    self.cubemap_pipeline.deinit();
+    self.cubemap_descriptor_set.deinit();
+    self.cubemap_descriptor_pool.deinit();
+    self.cubemap_descriptor_layout.deinit();
+
+    self.sky_aerial_pipeline.deinit();
+    self.sky_aerial_descriptor_set.deinit();
+    self.sky_aerial_descriptor_pool.deinit();
+    self.sky_aerial_descriptor_layout.deinit();
 
     self.lut_sampler.deinit();
+
+    self.cubemap_sampler_view.deinit();
+    self.cubemap_storage_view.deinit();
+    self.cubemap_image.deinit();
 
     self.aerial_view.deinit();
     self.aerial_image.deinit();
@@ -221,6 +240,32 @@ pub fn init(settings: AtmosphereSettings) !Self {
 
     const aerial_view = try gfx.ImageView.init(.{ .image = aerial_image, .view_type = .ImageView3D });
     errdefer aerial_view.deinit();
+
+    const cubemap_image = try gfx.Image.init(.{
+        .match_swapchain_extent = false,
+        .width = CUBEMAP_FACE_SIZE, .height = CUBEMAP_FACE_SIZE,
+        .array_length = 6,
+        .is_cube = true,
+        .format = .Rgba16_Float,
+        .usage_flags = .{ .StorageResource = true, .ShaderResource = true },
+        .access_flags = .{ .GpuWrite = true },
+        .dst_layout = .ShaderReadOnlyOptimal,
+    }, null);
+    errdefer cubemap_image.deinit();
+
+    // 2D array view for compute UAV writes (Vulkan forbids cube views as storage images)
+    const cubemap_storage_view = try gfx.ImageView.init(.{
+        .image = cubemap_image,
+        .view_type = .ImageView2DArray,
+    });
+    errdefer cubemap_storage_view.deinit();
+
+    // Cube view for sampling in later pipeline stages
+    const cubemap_sampler_view = try gfx.ImageView.init(.{
+        .image = cubemap_image,
+        .view_type = .ImageViewCube,
+    });
+    errdefer cubemap_sampler_view.deinit();
 
     // Sampler: linear clamp
     const lut_sampler = try gfx.Sampler.init(.{
@@ -334,67 +379,65 @@ pub fn init(settings: AtmosphereSettings) !Self {
         .{ .binding = 4, .data = .{ .StorageImage = aerial_view } },
     }});
 
-    // --- Render descriptor layout ---
-    const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
+    // --- Cubemap descriptor layout ---
+    const cubemap_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            .{ .shader_stages = .{ .Pixel = true }, .binding = 0, .binding_type = .UniformBuffer },
-            .{ .shader_stages = .{ .Pixel = true }, .binding = 1, .binding_type = .ImageView },
-            .{ .shader_stages = .{ .Pixel = true }, .binding = 2, .binding_type = .ImageView },
-            .{ .shader_stages = .{ .Pixel = true }, .binding = 3, .binding_type = .ImageView },
-            .{ .shader_stages = .{ .Pixel = true }, .binding = 4, .binding_type = .Sampler },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 0, .binding_type = .UniformBuffer },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 1, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 2, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 3, .binding_type = .Sampler },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 4, .binding_type = .StorageImage },
         },
     });
-    errdefer render_descriptor_layout.deinit();
+    errdefer cubemap_descriptor_layout.deinit();
 
-    const render_descriptor_pool = try gfx.DescriptorPool.init(.{
-        .strategy = .{ .Layout = render_descriptor_layout }, .max_sets = 1,
+    const cubemap_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = cubemap_descriptor_layout }, .max_sets = 1,
     });
-    errdefer render_descriptor_pool.deinit();
+    errdefer cubemap_descriptor_pool.deinit();
 
-    const render_descriptor_set = try (try render_descriptor_pool.get()).allocate_set(.{ .layout = render_descriptor_layout });
-    errdefer render_descriptor_set.deinit();
+    const cubemap_descriptor_set = try (try cubemap_descriptor_pool.get()).allocate_set(.{ .layout = cubemap_descriptor_layout });
+    errdefer cubemap_descriptor_set.deinit();
 
-    try (try render_descriptor_set.get()).update(.{ .writes = &.{
+    try (try cubemap_descriptor_set.get()).update(.{ .writes = &.{
         .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = params_buffer } } },
-        .{ .binding = 1, .data = .{ .ImageView = sky_view_view } },
-        .{ .binding = 2, .data = .{ .ImageView = transmittance_view } },
-        .{ .binding = 3, .data = .{ .ImageView = eng.get().gfx.default.depth_view } },
-        .{ .binding = 4, .data = .{ .Sampler = lut_sampler } },
+        .{ .binding = 1, .data = .{ .ImageView = transmittance_view } },
+        .{ .binding = 2, .data = .{ .ImageView = sky_view_view } },
+        .{ .binding = 3, .data = .{ .Sampler = lut_sampler } },
+        .{ .binding = 4, .data = .{ .StorageImage = cubemap_storage_view } },
     }});
 
-    // Render pass
-    const render_pass = try gfx.RenderPass.init(.{
-        .attachments = &.{
-            gfx.AttachmentInfo {
-                .name = "colour",
-                .format = gfx.GfxState.hdr_format,
-                .initial_layout = .ColorAttachmentOptimal,
-                .final_layout = .ColorAttachmentOptimal,
-                .blend_type = .None,
-                .load_op = .Load,
-            },
-        },
-        .subpasses = &.{
-            gfx.SubpassInfo { .attachments = &.{ "colour" } },
-        },
-        .dependencies = &.{
-            gfx.SubpassDependencyInfo {
-                .src_subpass = null,
-                .dst_subpass = 0,
-                .src_access_mask = .{},
-                .src_stage_mask = .{ .color_attachment_output = true },
-                .dst_access_mask = .{ .color_attachment_write = true },
-                .dst_stage_mask = .{ .color_attachment_output = true },
-            },
+    // --- Sky + aerial perspective combined descriptor layout ---
+    const sky_aerial_descriptor_layout = try gfx.DescriptorLayout.init(.{
+        .bindings = &.{
+            .{ .shader_stages = .{ .Compute = true }, .binding = 0, .binding_type = .StorageImage },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 1, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 2, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 3, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 4, .binding_type = .ImageView },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 5, .binding_type = .UniformBuffer },
+            .{ .shader_stages = .{ .Compute = true }, .binding = 6, .binding_type = .Sampler },
         },
     });
-    errdefer render_pass.deinit();
+    errdefer sky_aerial_descriptor_layout.deinit();
 
-    const framebuffer = try gfx.FrameBuffer.init(.{
-        .render_pass = render_pass,
-        .attachments = &.{ .SwapchainHDR },
+    const sky_aerial_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = sky_aerial_descriptor_layout }, .max_sets = 1,
     });
-    errdefer framebuffer.deinit();
+    errdefer sky_aerial_descriptor_pool.deinit();
+
+    const sky_aerial_descriptor_set = try (try sky_aerial_descriptor_pool.get()).allocate_set(.{ .layout = sky_aerial_descriptor_layout });
+    errdefer sky_aerial_descriptor_set.deinit();
+
+    try (try sky_aerial_descriptor_set.get()).update(.{ .writes = &.{
+        .{ .binding = 0, .data = .{ .StorageImage = eng.get().gfx.default.hdr_image_view } },
+        .{ .binding = 1, .data = .{ .ImageView    = eng.get().gfx.default.depth_view } },
+        .{ .binding = 2, .data = .{ .ImageView    = aerial_view } },
+        .{ .binding = 3, .data = .{ .ImageView    = sky_view_view } },
+        .{ .binding = 4, .data = .{ .ImageView    = transmittance_view } },
+        .{ .binding = 5, .data = .{ .UniformBuffer = .{ .buffer = params_buffer } } },
+        .{ .binding = 6, .data = .{ .Sampler      = lut_sampler } },
+    }});
 
     // Static LUT pipelines (embedded, no file watcher)
     const transmittance_pipeline = try create_transmittance_pipeline(transmittance_descriptor_layout);
@@ -406,16 +449,17 @@ pub fn init(settings: AtmosphereSettings) !Self {
     const aerial_pipeline = try create_aerial_pipeline(aerial_descriptor_layout);
     errdefer aerial_pipeline.deinit();
 
+    const sky_aerial_pipeline = try create_sky_aerial_pipeline(sky_aerial_descriptor_layout);
+    errdefer sky_aerial_pipeline.deinit();
+
+    const cubemap_pipeline = try create_cubemap_pipeline(cubemap_descriptor_layout);
+    errdefer cubemap_pipeline.deinit();
+
     // File watchers for hot-reloaded shaders
     const sky_view_path = try eng.util.uri.resolve_file_uri(alloc, SkyViewShaderUri);
     defer alloc.free(sky_view_path);
     var sky_view_shader_watcher = try FileWatcher.init(alloc, sky_view_path, 1000);
     errdefer sky_view_shader_watcher.deinit();
-
-    const render_path = try eng.util.uri.resolve_file_uri(alloc, RenderShaderUri);
-    defer alloc.free(render_path);
-    var render_shader_watcher = try FileWatcher.init(alloc, render_path, 1000);
-    errdefer render_shader_watcher.deinit();
 
     var self = Self {
         .current_settings = settings,
@@ -454,20 +498,22 @@ pub fn init(settings: AtmosphereSettings) !Self {
         .aerial_descriptor_set    = aerial_descriptor_set,
         .aerial_pipeline          = aerial_pipeline,
 
-        .render_descriptor_layout = render_descriptor_layout,
-        .render_descriptor_pool   = render_descriptor_pool,
-        .render_descriptor_set    = render_descriptor_set,
-        .render_render_pass        = render_pass,
-        .render_framebuffer        = framebuffer,
-        .render_pipeline           = undefined,
-        .render_shader_watcher     = render_shader_watcher,
+        .cubemap_image        = cubemap_image,
+        .cubemap_storage_view = cubemap_storage_view,
+        .cubemap_sampler_view = cubemap_sampler_view,
+        .cubemap_descriptor_layout = cubemap_descriptor_layout,
+        .cubemap_descriptor_pool   = cubemap_descriptor_pool,
+        .cubemap_descriptor_set    = cubemap_descriptor_set,
+        .cubemap_pipeline          = cubemap_pipeline,
+
+        .sky_aerial_descriptor_layout = sky_aerial_descriptor_layout,
+        .sky_aerial_descriptor_pool   = sky_aerial_descriptor_pool,
+        .sky_aerial_descriptor_set    = sky_aerial_descriptor_set,
+        .sky_aerial_pipeline          = sky_aerial_pipeline,
     };
 
     self.sky_view_pipeline = try self.create_sky_view_pipeline();
     errdefer self.sky_view_pipeline.deinit();
-
-    self.render_pipeline = try self.create_render_pipeline();
-    errdefer self.render_pipeline.deinit();
 
     // Compute static LUTs synchronously at init
     {
@@ -666,21 +712,26 @@ pub fn update_luts(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.came
 }
 
 pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, sun_direction: [3]f32) void {
-    // Hot-reload render pipeline
-    if (self.render_shader_watcher.was_modified_since_last_check()) blk: {
-        const new_pipeline = self.create_render_pipeline() catch |err| {
-            std.log.err("atmosphere: render shader reload failed: {}", .{err});
-            break :blk;
-        };
-        self.render_pipeline.deinit();
-        self.render_pipeline = new_pipeline;
-        eng.get().gfx.flush();
-    }
+    const swapchain_size = gfx.GfxState.get().swapchain_size();
+    const inv_vp = zm.inverse(zm.mul(
+        camera.transform.generate_view_matrix(),
+        camera.generate_perspective_matrix(gfx.GfxState.get().swapchain_aspect()),
+    ));
+    const cam_pos_km = [3]f32{
+        camera.transform.position[0] / 1000.0,
+        camera.transform.position[1] / 1000.0,
+        camera.transform.position[2] / 1000.0,
+    };
+    const push = SkyAerialPushConstant{
+        .inv_view_projection = inv_vp,
+        .sun_direction       = sun_direction,
+        .camera_position_km  = cam_pos_km,
+        .aerial_km_per_slice = self.current_settings.aerial_perspective_km_per_slice,
+    };
 
-    // Transition depth: DepthStencilAttachmentOptimal -> ShaderReadOnlyOptimal
     cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .late_fragment_tests = true },
-        .dst_stage = .{ .fragment_shader = true },
+        .dst_stage = .{ .compute_shader = true },
         .image_barriers = &.{
             .{
                 .image = eng.get().gfx.default.depth_image,
@@ -689,47 +740,40 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
                 .src_access_mask = .{ .depth_stencil_attachment_write = true },
                 .dst_access_mask = .{ .shader_read = true },
             },
+            .{
+                .image = eng.get().gfx.default.hdr_image,
+                .old_layout = .ColorAttachmentOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .color_attachment_write = true },
+                .dst_access_mask = .{ .shader_read = true, .shader_write = true },
+            },
         },
     });
 
-    {
-        cmd.cmd_begin_render_pass(.{
-            .render_pass = self.render_render_pass,
-            .framebuffer = self.render_framebuffer,
-            .render_area = .full_screen_pixels(),
-        });
-        defer cmd.cmd_end_render_pass();
+    cmd.cmd_bind_compute_pipeline(self.sky_aerial_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.sky_aerial_descriptor_set } });
+    cmd.cmd_push_constants(.{
+        .data = std.mem.asBytes(&push),
+        .offset = 0,
+        .shader_stages = .{ .Compute = true },
+    });
+    cmd.cmd_dispatch(.{
+        .group_count_x = (swapchain_size[0] + 7) / 8,
+        .group_count_y = (swapchain_size[1] + 7) / 8,
+        .group_count_z = 1,
+    });
 
-        const inv_vp = zm.inverse(zm.mul(
-            camera.transform.generate_view_matrix(),
-            camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()),
-        ));
-        const cam_pos_km = [3]f32{
-            camera.transform.position[0] / 1000.0,
-            camera.transform.position[1] / 1000.0,
-            camera.transform.position[2] / 1000.0,
-        };
-        const push = RenderPushConstant {
-            .inv_view_projection = inv_vp,
-            .sun_direction       = sun_direction,
-            .camera_position_km  = cam_pos_km,
-        };
-
-        cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
-        cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.render_descriptor_set } });
-        cmd.cmd_push_constants(.{
-            .data = std.mem.asBytes(&push),
-            .offset = 0,
-            .shader_stages = .{ .Vertex = true, .Pixel = true },
-        });
-        cmd.cmd_draw(.{ .vertex_count = 6 });
-    }
-
-    // Transition depth back: ShaderReadOnlyOptimal -> DepthStencilAttachmentOptimal
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .fragment_shader = true },
-        .dst_stage = .{ .early_fragment_tests = true },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .color_attachment_output = true, .early_fragment_tests = true },
         .image_barriers = &.{
+            .{
+                .image = eng.get().gfx.default.hdr_image,
+                .old_layout = .General,
+                .new_layout = .ColorAttachmentOptimal,
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
+            },
             .{
                 .image = eng.get().gfx.default.depth_image,
                 .old_layout = .ShaderReadOnlyOptimal,
@@ -798,6 +842,30 @@ fn create_aerial_pipeline(layout: gfx.DescriptorLayout.Ref) !gfx.ComputePipeline
     });
 }
 
+fn create_sky_aerial_pipeline(layout: gfx.DescriptorLayout.Ref) !gfx.ComputePipeline.Ref {
+    const alloc = eng.get().general_allocator;
+    const combined = try std.fmt.allocPrint(alloc, "{s}\n{s}", .{ AtmosphereCommonSrc, @embedFile("atmosphere_sky_aerial.slang") });
+    defer alloc.free(combined);
+    const spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
+        .shader_data = combined,
+        .shader_entry_points = &.{ "cs_main" },
+    });
+    defer alloc.free(spirv);
+    const module = try gfx.ShaderModule.init(.{ .spirv_data = spirv });
+    defer module.deinit();
+    return gfx.ComputePipeline.init(.{
+        .compute_shader = .{ .module = &module, .entry_point = "cs_main" },
+        .descriptor_set_layouts = &.{ layout },
+        .push_constants = &.{
+            gfx.PushConstantLayoutInfo {
+                .shader_stages = .{ .Compute = true },
+                .offset = 0,
+                .size = @sizeOf(SkyAerialPushConstant),
+            },
+        },
+    });
+}
+
 fn create_sky_view_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
     const alloc = eng.get().general_allocator;
 
@@ -837,52 +905,59 @@ fn create_sky_view_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
     });
 }
 
-fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
+pub fn update_cubemap(self: *Self, cmd: *gfx.CommandBuffer, camera_altitude_km: f32, sun_direction: [3]f32) void {
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .fragment_shader = true },
+        .dst_stage = .{ .compute_shader = true },
+        .image_barriers = &.{
+            .{ .image = self.cubemap_image, .old_layout = .ShaderReadOnlyOptimal, .new_layout = .General,
+               .src_access_mask = .{ .shader_read = true }, .dst_access_mask = .{ .shader_write = true } },
+        },
+    });
+
+    const push = CubemapPushConstant {
+        .sun_direction      = sun_direction,
+        .camera_altitude_km = camera_altitude_km,
+    };
+    cmd.cmd_bind_compute_pipeline(self.cubemap_pipeline);
+    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.cubemap_descriptor_set } });
+    cmd.cmd_push_constants(.{
+        .data = std.mem.asBytes(&push),
+        .offset = 0,
+        .shader_stages = .{ .Compute = true },
+    });
+    cmd.cmd_dispatch(.{ .group_count_x = CUBEMAP_FACE_SIZE / 8, .group_count_y = CUBEMAP_FACE_SIZE / 8, .group_count_z = 6 });
+
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .fragment_shader = true },
+        .image_barriers = &.{
+            .{ .image = self.cubemap_image, .old_layout = .General, .new_layout = .ShaderReadOnlyOptimal,
+               .src_access_mask = .{ .shader_write = true }, .dst_access_mask = .{ .shader_read = true } },
+        },
+    });
+}
+
+fn create_cubemap_pipeline(layout: gfx.DescriptorLayout.Ref) !gfx.ComputePipeline.Ref {
     const alloc = eng.get().general_allocator;
-
-    const path = try eng.util.uri.resolve_file_uri(alloc, RenderShaderUri);
-    defer alloc.free(path);
-
-    const file = try std.fs.openFileAbsolute(path, .{ .mode = .read_only });
-    defer file.close();
-
-    const file_data = try alloc.alloc(u8, try file.getEndPos());
-    defer alloc.free(file_data);
-    _ = try file.readAll(file_data);
-
-    // Prepend atmosphere_common.slang so its symbols are available to the shader
-    const combined = try std.fmt.allocPrint(alloc, "{s}\n{s}", .{ AtmosphereCommonSrc, file_data });
+    const combined = try std.fmt.allocPrint(alloc, "{s}\n{s}", .{ AtmosphereCommonSrc, CubemapShaderSrc });
     defer alloc.free(combined);
-
     const spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
         .shader_data = combined,
-        .shader_entry_points = &.{ "vs_main", "ps_main" },
+        .shader_entry_points = &.{ "cs_main" },
     });
     defer alloc.free(spirv);
-
     const module = try gfx.ShaderModule.init(.{ .spirv_data = spirv });
     defer module.deinit();
-
-    const vertex_input = try gfx.VertexInput.init(.{ .bindings = &.{}, .attributes = &.{} });
-    defer vertex_input.deinit();
-
-    return gfx.GraphicsPipeline.init(.{
-        .render_pass    = self.render_render_pass,
-        .subpass_index  = 0,
-        .vertex_shader  = .{ .module = &module, .entry_point = "vs_main" },
-        .vertex_input   = &vertex_input,
-        .pixel_shader   = .{ .module = &module, .entry_point = "ps_main" },
-        .depth_test     = null,
+    return gfx.ComputePipeline.init(.{
+        .compute_shader = .{ .module = &module, .entry_point = "cs_main" },
+        .descriptor_set_layouts = &.{ layout },
         .push_constants = &.{
             gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true },
+                .shader_stages = .{ .Compute = true },
                 .offset = 0,
-                .size = @sizeOf(RenderPushConstant),
+                .size = @sizeOf(CubemapPushConstant),
             },
         },
-        .topology               = .TriangleList,
-        .rasterization_fill_mode = .Fill,
-        .front_face             = .Clockwise,
-        .descriptor_set_layouts = &.{ self.render_descriptor_layout },
     });
 }
