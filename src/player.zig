@@ -18,11 +18,9 @@ pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.Animation
     };
 
     const character_virtual_settings = eng.physics.CharacterVirtualSettings {
-        .base = eng.physics.CharacterBaseSettings {
-            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-            .max_slope_angle = 70.0,
-            .shape = chara_shape,
-        },
+        .shape = chara_shape,
+        .up_direction = [4]f32{0.0, 1.0, 0.0, 0.0},
+        .max_slope_angle = std.math.degreesToRadians(70.0),
         .mass = 70.0,
         .character_padding = 0.02,
     };
@@ -71,6 +69,7 @@ pub fn player_control_system() !void {
         ecs.PlayerCharacterComponent,
         eng.ecs.TransformComponent,
         eng.ecs.PhysicsComponent,
+        eng.ecs.PhysicsRuntimeComponent,
         eng.ecs.AnimationControllerComponent,
     });
 
@@ -78,6 +77,7 @@ pub fn player_control_system() !void {
         const player_character_component: *ecs.PlayerCharacterComponent,
         const transform_component: *eng.ecs.TransformComponent,
         const physics_component: *eng.ecs.PhysicsComponent,
+        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent,
         const anim_controller_component: *eng.ecs.AnimationControllerComponent = components;
 
         // Input to move the model around
@@ -123,7 +123,7 @@ pub fn player_control_system() !void {
             //     .colour = zm.f32x4(1.0, 0.0, 0.0, 1.0),
             // });
 
-            const character = physics_component.runtime_data.CharacterVirtual.virtual;
+            const character = physics_runtime_component.runtime_data.CharacterVirtual.virtual;
 
             var character_velocity = physics_component.velocity;// zm.loadArr3(character.getLinearVelocity());
 
@@ -147,7 +147,7 @@ pub fn player_control_system() !void {
             } else {
                 // if not supported then apply gravity
                 character_velocity = character_velocity
-                    + zm.loadArr3(engine.physics.zphy.getGravity()) * zm.f32x4s(engine.time.delta_time_f32());
+                    + zm.loadArr3(engine.physics.zphysics.system.getGravity()) * zm.f32x4s(engine.time.delta_time_f32());
             }
             
             if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.Space)) {
@@ -212,7 +212,7 @@ pub fn player_control_system() !void {
                 //self.player_attack_particle_system.settings.initial_velocity = zm.f32x4s(0.0); //camera_forward_2d * zm.f32x4s(10.0);
                 //self.player_attack_particle_system.emit_particle_burst();
 
-                engine.physics.zphy.getNarrowPhaseQuery().collideShape(
+                engine.physics.zphysics.system.getNarrowPhaseQuery().collideShape(
                     box_shape,
                     [3]f32{1.0, 1.0, 1.0},
                     matrix,

@@ -23,6 +23,7 @@ Texture2D<float4> sky_view_lut;
 SamplerState lut_sampler;
 
 [[vk::binding(4, 0)]]
+[[vk::image_format("rgba16f")]]
 RWTexture2DArray<float4> output_cube;
 
 // Map a face index and normalised UV in [0,1]^2 to a world-space direction.

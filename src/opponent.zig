@@ -17,11 +17,9 @@ pub fn spawn_opponent_character(transform: eng.Transform, animation_graph: *eng.
     };
 
     const character_virtual_settings = eng.physics.CharacterVirtualSettings {
-        .base = eng.physics.CharacterBaseSettings {
-            .up = [4]f32{0.0, 1.0, 0.0, 0.0},
-            .max_slope_angle = 70.0,
-            .shape = chara_shape,
-        },
+        .shape = chara_shape,
+        .up_direction = [4]f32{0.0, 1.0, 0.0, 0.0},
+        .max_slope_angle = std.math.degreesToRadians(70.0),
         .mass = 70.0,
         .character_padding = 0.02,
     };
@@ -62,11 +60,12 @@ pub fn opponent_behaviour_system() !void {
     const player_transform_component: *eng.ecs.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
     _ = player_character_component;
 
-    var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent, eng.ecs.AnimationControllerComponent });
+    var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent, eng.ecs.PhysicsRuntimeComponent, eng.ecs.AnimationControllerComponent });
     while (query.next()) |components| {
         const opponent_component: *ecs.OpponentCharacterComponent,
         const transform_component: *eng.ecs.TransformComponent,
         const physics_component: *eng.ecs.PhysicsComponent,
+        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent,
         const animation_component: *eng.ecs.AnimationControllerComponent = components;
 
         var desired_movement_direction = zm.f32x4s(0.0);
@@ -77,7 +76,7 @@ pub fn opponent_behaviour_system() !void {
             desired_movement_direction += zm.normalize3(pos_diff);
         }
 
-        const opponent_physics = physics_component.runtime_data.CharacterVirtual.virtual;
+        const opponent_physics = physics_runtime_component.runtime_data.CharacterVirtual.virtual;
 
         if (zm.length3(desired_movement_direction)[0] != 0.0) {
             desired_movement_direction = zm.normalize3(desired_movement_direction);
@@ -98,7 +97,7 @@ pub fn opponent_behaviour_system() !void {
             } else {
                 // if not supported then apply gravity
                 character_velocity = character_velocity
-                    + zm.loadArr3(eng.get().physics.zphy.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                    + zm.loadArr3(eng.get().physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
             }
 
             physics_component.velocity = character_velocity;

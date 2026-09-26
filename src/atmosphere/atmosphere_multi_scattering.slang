@@ -27,6 +27,7 @@ Texture2D<float4> transmittance_lut;
 SamplerState lut_sampler;
 
 [[vk::binding(3, 0)]]
+[[vk::image_format("rgba16f")]]
 RWTexture2D<float4> multi_scatter_lut : register(u0);
 
 groupshared float3 gs_L2nd[64];

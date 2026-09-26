@@ -467,7 +467,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, selected_id: u32) !void {
     cmd.cmd_bind_compute_pipeline(self.compute_pipeline);
     cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.compute_descriptor_set } });
     cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true, } });
-    cmd.cmd_dispatch(.{ .group_count_x = eng.get().gfx.swapchain_size()[0], .group_count_y = eng.get().gfx.swapchain_size()[1], .group_count_z = 1, });
+    cmd.cmd_dispatch(.{ .group_count_x = (eng.get().gfx.swapchain_size()[0] + 7) / 8, .group_count_y = (eng.get().gfx.swapchain_size()[1] + 7) / 8, .group_count_z = 1, });
 
     cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .compute_shader = true, },

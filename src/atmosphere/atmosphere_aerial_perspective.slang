@@ -38,6 +38,7 @@ Texture2D<float4> multi_scatter_lut;
 SamplerState lut_sampler;
 
 [[vk::binding(4, 0)]]
+[[vk::image_format("rgba16f")]]
 RWTexture3D<float4> aerial_lut : register(u0);
 
 [[vk::push_constant]]

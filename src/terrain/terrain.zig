@@ -246,7 +246,7 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
 /// Removes the physics body from the terrain if it exists
 fn remove_physics_body(self: *Self) void {
     if (self.physics_body_id) |*b| {
-        const body_interface = eng.get().physics.zphy.getBodyInterfaceMut();
+        const body_interface = eng.get().physics.zphysics.system.getBodyInterfaceMut();
         body_interface.removeAndDestroyBody(b.*);
         self.physics_body_id = null;
     }
@@ -254,7 +254,7 @@ fn remove_physics_body(self: *Self) void {
 
 /// Regenerates the heightmap physics body using the internal heightmap data
 fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
-    const body_interface = eng.get().physics.zphy.getBodyInterfaceMut();
+    const body_interface = eng.get().physics.zphysics.system.getBodyInterfaceMut();
 
     // create the new physics body
     const heightmap_side_length: u32 = @intCast(std.math.sqrt(self.heightmap.len));

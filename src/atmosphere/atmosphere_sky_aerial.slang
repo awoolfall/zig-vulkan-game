@@ -12,7 +12,7 @@ struct SkyAerialPushConstant {
     float    aerial_km_per_slice;
 };
 
-[[vk::binding(0, 0)]] RWTexture2D<float4>              hdr_image;
+[[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4>              hdr_image;
 [[vk::binding(1, 0)]] Texture2D<float>                 depth_image;
 [[vk::binding(2, 0)]] Texture3D<float4>                aerial_lut;
 [[vk::binding(3, 0)]] Texture2D<float4>                sky_view_lut;

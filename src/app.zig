@@ -84,8 +84,6 @@ pub fn init() !Self {
     std.log.info("App init!", .{});
     const engine = eng.get();
 
-    engine.physics.zphy.optimizeBroadPhase();
-
     var player_attack_particle_system_settings = eng.particles.ParticleSystemSettings {
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
@@ -273,8 +271,8 @@ fn update(self: *Self) !void {
             var vel_buf: [128]u8 = [_]u8{0} ** 128;
             var vel_text: []u8 = vel_buf[0..0];
             if (self.character_entity) |character_entity| blk: {
-                const physics_component = eng.get().ecs.get_component(eng.ecs.PhysicsComponent, character_entity) orelse break :blk;
-                const character = physics_component.runtime_data.CharacterVirtual.virtual;
+                const physics_runtime_component = eng.get().ecs.get_component(eng.ecs.PhysicsRuntimeComponent, character_entity) orelse break :blk;
+                const character = physics_runtime_component.runtime_data.CharacterVirtual.virtual;
                 const character_velocity = zm.loadArr3(character.getLinearVelocity());
                 vel_text = std.fmt.bufPrint(vel_buf[0..], "character speed: {d:.2}\nvelocity: {d:.2}", .{
                     zm.length3(character_velocity)[0],
@@ -369,6 +367,7 @@ fn update(self: *Self) !void {
     // Update animation times
     var animation_component_iterator = eng.get().ecs.component_iterator(eng.ecs.AnimationControllerComponent);
     while (animation_component_iterator.next()) |component| {
+        component.control_data.active_time += eng.get().time.delta_time_f32();
         eng.AnimationGraph.update(component.graph, &component.control_data);
     }
 
@@ -393,12 +392,12 @@ fn update(self: *Self) !void {
         return;
     };
 
-    // Derive sun direction from first sun/directional light in scene
+    // Derive sun direction from first sun light in scene
     const atm_sun_dir: [3]f32 = blk: {
         var light_query = eng.get().ecs.query_iterator(.{ ecs.LightComponent });
         while (light_query.next()) |components| {
             const lc = components.@"0";
-            if (lc.light.light_type == .Sun or lc.light.light_type == .Directional) {
+            if (lc.light.light_type == .Sun) {
                 const d = zm.normalize3(lc.light.direction);
                 break :blk .{ d[0], d[1], d[2] };
             }
@@ -568,15 +567,17 @@ pub fn push_all_entities_for_rendering(
             const maybe_anim_component = eng.get().ecs.get_component(eng.ecs.AnimationControllerComponent, entity);
 
             const transform = eng.get().physics.calculate_entity_visual_transform(entity);
-            
-            self.push_model_for_rendering(
-                bone_arena.allocator(),
-                entity,
-                model_component.model orelse defualt_model_component.model.?,
-                transform,
-                maybe_anim_component
-            ) catch |err| {
-                std.log.warn("Failed to render entity model: {}", .{err});
+
+            self.standard_renderer.push_model(.{
+                .model = model_component.model orelse default_model_id,
+                .animation_data = if (maybe_anim_component) |ac| .{
+                    .animation_graph = ac.graph,
+                    .control_data = &ac.control_data,
+                } else null,
+                .transform = transform,
+                .entity_id = @truncate(entity.idx.index),
+            }) catch |err| {
+                std.log.warn("Unable to push model for rendering: {}", .{err});
                 break :blk;
             };
         }
@@ -590,10 +591,8 @@ pub fn push_all_entities_for_rendering(
             light_component.light.direction = transform_component.transform.forward_direction();
             
             self.standard_renderer.push_light(light_component.light) catch |err| {
-                std.log.warn("Unable to push light '{s}' for rendering: {}", .{
-                    entity.idx.index,
-                    err
-                });
+                std.log.warn("Unable to push light '{s}' for rendering: {}", .{ entity.idx.index, err });
+                break :blk;
             };
         }
 
@@ -605,140 +604,6 @@ pub fn push_all_entities_for_rendering(
                 break :blk;
             };
         }
-    }
-}
-
-pub fn push_model_for_rendering(
-    self: *Self,
-    alloc: std.mem.Allocator,
-    entity: eng.ecs.Entity,
-    model: assets.ModelAssetId,
-    transform: Transform,
-    maybe_anim_controller: ?*eng.ecs.AnimationControllerComponent,
-) !void {
-    const engine = eng.get();
-
-    const m = engine.asset_manager.get_asset(assets.ModelAsset, model) catch unreachable;
-
-    const pose = try alloc.alloc(zm.Mat, eng.mesh.MAX_BONES);
-    defer alloc.free(pose);
-    @memset(pose, zm.identity());
-
-    const bone_info = blk: {
-        if (maybe_anim_controller) |anim_controller| {
-            anim_controller.graph.calculate_bone_transforms(eng.get().general_allocator, m, &anim_controller.control_data, pose);
-
-            const bone_index_info = self.standard_renderer.push_bones(pose[0..]) catch unreachable;
-
-            break :blk StandardRenderer.AnimatedRenderObject.BoneInfo {
-                .bone_offset = bone_index_info.start_idx,
-                .bone_count = bone_index_info.end_idx - bone_index_info.start_idx,
-            };
-        } else {
-            break :blk null;
-        }
-    };
-
-    // Finally, render the model
-    self.render_model(
-        @truncate(entity.idx.index),
-        m,
-        if (bone_info) |bi| 
-        .{
-            .pose_data = pose,
-            .bone_info = bi,
-        }
-        else null,
-        transform
-    ) catch unreachable;
-}
-
-pub fn render_model(
-    self: *Self,
-    entity_id: u32,
-    model: *const eng.mesh.Model,
-    bones_data: ?struct {
-        pose_data: []const zm.Mat,
-        bone_info: StandardRenderer.AnimatedRenderObject.BoneInfo,
-    },
-    transform: Transform,
-) !void {
-    const __tracy_zone = eng.ztracy.ZoneN(@src(), "render model");
-    defer __tracy_zone.End();
-
-    const node_matrix_list = try eng.get().general_allocator.alloc(zm.Mat, model.nodes.len);
-    defer eng.get().general_allocator.free(node_matrix_list);
-
-    const root_transform = transform.generate_model_matrix();
-
-    for (model.nodes, 0..) |*node, node_index| {
-        const parent_matrix = if (node.parent) |parent_node_index| blk: {
-            std.debug.assert(parent_node_index < node_index);
-            break :blk node_matrix_list[parent_node_index];
-        } else root_transform;
-
-        var node_model_matrix = zm.mul(node.transform.generate_model_matrix(), parent_matrix);
-
-        // Apply pose
-        if (bones_data) |bd| {
-            const ___tracy_zone = eng.ztracy.ZoneN(@src(), "apply pose");
-            defer ___tracy_zone.End();
-            if (node.name) |node_name| {
-                if (model.bones_names_map.get(node_name)) |bone_id| {
-                    const bone_data = &model.bones_info[@intCast(bone_id)];
-                    // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
-                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset_matrix), bd.pose_data[@intCast(bone_id)]), root_transform);
-                }
-            }
-        }
-
-        // Render mesh set
-        if (node.mesh_set) |*mesh_set| {
-            for (mesh_set.primitives_slice()) |prim_index| {
-                const mesh_prim = &model.meshes[prim_index];
-
-                var material = eng.mesh.MaterialTemplate {};
-                if (mesh_prim.material_template) |m_idx| {
-                    material = model.materials[m_idx];
-                }
-
-                const indices_info = blk: { if (mesh_prim.has_indices()) {
-                    break :blk StandardRenderer.RenderObject.IndexInfo {
-                        .buffer_info = .{ 
-                            .buffer = model.indices_buffer,
-                            .offset = @intCast(mesh_prim.indices_offset),
-                        },
-                        .index_count = mesh_prim.index_count,
-                    };
-                } else {
-                    break :blk null;
-                } };
-
-                var render_object = StandardRenderer.RenderObject {
-                    .entity_id = entity_id,
-                    .transform = node_model_matrix,
-                    .vertex_buffers = undefined,
-                    .vertex_count = mesh_prim.vertex_count,
-                    .pos_offset = 0,
-                    .index_buffer = indices_info,
-                    .material = material,
-                };
-                render_object.vertex_buffers[0] = .{ .buffer = model.vertices_buffer, .offset = mesh_prim.vertices_offset, };
-                render_object.vertex_buffers_count = 1;
-
-                if (bones_data) |bd| {
-                    self.standard_renderer.push_animated(.{
-                        .standard = render_object,
-                        .bone_info = bd.bone_info,
-                    }) catch unreachable;
-                } else {
-                    self.standard_renderer.push(render_object)
-                        catch unreachable;
-                }
-            }
-        }
-
-        node_matrix_list[node_index] = node_model_matrix;
     }
 }
 

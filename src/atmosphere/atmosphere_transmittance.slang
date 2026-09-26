@@ -20,6 +20,7 @@ struct AtmosphereParams {
 ConstantBuffer<AtmosphereParams> params : register(b0);
 
 [[vk::binding(1, 0)]]
+[[vk::image_format("rgba16f")]]
 RWTexture2D<float4> transmittance_lut : register(u0);
 
 float density_rayleigh(float h_km, float scale_height_km) {

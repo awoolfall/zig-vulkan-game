@@ -18,6 +18,7 @@ Texture2D<float4> multi_scatter_lut;
 SamplerState lut_sampler;
 
 [[vk::binding(4, 0)]]
+[[vk::image_format("rgba16f")]]
 RWTexture2D<float4> sky_view_lut : register(u0);
 
 struct SkyViewPushConstant {

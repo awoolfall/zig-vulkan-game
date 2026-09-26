@@ -763,6 +763,108 @@ pub fn push_bones(self: *Self, bones: []const zm.Mat) !struct { start_idx: usize
     return .{ .start_idx = start_idx, .end_idx = end_idx, };
 }
 
+pub const ModelRenderObject = struct {
+    model: eng.assets.ModelAssetId,
+    transform: eng.Transform,
+    animation_data: ?struct {
+        animation_graph: *const eng.animation.Graph,
+        control_data: *const eng.animation.Graph.ControlData,
+    } = null,
+    entity_id: ?u32 = null,
+    invisible_node_ids: []usize = &.{},
+};
+
+pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
+    const model: *eng.assets.ModelAsset.BaseType = try eng.get().asset_manager.get_asset(eng.assets.ModelAsset, ro.model);
+
+    var animation_bones = [1]zm.Mat { zm.identity() } ** eng.mesh.MAX_BONES;
+
+    const bone_info = if (ro.animation_data) |anim_data| blk: {
+        anim_data.animation_graph.calculate_bone_transforms(eng.get().general_allocator, model, anim_data.control_data, animation_bones[0..]);
+
+        const bone_index_info = self.push_bones(animation_bones[0..]) catch unreachable;
+
+        break :blk AnimatedRenderObject.BoneInfo {
+            .bone_offset = bone_index_info.start_idx,
+            .bone_count = bone_index_info.end_idx - bone_index_info.start_idx,
+        };
+    } else null;
+
+    const node_matrix_list = try eng.get().general_allocator.alloc(zm.Mat, model.nodes.len);
+    defer eng.get().general_allocator.free(node_matrix_list);
+
+    const root_transform = ro.transform.generate_model_matrix();
+
+    for (model.nodes, 0..) |*node, node_index| {
+        const parent_matrix = if (node.parent) |parent_node_index| blk: {
+            std.debug.assert(parent_node_index < node_index);
+            break :blk node_matrix_list[parent_node_index];
+        } else root_transform;
+
+        var node_model_matrix = zm.mul(node.transform.generate_model_matrix(), parent_matrix);
+
+        // Apply pose
+        if (ro.animation_data != null) {
+            const ___tracy_zone = eng.ztracy.ZoneN(@src(), "apply pose");
+            defer ___tracy_zone.End();
+            if (node.name) |node_name| {
+                if (model.bones_names_map.get(node_name)) |bone_id| {
+                    const bone_data = &model.bones_info[@intCast(bone_id)];
+                    // @TODO: this inverse does not need to happen, work to remove this if performance becomes an issue
+                    node_model_matrix = zm.mul(zm.mul(zm.inverse(bone_data.bone_offset_matrix), animation_bones[@intCast(bone_id)]), root_transform);
+                }
+            }
+        }
+
+        // Render mesh set
+        if (node.mesh_set) |*mesh_set| {
+            for (mesh_set.primitives_slice()) |prim_index| {
+                const mesh_prim = &model.meshes[prim_index];
+
+                var material = eng.mesh.MaterialTemplate {};
+                if (mesh_prim.material_template) |m_idx| {
+                    material = model.materials[m_idx];
+                }
+
+                const indices_info = blk: { if (mesh_prim.has_indices()) {
+                    break :blk RenderObject.IndexInfo {
+                        .buffer_info = .{ 
+                            .buffer = model.indices_buffer,
+                            .offset = @intCast(mesh_prim.indices_offset),
+                        },
+                        .index_count = mesh_prim.index_count,
+                    };
+                } else {
+                    break :blk null;
+                } };
+
+                var render_object = RenderObject {
+                    .entity_id = ro.entity_id,
+                    .transform = node_model_matrix,
+                    .vertex_buffers = undefined,
+                    .vertex_count = mesh_prim.vertex_count,
+                    .pos_offset = 0,
+                    .index_buffer = indices_info,
+                    .material = material,
+                };
+                render_object.vertex_buffers[0] = .{ .buffer = model.vertices_buffer, .offset = mesh_prim.vertices_offset, };
+                render_object.vertex_buffers_count = 1;
+
+                if (bone_info) |bi| {
+                    try self.push_animated(.{
+                        .standard = render_object,
+                        .bone_info = bi,
+                    });
+                } else {
+                    try self.push(render_object);
+                }
+            }
+        }
+
+        node_matrix_list[node_index] = node_model_matrix;
+    }
+}
+
 pub fn push_light(self: *Self, light: Light) !void {
     self.lights.append(eng.get().general_allocator, light) catch unreachable;
 }

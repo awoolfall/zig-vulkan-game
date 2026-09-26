@@ -730,6 +730,20 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
     };
 
     cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .color_attachment_output = true },
+        .dst_stage = .{ .compute_shader = true },
+        .image_barriers = &.{
+            .{
+                .image = eng.get().gfx.default.hdr_image,
+                .old_layout = .ColorAttachmentOptimal,
+                .new_layout = .General,
+                .src_access_mask = .{ .color_attachment_write = true },
+                .dst_access_mask = .{ .shader_read = true, .shader_write = true },
+            },
+        },
+    });
+
+    cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .late_fragment_tests = true },
         .dst_stage = .{ .compute_shader = true },
         .image_barriers = &.{
@@ -739,13 +753,6 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
                 .new_layout = .ShaderReadOnlyOptimal,
                 .src_access_mask = .{ .depth_stencil_attachment_write = true },
                 .dst_access_mask = .{ .shader_read = true },
-            },
-            .{
-                .image = eng.get().gfx.default.hdr_image,
-                .old_layout = .ColorAttachmentOptimal,
-                .new_layout = .General,
-                .src_access_mask = .{ .color_attachment_write = true },
-                .dst_access_mask = .{ .shader_read = true, .shader_write = true },
             },
         },
     });
@@ -765,7 +772,7 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
 
     cmd.cmd_pipeline_barrier(.{
         .src_stage = .{ .compute_shader = true },
-        .dst_stage = .{ .color_attachment_output = true, .early_fragment_tests = true },
+        .dst_stage = .{ .color_attachment_output = true, },
         .image_barriers = &.{
             .{
                 .image = eng.get().gfx.default.hdr_image,
@@ -774,6 +781,13 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Ca
                 .src_access_mask = .{ .shader_write = true },
                 .dst_access_mask = .{ .color_attachment_write = true },
             },
+        },
+    });
+
+    cmd.cmd_pipeline_barrier(.{
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .early_fragment_tests = true },
+        .image_barriers = &.{
             .{
                 .image = eng.get().gfx.default.depth_image,
                 .old_layout = .ShaderReadOnlyOptimal,

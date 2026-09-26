@@ -292,7 +292,20 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
                 defer imui.pop_layout();
 
+                const open_resource_dir_button = Imui.widgets.badge.create(imui, "Open Resource Dir", key ++ .{@src()});
+                //open_resource_dir_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                if (open_resource_dir_button.clicked) blk: {
+                    const resource_dir_str_z = eng.get().frame_allocator.dupeZ(u8, eng.get().asset_manager.resource_directory_str) catch |err| {
+                        std.log.warn("failed to alloc resource dir string: {}", .{err});
+                        break :blk;
+                    };
+                    defer eng.get().frame_allocator.free(resource_dir_str_z);
+
+                    eng.get().window.open_directory_in_file_explorer(resource_dir_str_z) catch break :blk;
+                }
+
                 const save_button = Imui.widgets.badge.create(imui, "Save Scene", key ++ .{@src()});
+                save_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
                         save_entities_to_scene(scene_name) catch |err| {
@@ -302,17 +315,9 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                     }
                 }
                 const load_button = Imui.widgets.badge.create(imui, "Load Scene", key ++ .{@src()});
+                load_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (load_button.clicked) {
                     self.load_scene_popup_is_open = true;
-                    // for (eng.get().entities.list.data.items, 0..) |*it, idx| {
-                    //     if (it.item_data) |_| {
-                    //         eng.get().entities.remove_entity(GenerationalIndex{.index = idx, .generation = it.generation}) catch unreachable;
-                    //     }
-                    // }
-                    // create_scene_entities("scene") catch |err| {
-                    //     std.log.err("Failed to load scene: {}", .{err});
-                    // };
-                    // std.log.debug("loaded!", .{});
                 }
             }
         }
@@ -347,6 +352,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 defer imui.pop_layout();
 
                 const new_button = Imui.widgets.badge.create(imui, "New Entity", key ++ .{@src()});
+                new_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (new_button.clicked) {
                     self.create_new_entity() catch |err| {
                         std.log.err("Failed to create new entity: {}", .{err});
@@ -354,11 +360,13 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const delete_button = Imui.widgets.badge.create(imui, "Delete Entity", key ++ .{@src()});
+                delete_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
 
                 const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
+                duplicate_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity() catch |err| {
                         std.log.err("Failed to duplicate entity: {}", .{err});
@@ -366,6 +374,8 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const edit_ocean_button = Imui.widgets.badge.create(imui, "Edit Ocean Parameters", key ++ .{@src()});
+                // TODO: need an expanding kind which takes largest of child size and parent percentage
+                //edit_ocean_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (edit_ocean_button.clicked) {
                     self.edit_ocean_params_open = true;
                 }
