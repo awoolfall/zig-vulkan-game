@@ -207,7 +207,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         };
     }
 
-    self.camera.orbit_camera_update(zm.f32x4s(0.0), &eng.get().window, &eng.get().input, &eng.get().time);
+    self.camera.orbit_camera_update(zm.f32x4s(0.0), &eng.get().os, &eng.get().input, &eng.get().time);
 }
 
 fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {

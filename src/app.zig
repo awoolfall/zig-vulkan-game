@@ -8,7 +8,6 @@ const zm = eng.zmath;
 const Transform = eng.Transform;
 const gfx = eng.gfx;
 const Imui = eng.ui;
-const window = eng.window;
 const KeyCode = eng.input.KeyCode;
 const gen = eng.gen;
 const ph = eng.physics;
@@ -303,7 +302,7 @@ fn update(self: *Self) !void {
                     target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
                 }
 
-                camera_component.camera_data.orbit_camera_update(target_pos, &engine.window, &engine.input, &engine.time);
+                camera_component.camera_data.orbit_camera_update(target_pos, &engine.os, &engine.input, &engine.time);
                 camera_transform.transform = camera_component.camera_data.transform; // TODO: we shouldn't use two transforms. convert camera update to use ecs
 
                 render_camera = &camera_component.camera_data;
@@ -607,7 +606,7 @@ pub fn push_all_entities_for_rendering(
     }
 }
 
-pub fn window_event_received(self: *Self, event: *const window.WindowEvent) void {
+pub fn window_event_received(self: *Self, event: *const eng.os.WindowEvent) void {
     switch (event.*) {
         .EVENTS_CLEARED => {
             self.update() catch |err| {

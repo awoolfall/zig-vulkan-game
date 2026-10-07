@@ -116,7 +116,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
     _ = standard_renderer;
     
     if (!eng.get().imui.has_focus()) {
-        self.editor_camera.fly_camera_update(&eng.get().window, &eng.get().input, &eng.get().time);
+        self.editor_camera.fly_camera_update(&eng.get().os, &eng.get().input, &eng.get().time);
 
         // focus camera on selected entity
         if (eng.get().input.get_key_down(KeyCode.F)) blk: {
@@ -301,7 +301,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                     };
                     defer eng.get().frame_allocator.free(resource_dir_str_z);
 
-                    eng.get().window.open_directory_in_file_explorer(resource_dir_str_z) catch break :blk;
+                    eng.get().main_window().open_directory_in_file_explorer(resource_dir_str_z) catch break :blk;
                 }
 
                 const save_button = Imui.widgets.badge.create(imui, "Save Scene", key ++ .{@src()});
