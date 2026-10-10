@@ -178,7 +178,7 @@ pub fn init() !Self {
     };
 }
 
-fn update(self: *Self) !void {
+pub fn update(self: *Self) !void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app::update");
     defer __tracy_zone.End();
 
@@ -603,16 +603,5 @@ pub fn push_all_entities_for_rendering(
                 break :blk;
             };
         }
-    }
-}
-
-pub fn window_event_received(self: *Self, event: *const eng.os.WindowEvent) void {
-    switch (event.*) {
-        .EVENTS_CLEARED => {
-            self.update() catch |err| {
-                std.log.err("update failed: {}", .{err});
-            };
-        },
-        else => {},
     }
 }

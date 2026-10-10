@@ -94,8 +94,8 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         const model_drop_zone = eng.ui.widgets.file_drop_zone.create(imui, .{@src()});
         model_drop_zone.id.get().semantic_size[1] = eng.ui.SemanticSize { .kind = .Pixels, .value = 25.0, };
         if (model_drop_zone.data_changed) blk: {
-            std.debug.assert(eng.get().input.dropped_files.len != 0);
-            const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.dropped_files[0]);
+            std.debug.assert(eng.get().input.get_dropped_files().len != 0);
+            const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
             defer eng.get().frame_allocator.free(model_uri);
 
             self.model = eng.get().asset_manager.get_asset_id(model_uri) catch |err| {
@@ -108,8 +108,8 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         var anim_drop_zone = eng.ui.widgets.file_drop_zone.create(imui, .{@src()});
         anim_drop_zone.id.get().semantic_size[1] = eng.ui.SemanticSize { .kind = .Pixels, .value = 25.0, };
         if (anim_drop_zone.data_changed) blk: {
-            std.debug.assert(eng.get().input.dropped_files.len != 0);
-            const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.dropped_files[0]);
+            std.debug.assert(eng.get().input.get_dropped_files().len != 0);
+            const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
             defer eng.get().frame_allocator.free(model_uri);
 
             self.animation_model = eng.get().asset_manager.get_asset_id(model_uri) catch |err| {

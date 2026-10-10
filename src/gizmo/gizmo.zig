@@ -631,16 +631,17 @@ fn translate_with_cursor(self: *const Self, transform: *Transform, cursor_ray: R
 
 fn scale_with_cursor(self: *const Self, transform: *Transform, inv_perspective: zm.Mat, inv_view: zm.Mat, scale_dir: zm.F32x4) void {
     _ = self;
-    const cursor_ray_this_frame = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
+    const cursor_position = eng.get().input.get_cursor_position();
+    const cursor_ray_this_frame = ray_out_point_on_screen_px(cursor_position, inv_perspective, inv_view);
     const closest_point_this_frame = closest_points_between_rays(cursor_ray_this_frame, Ray{
         .origin = transform.position,
         .direction = scale_dir,
     }).point_on_ray2;
 
-    const mouse_delta = [2]i32{@intFromFloat(eng.get().input.mouse_delta[0]), @intFromFloat(eng.get().input.mouse_delta[1])};
+    const mouse_delta = eng.get().input.get_mouse_delta();
     const cursor_pos_last_frame = [2]i32 {
-        eng.get().input.cursor_position[0] - mouse_delta[0],
-        eng.get().input.cursor_position[1] - mouse_delta[1],
+        cursor_position[0] - @as(i32, @intFromFloat(mouse_delta[0])),
+        cursor_position[1] - @as(i32, @intFromFloat(mouse_delta[1])),
     };
     const cursor_ray_last_frame = ray_out_point_on_screen_px(cursor_pos_last_frame, inv_perspective, inv_view);
     const closest_point_last_frame = closest_points_between_rays(cursor_ray_last_frame, Ray{
@@ -681,17 +682,17 @@ inline fn get_coord_space() CoordSpace {
 }
 
 pub fn update(self: *Self, transform: *Transform) bool {
-    const inv_perspective = zm.inverse(self.rendered_perspective_matrix);
-    const inv_view = zm.inverse(self.rendered_view_matrix);
-
-    const coord_space = get_coord_space();
     if (eng.get().input.get_key_down(input.KeyCode.MouseLeft)) {
         self.selected_control = null;
-        if (self.selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1]))) |s| {
+        const cursor_position = eng.get().input.get_cursor_position();
+        if (self.selection_textures.get_value_at_position(@intCast(cursor_position[0]), @intCast(cursor_position[1]))) |s| {
+            const inv_perspective = zm.inverse(self.rendered_perspective_matrix);
+            const inv_view = zm.inverse(self.rendered_view_matrix);
+            const coord_space = get_coord_space();
             self.selected_control = @as(GizmoControl, @enumFromInt(s));
             switch (self.selected_control.?) {
                 .TranslateX, .TranslateY, .TranslateZ => {
-                    const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(cursor_position, inv_perspective, inv_view);
                     const closest_points = closest_points_between_rays(cursor_ray, Ray{
                         .origin = transform.position,
                         .direction = self.selected_control.?.direction(transform, coord_space),
@@ -699,7 +700,7 @@ pub fn update(self: *Self, transform: *Transform) bool {
                     self.selected_offset = closest_points.point_on_ray2 - transform.position;
                 },
                 .RotateX, .RotateY, .RotateZ => {
-                    const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
+                    const cursor_ray = ray_out_point_on_screen_px(cursor_position, inv_perspective, inv_view);
                     const local_direction = self.selected_control.?.direction(transform, coord_space);
                     const plane = Plane {
                         .point = transform.position,
@@ -725,7 +726,11 @@ pub fn update(self: *Self, transform: *Transform) bool {
     }
     if (eng.get().input.get_key(input.KeyCode.MouseLeft)) {
         if (self.selected_control) |s| {
-            const cursor_ray = ray_out_point_on_screen_px(eng.get().input.cursor_position, inv_perspective, inv_view);
+            const inv_perspective = zm.inverse(self.rendered_perspective_matrix);
+            const inv_view = zm.inverse(self.rendered_view_matrix);
+            const coord_space = get_coord_space();
+            const cursor_position = eng.get().input.get_cursor_position();
+            const cursor_ray = ray_out_point_on_screen_px(cursor_position, inv_perspective, inv_view);
             switch (s) {
                 .None => {},
                 .TranslateX, .TranslateY, .TranslateZ => {

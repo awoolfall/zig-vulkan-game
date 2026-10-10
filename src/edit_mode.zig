@@ -171,7 +171,8 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
         // Select entity
         if (interaction_available and eng.get().input.get_key_down(KeyCode.MouseLeft)) {
             interaction_available = false;
-            const selection_entity_id = selection_textures.get_value_at_position(@intCast(eng.get().input.cursor_position[0]), @intCast(eng.get().input.cursor_position[1])) catch |err| {
+            const cursor_position = eng.get().input.get_cursor_position();
+            const selection_entity_id = selection_textures.get_value_at_position(@intCast(cursor_position[0]), @intCast(cursor_position[1])) catch |err| {
                 std.log.err("cannot get value at position: {}", .{err});
                 return;
             };
@@ -535,8 +536,9 @@ fn entity_editor_ui(
         entity_editor_background_position.* = .{ -10.0, 35.0 };
     }
     if (entity_editor_background_signals.dragged) {
-        entity_editor_background_position[0] += eng.get().input.mouse_delta[0];
-        entity_editor_background_position[1] += eng.get().input.mouse_delta[1];
+        const mouse_delta = eng.get().input.get_mouse_delta();
+        entity_editor_background_position[0] += mouse_delta[0];
+        entity_editor_background_position[1] += mouse_delta[1];
     }
 
     const entity_editor_title_text = Imui.widgets.label.create(imui, "Entity Editor");
@@ -831,8 +833,9 @@ fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
         set_background_widget_layout(background_widget);
     }
     if (imui.generate_widget_signals(background_box).dragged) {
-        ocean_editor_background_position[0] += eng.get().input.mouse_delta[0];
-        ocean_editor_background_position[1] += eng.get().input.mouse_delta[1];
+        const mouse_delta = eng.get().input.get_mouse_delta();
+        ocean_editor_background_position[0] += mouse_delta[0];
+        ocean_editor_background_position[1] += mouse_delta[1];
     }
 
     {

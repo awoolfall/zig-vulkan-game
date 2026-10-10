@@ -393,7 +393,7 @@ pub fn edit_terrain(self: *Self, terrain_renderer: *TerrainRenderer) !bool {
     self.dbg_modify_center = .{ 0.0, 0.0 };
 
     if (modify_terrain != 0.0) {
-        const mouse_pos = eng.get().input.cursor_position;
+        const mouse_pos = eng.get().input.get_cursor_position();
         if (mouse_pos[0] < 0 or mouse_pos[1] < 0) {
             return false;
         }

@@ -107,8 +107,9 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
             imui.set_floating_layout_position(picker_floating_layout, picker_floating_position[0], picker_floating_position[1]);
 
             if (imui.generate_widget_signals(picker_floating_layout).dragged) {
-                picker_floating_position[0] += eng.get().input.mouse_delta[0];
-                picker_floating_position[1] += eng.get().input.mouse_delta[1];
+                const mouse_delta = eng.get().input.get_mouse_delta();
+                picker_floating_position[0] += mouse_delta[0];
+                picker_floating_position[1] += mouse_delta[1];
             }
 
             _ = eng.ui.widgets.label.create(imui, "colour picker");
