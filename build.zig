@@ -55,20 +55,13 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(engine.artifact("assimp"));
     b.installArtifact(engine.artifact("joltc"));
 
-    // perform a circular dependency juggle with app, engine, and the exe
-    {
-        // add app module as a dependency to engine module
-        // so that App is accessible from engine
-        engine.module("root").addImport("app", app_library.root_module);
+    // add engine module to app module
+    // so that Engine is accessible from app
+    app_library.root_module.addImport("engine", engine.module("root"));
 
-        // add engine module to app module
-        // so that Engine is accessible from app
-        app_library.root_module.addImport("engine", engine.module("root"));
-
-        // add engine module to exe
-        // so that we can call engine run() from main.zig (and main is still owned by the user)
-        exe.root_module.addImport("engine", engine.module("root"));
-    }
+    // add engine module to exe
+    // so that we can call engine run() from main.zig (and main is still owned by the user)
+    exe.root_module.addImport("engine", engine.module("root"));
 
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish

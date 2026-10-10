@@ -102,6 +102,11 @@ fn _init() !Self {
     std.log.info("App init!", .{});
     const engine = eng.get();
 
+    // register app components
+    inline for (ecs.EntityComponents) |T| {
+        try eng.get().ecs.register_component(T);
+    }
+
     var player_attack_particle_system_settings = eng.particles.ParticleSystemSettings {
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
@@ -394,8 +399,9 @@ fn _update(self: *Self) !void {
     }
 
     // Update animation times
-    var animation_component_iterator = eng.get().ecs.component_iterator(eng.ecs.AnimationControllerComponent);
-    while (animation_component_iterator.next()) |component| {
+    var animation_component_iterator = eng.get().ecs.query_iterator(.{eng.ecs.AnimationControllerComponent});
+    while (animation_component_iterator.next()) |components| {
+        const component = components.@"0";
         component.control_data.active_time += eng.get().time.delta_time_f32();
         eng.AnimationGraph.update(component.graph, &component.control_data);
     }

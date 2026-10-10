@@ -575,177 +575,179 @@ fn entity_editor_ui(
         }
     }
 
-    const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
+    // @TODO FIX
 
-    {
-        const component_add_layout = imui.push_layout(.X, key ++ .{@src()});
-        defer imui.pop_layout();
-        {
-            const w = component_add_layout.get();
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
-            w.children_gap = 2.0;
-        }
+    // const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
 
-        const data, const data_state = component_add_layout.get_widget_data(ItemSearchData, imui) catch unreachable;
+    // {
+    //     const component_add_layout = imui.push_layout(.X, key ++ .{@src()});
+    //     defer imui.pop_layout();
+    //     {
+    //         const w = component_add_layout.get();
+    //         w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+    //         w.children_gap = 2.0;
+    //     }
 
-        if (data_state == .Init) {
-            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-                const option_text = imui.widget_allocator().dupe(u8, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME) catch unreachable;
-                errdefer imui.widget_allocator().free(option_text);
+    //     const data, const data_state = component_add_layout.get_widget_data(ItemSearchData, imui) catch unreachable;
 
-                data.options.append(imui.widget_allocator(), option_text) catch unreachable;
-            }
-        }
+    //     if (data_state == .Init) {
+    //         inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+    //             const option_text = imui.widget_allocator().dupe(u8, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME) catch unreachable;
+    //             errdefer imui.widget_allocator().free(option_text);
 
-        const component_search_line_edit = eng.ui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
-        const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.ui.widgets.line_edit.TextInputState, imui) catch unreachable;
-        {
-            const w = component_search_line_edit.id.box.get();
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
-        }
+    //             data.options.append(imui.widget_allocator(), option_text) catch unreachable;
+    //         }
+    //     }
 
-        if (imui.focus_item) |focus_item| {
-            data.dropdown_is_open = (
-                focus_item == component_search_line_edit.id.box.get().key or
-                focus_item == component_search_line_edit.id.text.get().key
-            );
-        } else {
-            data.dropdown_is_open = false;
-        }
+    //     const component_search_line_edit = eng.ui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
+    //     const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.ui.widgets.line_edit.TextInputState, imui) catch unreachable;
+    //     {
+    //         const w = component_search_line_edit.id.box.get();
+    //         w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+    //     }
 
-        var component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
+    //     if (imui.focus_item) |focus_item| {
+    //         data.dropdown_is_open = (
+    //             focus_item == component_search_line_edit.id.box.get().key or
+    //             focus_item == component_search_line_edit.id.text.get().key
+    //         );
+    //     } else {
+    //         data.dropdown_is_open = false;
+    //     }
 
-        // if the dropdown should be shown then render it
-        dropdown_is_open: { if (data.dropdown_is_open) {
-            // determine the position of the dropdown options based on the primary combobox rect
-            const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b| 
-                .{ b.rect().left, b.rect().bottom + 4 }
-                else break :dropdown_is_open;
+    //     var component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
 
-            // push the options background layout
-            const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
-            if (imui.get_widget(options_background)) |options_background_widget| {
-                options_background_widget.semantic_size[0] = .{
-                    .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
-                };
-                options_background_widget.semantic_size[1] = .{
-                    .kind = .ChildrenSize, .value = 1.0, .shrinkable = true,
-                };
+    //     // if the dropdown should be shown then render it
+    //     dropdown_is_open: { if (data.dropdown_is_open) {
+    //         // determine the position of the dropdown options based on the primary combobox rect
+    //         const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b| 
+    //             .{ b.rect().left, b.rect().bottom + 4 }
+    //             else break :dropdown_is_open;
 
-                options_background_widget.flags.render = true;
-                options_background_widget.border_width_px = .all(1);
-                options_background_widget.padding_px = .all(4);
-                options_background_widget.children_gap = 2;
-                options_background_widget.corner_radii_px = .all(4);
-            }
+    //         // push the options background layout
+    //         const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
+    //         if (imui.get_widget(options_background)) |options_background_widget| {
+    //             options_background_widget.semantic_size[0] = .{
+    //                 .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
+    //             };
+    //             options_background_widget.semantic_size[1] = .{
+    //                 .kind = .ChildrenSize, .value = 1.0, .shrinkable = true,
+    //             };
 
-            // push each of the options into the dropdown menu
-            const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
-            defer eng.get().frame_allocator.free(lower_line_edit_text);
+    //             options_background_widget.flags.render = true;
+    //             options_background_widget.border_width_px = .all(1);
+    //             options_background_widget.padding_px = .all(4);
+    //             options_background_widget.children_gap = 2;
+    //             options_background_widget.corner_radii_px = .all(4);
+    //         }
 
-            var is_first_item = true;
-            for (data.options.items, 0..) |option, i| {
-                const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
-                defer eng.get().frame_allocator.free(lower_option);
+    //         // push each of the options into the dropdown menu
+    //         const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
+    //         defer eng.get().frame_allocator.free(lower_line_edit_text);
 
-                //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
-                if (lower_line_edit_text.len > 0) {
-                    if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) { continue; }
-                }
+    //         var is_first_item = true;
+    //         for (data.options.items, 0..) |option, i| {
+    //             const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
+    //             defer eng.get().frame_allocator.free(lower_option);
 
-                const option_background = imui.push_layout(.X, key ++ .{@src(), i});
-                defer imui.pop_layout();
+    //             //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
+    //             if (lower_line_edit_text.len > 0) {
+    //                 if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) { continue; }
+    //             }
 
-                // give the option a hover effect
-                if (imui.get_widget(option_background)) |option_background_widget| {
-                    option_background_widget.semantic_size[0] = .{
-                        .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
-                    };
-                    option_background_widget.flags.clickable = true;
-                    option_background_widget.flags.render = true;
-                    option_background_widget.padding_px = .all(4);
-                    option_background_widget.corner_radii_px = .all(4);
-                }
+    //             const option_background = imui.push_layout(.X, key ++ .{@src(), i});
+    //             defer imui.pop_layout();
 
-                // if the option is clicked then set text field and simulate click on add button
-                if (imui.generate_widget_signals(option_background).clicked) {
-                    line_edit_data.text.clearRetainingCapacity();
-                    line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
-                    component_add_button.clicked = true;
-                }
+    //             // give the option a hover effect
+    //             if (imui.get_widget(option_background)) |option_background_widget| {
+    //                 option_background_widget.semantic_size[0] = .{
+    //                     .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
+    //                 };
+    //                 option_background_widget.flags.clickable = true;
+    //                 option_background_widget.flags.render = true;
+    //                 option_background_widget.padding_px = .all(4);
+    //                 option_background_widget.corner_radii_px = .all(4);
+    //             }
 
-                // if enter is clicked then set the text field to the first item and simulate click on add button
-                if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
-                    if (is_first_item) {
-                        line_edit_data.text.clearRetainingCapacity();
-                        line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
-                        component_add_button.clicked = true;
-                        imui.focus_item = null;
-                    }
-                }
+    //             // if the option is clicked then set text field and simulate click on add button
+    //             if (imui.generate_widget_signals(option_background).clicked) {
+    //                 line_edit_data.text.clearRetainingCapacity();
+    //                 line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+    //                 component_add_button.clicked = true;
+    //             }
+
+    //             // if enter is clicked then set the text field to the first item and simulate click on add button
+    //             if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
+    //                 if (is_first_item) {
+    //                     line_edit_data.text.clearRetainingCapacity();
+    //                     line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+    //                     component_add_button.clicked = true;
+    //                     imui.focus_item = null;
+    //                 }
+    //             }
                 
-                _ = eng.ui.widgets.label.create(imui, option);
-                is_first_item = false;
-            }
+    //             _ = eng.ui.widgets.label.create(imui, option);
+    //             is_first_item = false;
+    //         }
 
-            imui.pop_layout(); // options background layout
-        } }
+    //         imui.pop_layout(); // options background layout
+    //     } }
 
-        if (component_add_button.clicked) {
-            // add component with the same name as what is in the line edit
-            inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-                if (std.mem.eql(u8, line_edit_data.text.items, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME)) {
-                    _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
-                        std.log.err("Unable to add component '{s}' to entity: {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
-                    };
-                    break;
-                }
-            }
-            line_edit_data.text.clearRetainingCapacity();
-        }
-    }
+    //     if (component_add_button.clicked) {
+    //         // add component with the same name as what is in the line edit
+    //         inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+    //             if (std.mem.eql(u8, line_edit_data.text.items, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME)) {
+    //                 _ = eng.get().ecs.add_component(eng.AppEcsSystem.ComponentTypes[idx], entity) catch |err| {
+    //                     std.log.err("Unable to add component '{s}' to entity: {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
+    //                 };
+    //                 break;
+    //             }
+    //         }
+    //         line_edit_data.text.clearRetainingCapacity();
+    //     }
+    // }
 
-    // render component UIs
-    inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
-        if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
-            const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
-            if (imui.get_widget(collapsible_outer_layout)) |w| {
-                w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
-            }
+    // // render component UIs
+    // inline for (ecs_component_info.@"struct".fields, 0..) |_, idx| {
+    //     if (eng.get().ecs.get_component(eng.AppEcsSystem.ComponentTypes[idx], entity)) |component| {
+    //         const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
+    //         if (imui.get_widget(collapsible_outer_layout)) |w| {
+    //             w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
+    //         }
 
-            const collapsible = Imui.widgets.collapsible.create(imui, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, null, key ++ .{@src(), idx});
-            const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
+    //         const collapsible = Imui.widgets.collapsible.create(imui, eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, null, key ++ .{@src(), idx});
+    //         const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
 
-            // add remove component button
-            const remove_button = eng.ui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
+    //         // add remove component button
+    //         const remove_button = eng.ui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
 
-            // dont enable remove button functionality for the transform component.
-            // we dont want to make it possible to remove the transform component.
-            // TODO make this visible by greying out the button
-            if (eng.AppEcsSystem.ComponentTypes[idx] != eng.ecs.TransformComponent) {
-                if (remove_button.clicked) {
-                    eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
-                }
-            }
+    //         // dont enable remove button functionality for the transform component.
+    //         // we dont want to make it possible to remove the transform component.
+    //         // TODO make this visible by greying out the button
+    //         if (eng.AppEcsSystem.ComponentTypes[idx] != eng.ecs.TransformComponent) {
+    //             if (remove_button.clicked) {
+    //                 eng.get().ecs.remove_component(eng.AppEcsSystem.ComponentTypes[idx], entity);
+    //             }
+    //         }
 
-            imui.pop_layout();
+    //         imui.pop_layout();
 
-            if (collapsible_open.*) {
-                const component_outer_layout = imui.push_layout(.Y, key ++ .{@src(), idx});
-                defer imui.pop_layout();
+    //         if (collapsible_open.*) {
+    //             const component_outer_layout = imui.push_layout(.Y, key ++ .{@src(), idx});
+    //             defer imui.pop_layout();
 
-                if (imui.get_widget(component_outer_layout)) |w| {
-                    w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
-                    w.padding_px.left = 20.0;
-                    w.children_gap = 5.0;
-                }
+    //             if (imui.get_widget(component_outer_layout)) |w| {
+    //                 w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+    //                 w.padding_px.left = 20.0;
+    //                 w.children_gap = 5.0;
+    //             }
 
-                eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, entity, component, key ++ .{@src(), idx}) catch |err| {
-                    std.log.warn("Failed to load editor ui for component '{s}': {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
-                };
-            }
-        }
-    }
+    //             eng.AppEcsSystem.ComponentTypes[idx].editor_ui(imui, entity, component, key ++ .{@src(), idx}) catch |err| {
+    //                 std.log.warn("Failed to load editor ui for component '{s}': {}", .{eng.AppEcsSystem.ComponentTypes[idx].COMPONENT_NAME, err});
+    //             };
+    //         }
+    //     }
+    // }
 }
 
 fn physics_shape_editor_ui(
@@ -1054,69 +1056,71 @@ fn create_scene_entities(scene_name: []const u8) !void {
 }
 
 fn save_entities_to_scene(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
-    defer arena.deinit();
+    _ = scene_name;
+    unreachable; // @TODO FIX
+    // var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
+    // defer arena.deinit();
 
-    var scenes_dir = try open_scenes_dir(true);
-    defer scenes_dir.close();
+    // var scenes_dir = try open_scenes_dir(true);
+    // defer scenes_dir.close();
 
-    scenes_dir.deleteTree(scene_name) catch |err| {
-        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
-    };
+    // scenes_dir.deleteTree(scene_name) catch |err| {
+    //     std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+    // };
 
-    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
-    defer scene_dir.close();
+    // var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
+    // defer scene_dir.close();
 
 
-    var serialize_component_iterator = eng.get().ecs.component_iterator(eng.ecs.SerializationComponent);
-    var largest_serialize_id: u32 = 0;
-    while (serialize_component_iterator.next()) |serialize_component| {
-        largest_serialize_id = @max(largest_serialize_id, serialize_component.serialize_id orelse 0);
-    }
+    // var serialize_component_iterator = eng.get().ecs.component_iterator(eng.ecs.SerializationComponent);
+    // var largest_serialize_id: u32 = 0;
+    // while (serialize_component_iterator.next()) |serialize_component| {
+    //     largest_serialize_id = @max(largest_serialize_id, serialize_component.serialize_id orelse 0);
+    // }
 
-    var entity_iterator = eng.get().ecs.entity_iterator();
-    while (entity_iterator.next()) |entity| {
+    // var entity_iterator = eng.get().ecs.entity_iterator();
+    // while (entity_iterator.next()) |entity| {
 
-        _ = arena.reset(.retain_capacity);
+    //     _ = arena.reset(.retain_capacity);
 
-        const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity)
-            orelse continue;
+    //     const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity)
+    //         orelse continue;
 
-        entity_serialize_component.serialize_id = entity_serialize_component.serialize_id orelse blk: {
-            largest_serialize_id += 1;
-            break :blk largest_serialize_id;
-        };
+    //     entity_serialize_component.serialize_id = entity_serialize_component.serialize_id orelse blk: {
+    //         largest_serialize_id += 1;
+    //         break :blk largest_serialize_id;
+    //     };
 
-        const entity_s = eng.get().ecs.serialize_entity(arena.allocator(), entity) catch |err| {
-            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
-            continue;
-        };
+    //     const entity_s = eng.get().ecs.serialize_entity(arena.allocator(), entity) catch |err| {
+    //         std.log.err("unable to produce serializable for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+    //         continue;
+    //     };
 
-        var json_writer = std.io.Writer.Allocating.init(arena.allocator());
-        defer json_writer.deinit();
+    //     var json_writer = std.io.Writer.Allocating.init(arena.allocator());
+    //     defer json_writer.deinit();
 
-        var json = std.json.Stringify{
-            .writer = &json_writer.writer,
-        };
-        json.options.whitespace = .indent_2;
+    //     var json = std.json.Stringify{
+    //         .writer = &json_writer.writer,
+    //     };
+    //     json.options.whitespace = .indent_2;
 
-        json.write(entity_s) catch |err| {
-            std.log.err("unable to produce json for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
-            continue;
-        };
+    //     json.write(entity_s) catch |err| {
+    //         std.log.err("unable to produce json for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+    //         continue;
+    //     };
 
-        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity_serialize_component.serialize_id.?}) catch |err| {
-            std.log.err("unable to produce file path for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
-            continue;
-        };
+    //     const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity_serialize_component.serialize_id.?}) catch |err| {
+    //         std.log.err("unable to produce file path for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+    //         continue;
+    //     };
 
-        scene_dir.writeFile(.{
-            .sub_path = file_path,
-            .data = json_writer.written(),
-            .flags = .{ .read = false, .truncate = true, },
-        }) catch |err| {
-            std.log.err("unable to write file for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
-            continue;
-        };
-    }
+    //     scene_dir.writeFile(.{
+    //         .sub_path = file_path,
+    //         .data = json_writer.written(),
+    //         .flags = .{ .read = false, .truncate = true, },
+    //     }) catch |err| {
+    //         std.log.err("unable to write file for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+    //         continue;
+    //     };
+    // }
 }
