@@ -15,6 +15,19 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const app_dll_option = b.option(i32, "app_dll", "only build the app dll");
+
+    const app_library = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/app.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(app_library);
+    
     const exe = b.addExecutable(.{
         .name = "zig-dx11-game",
         .root_module = b.createModule(.{
@@ -23,29 +36,34 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    exe.root_module.linkLibrary(app_library);
 
-    const app_module = b.addModule("app", .{
-        .root_source_file = b.path("src/app.zig"),
-    });
-    exe.root_module.addImport("app", app_module);
+    // const app_module = b.addModule("app", .{
+    //     .root_source_file = b.path("src/app.zig"),
+    // });
+    // exe.root_module.addImport("app", app_module);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
-    b.installArtifact(exe);
+    if (app_dll_option == null) {
+        b.installArtifact(exe);
+    }
 
     // create engine module
     const engine = b.dependency("engine", .{});
+    b.installArtifact(engine.artifact("assimp"));
+    b.installArtifact(engine.artifact("joltc"));
 
     // perform a circular dependency juggle with app, engine, and the exe
     {
         // add app module as a dependency to engine module
         // so that App is accessible from engine
-        engine.module("root").addImport("app", app_module);
+        engine.module("root").addImport("app", app_library.root_module);
 
         // add engine module to app module
         // so that Engine is accessible from app
-        app_module.addImport("engine", engine.module("root"));
+        app_library.root_module.addImport("engine", engine.module("root"));
 
         // add engine module to exe
         // so that we can call engine run() from main.zig (and main is still owned by the user)

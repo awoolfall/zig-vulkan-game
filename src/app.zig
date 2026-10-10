@@ -52,7 +52,13 @@ command_buffers: [4]gfx.CommandBuffer,
 
 uber_cmd_semaphores: []gfx.Semaphore,
 
-pub fn deinit(self: *Self) void {
+pub export fn app_deinit(app_opaqueptr: ?*anyopaque) void {
+    const app_ptr: *Self = @alignCast(@ptrCast(app_opaqueptr));
+    app_ptr._deinit();
+    eng.get().general_allocator.destroy(app_ptr);
+}
+
+fn _deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
 
     self.player_attack_particle_system.deinit();
@@ -76,7 +82,20 @@ pub fn deinit(self: *Self) void {
     self.character_animation_graph.deinit();
 }
 
-pub fn init() !Self {
+pub export fn app_init(engine_opaqueptr: ?*anyopaque) ?*anyopaque {
+    const engine_ptr: *eng.Engine = @ptrCast(@alignCast(engine_opaqueptr));
+
+    const app_ptr = engine_ptr.general_allocator.create(Self) catch return null;
+    app_ptr.* = Self._init() catch |err| {
+        std.log.err("App init failed: {}", .{err});
+        engine_ptr.general_allocator.destroy(app_ptr);
+        return null;
+    };
+
+    return app_ptr;
+}
+
+fn _init() !Self {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app init");
     defer __tracy_zone.End();
 
@@ -178,7 +197,18 @@ pub fn init() !Self {
     };
 }
 
-pub fn update(self: *Self) !void {
+pub export fn app_update(app_opaqueptr: ?*anyopaque, engine_opaqueptr: ?*anyopaque) i32 {
+    const app_ptr: *Self = @alignCast(@ptrCast(app_opaqueptr));
+    _ = engine_opaqueptr;
+
+    app_ptr._update() catch |err| {
+        std.log.err("App error: {}", .{err});
+        return 1;
+    };
+    return 0;
+}
+
+fn _update(self: *Self) !void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app::update");
     defer __tracy_zone.End();
 

@@ -3,7 +3,6 @@ const Self = @This();
 const std = @import("std");
 const eng = @import("engine");
 const zm = eng.zmath;
-const ms = eng.mesh;
 const gfx = eng.gfx;
 const cm = eng.camera;
 const sr = eng.serialize;
@@ -24,7 +23,7 @@ pub const RenderObject = struct {
     vertex_count: usize,
     pos_offset: usize,
     index_buffer: ?IndexInfo,
-    material: ms.MaterialTemplate,
+    material: eng.Model.MaterialTemplate,
 
     pub const IndexInfo = struct {
         buffer_info: gfx.VertexBufferInput,
@@ -777,7 +776,7 @@ pub const ModelRenderObject = struct {
 pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
     const model: *eng.assets.ModelAsset.BaseType = try eng.get().asset_manager.get_asset(eng.assets.ModelAsset, ro.model);
 
-    var animation_bones = [1]zm.Mat { zm.identity() } ** eng.mesh.MAX_BONES;
+    var animation_bones = [1]zm.Mat { zm.identity() } ** eng.Model.MAX_BONES;
 
     const bone_info = if (ro.animation_data) |anim_data| blk: {
         anim_data.animation_graph.calculate_bone_transforms(eng.get().general_allocator, model, anim_data.control_data, animation_bones[0..]);
@@ -821,7 +820,7 @@ pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
             for (mesh_set.primitives_slice()) |prim_index| {
                 const mesh_prim = &model.meshes[prim_index];
 
-                var material = eng.mesh.MaterialTemplate {};
+                var material = eng.Model.MaterialTemplate {};
                 if (mesh_prim.material_template) |m_idx| {
                     material = model.materials[m_idx];
                 }
