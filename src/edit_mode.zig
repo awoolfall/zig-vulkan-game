@@ -984,7 +984,7 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
         if (load_button.clicked) {
             if (data.selected_name) |name| {
                 // remove all entities (and components)
-                eng.get().ecs.clear(.{eng.ui});
+                eng.get().ecs.clear_entities();
 
                 // Create new entities and set scene name
                 var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);

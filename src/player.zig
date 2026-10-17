@@ -59,6 +59,7 @@ pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.Animation
 
 pub fn player_control_system() !void {
     const imui = try eng.get().ecs.get_resource(eng.ui);
+    const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
 
     var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
     const camera_component: *ecs.CameraComponent,
@@ -155,7 +156,7 @@ pub fn player_control_system() !void {
                 .Falling => {
                     // if not supported then apply gravity
                     character_velocity = character_velocity
-                        + zm.loadArr3(eng.get().physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                        + zm.loadArr3(physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
                 },
                 .Walking => {
                     const move_t = 1.0 - std.math.exp(-20.0 * eng.get().time.delta_time_f32());
@@ -251,7 +252,7 @@ pub fn player_control_system() !void {
                 //self.player_attack_particle_system.settings.initial_velocity = zm.f32x4s(0.0); //camera_forward_2d * zm.f32x4s(10.0);
                 //self.player_attack_particle_system.emit_particle_burst();
 
-                eng.get().physics.zphysics.system.getNarrowPhaseQuery().collideShape(
+                physics.zphysics.system.getNarrowPhaseQuery().collideShape(
                     box_shape,
                     [3]f32{1.0, 1.0, 1.0},
                     matrix,
@@ -262,7 +263,7 @@ pub fn player_control_system() !void {
 
                 std.log.info("hits: {}", .{collector.hits.items.len});
                 for (collector.hits.items) |hit| {
-                    var read_lock = eng.get().physics.init_body_read_lock(hit.body2_id) catch unreachable;
+                    var read_lock = physics.init_body_read_lock(hit.body2_id) catch unreachable;
                     defer read_lock.deinit();
 
                     const user_data = eng.physics.PhysicsSystem.extract_entity_from_user_data(read_lock.body.getUserData());

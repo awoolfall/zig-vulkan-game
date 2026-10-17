@@ -55,6 +55,8 @@ pub fn spawn_opponent_character(transform: eng.Transform, animation_graph: *eng.
 }
 
 pub fn opponent_behaviour_system() !void {
+    const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
+
     var player_query = eng.get().ecs.query_iterator(.{ ecs.PlayerCharacterComponent, eng.ecs.TransformComponent });
     const player_character_component: *ecs.PlayerCharacterComponent,
     const player_transform_component: *eng.ecs.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
@@ -97,7 +99,7 @@ pub fn opponent_behaviour_system() !void {
             } else {
                 // if not supported then apply gravity
                 character_velocity = character_velocity
-                    + zm.loadArr3(eng.get().physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                    + zm.loadArr3(physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
             }
 
             physics_component.velocity = character_velocity;
