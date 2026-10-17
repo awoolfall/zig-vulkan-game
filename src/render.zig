@@ -4,7 +4,6 @@ const std = @import("std");
 const eng = @import("engine");
 const zm = eng.zmath;
 const gfx = eng.gfx;
-const cm = eng.camera;
 const sr = eng.serialize;
 const SelectionTextures = @import("selection_textures.zig");
 
@@ -875,7 +874,7 @@ pub fn clear(self: *Self) void {
     self.lights.clearRetainingCapacity();
 }
 
-pub fn update_camera_data_buffer(self: *Self, camera: *const cm.Camera) void {
+pub fn update_camera_data_buffer(self: *Self, camera: *const eng.Camera) void {
     const buffer = self.camera_data_buffer.buffer.get() catch |err| {
         std.log.warn("Unable to get camera data buffer: {}", .{err});
         return;
@@ -996,7 +995,7 @@ fn append_new_bones_buffer(
 pub fn render_cmd(
     self: *Self,
     data: struct {
-        camera: *const cm.Camera,
+        camera: *const eng.Camera,
     },
     cmd: *gfx.CommandBuffer,
 ) !void {

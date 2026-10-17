@@ -7,7 +7,6 @@ const zm = eng.zmath;
 const zmesh = eng.zmesh;
 const gf = eng.gfx;
 const input = eng.input;
-const cm = eng.camera;
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
 
@@ -754,7 +753,7 @@ pub fn render_cmd(
     self: *Self,
     cmd: *gf.CommandBuffer,
     transform: *const Transform,
-    camera: *const cm.Camera,
+    camera: *const eng.Camera,
 ) !void {
     cmd.cmd_begin_render_pass(.{
         .render_pass = self.render_pass,
@@ -777,7 +776,7 @@ pub fn render_objects_cmd(
     self: *Self,
     cmd: *gf.CommandBuffer,
     transform: *const Transform,
-    camera: *const cm.Camera,
+    camera: *const eng.Camera,
     ty: enum { Visual, Id }
 ) void {
     const pipelines = switch (ty) {

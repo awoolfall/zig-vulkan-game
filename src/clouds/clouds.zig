@@ -677,7 +677,7 @@ pub fn push_cloud_volume(self: *Self, cloud_volume: CloudVolume) void {
     };
 }
 
-pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, standard_renderer: *StandardRenderer) !void {
+pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, standard_renderer: *StandardRenderer) !void {
     defer self.cloud_volumes_list.clearRetainingCapacity();
     
     if (self.compute_shader_file_watcher.was_modified_since_last_check()) blk: {

@@ -7,14 +7,14 @@ pub const COMPONENT_NAME = "Particle System";
 
 const Self = @This();
 
-particle_system: eng.particles.ParticleSystem,
+particle_system: eng.ParticleSystem,
 
 pub fn deinit(self: *Self) void {
     self.particle_system.deinit();
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
-    const particle_system = try eng.particles.ParticleSystem.init(alloc, .{});
+    const particle_system = try eng.ParticleSystem.init(alloc, .{});
     errdefer particle_system.deinit();
 
     return .{
@@ -24,15 +24,15 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("particle_system_settings", try sr.serialize_value(eng.particles.ParticleSystemSettings, alloc, self.particle_system.settings));
+    try object.put("particle_system_settings", try sr.serialize_value(eng.ParticleSystem.ParticleSystemSettings, alloc, self.particle_system.settings));
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
-    var particle_system_settings = try sr.deserialize_value(eng.particles.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
+    var particle_system_settings = try sr.deserialize_value(eng.ParticleSystem.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
     defer particle_system_settings.deinit(alloc);
 
-    const particle_system = try eng.particles.ParticleSystem.init(alloc, particle_system_settings);
+    const particle_system = try eng.ParticleSystem.init(alloc, particle_system_settings);
     errdefer particle_system.deinit();
     
     return Self {

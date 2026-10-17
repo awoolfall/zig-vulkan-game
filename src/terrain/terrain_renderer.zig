@@ -6,11 +6,10 @@ const zm = eng.zmath;
 const gf = eng.gfx;
 const ph = eng.physics;
 const as = eng.assets;
-const Camera = eng.camera.Camera;
+const Camera = eng.Camera;
 const Terrain = @import("terrain.zig");
 const Transform = eng.Transform;
 const st = @import("../selection_textures.zig");
-const pt = eng.path;
 const FileWatcher = eng.assets.FileWatcher;
 const ClipmapMesh = @import("clipmap.zig");
 

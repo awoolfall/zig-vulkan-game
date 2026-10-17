@@ -630,7 +630,7 @@ pub fn recreate_static_luts(self: *Self, cmd: *gfx.CommandBuffer, settings: Atmo
     });
 }
 
-pub fn update_luts(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, sun_direction: [3]f32) void {
+pub fn update_luts(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, sun_direction: [3]f32) void {
     // Hot-reload sky-view pipeline
     if (self.sky_view_shader_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_sky_view_pipeline() catch |err| {
@@ -711,7 +711,7 @@ pub fn update_luts(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.came
     });
 }
 
-pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.camera.Camera, sun_direction: [3]f32) void {
+pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, sun_direction: [3]f32) void {
     const swapchain_size = gfx.GfxState.get().swapchain_size();
     const inv_vp = zm.inverse(zm.mul(
         camera.transform.generate_view_matrix(),

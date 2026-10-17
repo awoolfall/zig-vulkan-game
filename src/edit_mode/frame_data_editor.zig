@@ -7,7 +7,7 @@ const AnimationGraph = eng.animation.Graph;
 
 const Self = @This();
 
-camera: eng.camera.Camera,
+camera: eng.Camera,
 
 model: ?eng.assets.ModelAssetId = null,
 
@@ -39,8 +39,8 @@ pub fn deinit(self: *Self) void {
 
 pub fn init() !Self {
     return Self {
-        .camera = eng.camera.Camera {
-            .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
+        .camera = eng.Camera {
+            .field_of_view_y = eng.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 10000.0,
             .move_speed = 10.0,

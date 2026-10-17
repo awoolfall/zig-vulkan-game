@@ -7,7 +7,7 @@ pub const COMPONENT_NAME = "Camera";
 
 const Self = @This();
 
-camera_data: eng.camera.Camera,
+camera_data: eng.Camera,
 
 pub fn deinit(self: *Self) void {
     _ = self;
@@ -17,7 +17,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     _ = alloc;
     return .{
         .camera_data = .{
-            .field_of_view_y = eng.camera.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
+            .field_of_view_y = eng.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 10_000.0,
             .move_speed = 10.0,
@@ -31,7 +31,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("camera_data", try sr.serialize_value(eng.camera.Camera, alloc, self.camera_data));
+    try object.put("camera_data", try sr.serialize_value(eng.Camera, alloc, self.camera_data));
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
@@ -40,7 +40,7 @@ pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std
         .camera_data = undefined,
     };
 
-    component.camera_data = try sr.deserialize_value(eng.camera.Camera, alloc, object.get("camera_data"));
+    component.camera_data = try sr.deserialize_value(eng.Camera, alloc, object.get("camera_data"));
 
     return component;
 }

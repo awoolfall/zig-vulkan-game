@@ -1407,7 +1407,7 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     });
 }
 
-pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const eng.camera.Camera, cmd: *gfx.CommandBuffer) void {
+pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const eng.Camera, cmd: *gfx.CommandBuffer) void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean render");
     defer __tracy_zone.End();
     

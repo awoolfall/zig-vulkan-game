@@ -114,7 +114,7 @@ fn update() !void {
         }
     }
 
-    var render_camera: *eng.camera.Camera = &self.edit_mode.editor_camera;
+    var render_camera: *eng.Camera = &self.edit_mode.editor_camera;
     
     // update
     switch (self.current_mode) {

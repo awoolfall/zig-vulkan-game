@@ -16,14 +16,14 @@ const Self = @This();
 character_entity: ?eng.ecs.Entity = null,
 character_animation_graph: eng.AnimationGraph,
 
-player_attack_particle_system: eng.particles.ParticleSystem,
+player_attack_particle_system: eng.ParticleSystem,
 
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
 ocean: Ocean,
 clouds: Clouds,
 atmosphere: Atmosphere,
-particles_renderer: eng.particles_renderer.ParticleRenderer,
+particles_renderer: eng.ParticleRenderer,
 
 edit_mode: EditMode,
 current_mode: enum { Edit, Play } = .Edit,
@@ -64,7 +64,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
-    var player_attack_particle_system_settings = eng.particles.ParticleSystemSettings {
+    var player_attack_particle_system_settings = eng.ParticleSystem.ParticleSystemSettings {
             .max_particles = 300,
             .alignment = .{ .VelocityAligned = 5.0 },
             .shape = .Circle,
@@ -93,7 +93,7 @@ pub fn init() !Self {
         .{ .Drag = 5.0 },
     });
 
-    var player_attack_particle_system = try eng.particles.ParticleSystem.init(eng.get().general_allocator, player_attack_particle_system_settings);
+    var player_attack_particle_system = try eng.ParticleSystem.init(eng.get().general_allocator, player_attack_particle_system_settings);
     errdefer player_attack_particle_system.deinit();
 
     var character_animation_graph = try @import("character_animation.zig").character_animation_graph();
@@ -133,7 +133,7 @@ pub fn init() !Self {
     var clouds = try Clouds.init(eng.get().general_allocator);
     errdefer clouds.deinit();
 
-    var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(eng.get().general_allocator);
+    var particles_renderer = try eng.ParticleRenderer.init(eng.get().general_allocator);
     errdefer particles_renderer.deinit();
 
     var edit_mode = try EditMode.init(&standard_renderer);
