@@ -1,7 +1,7 @@
 const std = @import("std");
 const eng = @import("engine");
 const zm = eng.zmath;
-const Imui = eng.ui;
+const Imui = eng.Imui;
 
 const KeyCode = eng.input.KeyCode;
 
@@ -52,7 +52,7 @@ fn init() !void {
     }
     
     // create standard resources
-    try eng.get().ecs.create_resource(eng.ui);
+    try eng.get().ecs.create_resource(eng.Imui);
     try eng.get().ecs.create_resource(eng.physics.PhysicsSystem);
     try eng.get().ecs.create_resource(eng.Debug);
 
@@ -78,7 +78,7 @@ fn update() !void {
     defer self.standard_renderer.clear();
     defer self.particles_renderer.clear();
 
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
     imui.start_new_frame();
 
     const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
@@ -242,7 +242,7 @@ fn update() !void {
         _ = imui.push_floating_layout(
             .Y, 
             5.0, 
-            25.0 + imui.get_font(eng.ui.FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            25.0 + imui.get_font(eng.Imui.FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
         const l = Imui.widgets.label.create(imui, fps_text);
@@ -261,7 +261,7 @@ fn update() !void {
     }) catch unreachable;
     {
         _ = imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(eng.get().gfx.swapchain_size()[1])) - 
-            imui.get_font(eng.ui.FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
+            imui.get_font(eng.Imui.FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
         const l = Imui.widgets.label.create(imui, rev_text);
         if (imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;

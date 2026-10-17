@@ -1,7 +1,7 @@
 const std = @import("std");
 const eng = @import("engine");
 const zm = eng.zmath;
-const Imui = eng.ui;
+const Imui = eng.Imui;
 const ps = eng.particles;
 const es = eng.easings;
 
@@ -493,7 +493,7 @@ fn push_row_item_layout(text: []const u8, key: anytype) void {
 fn labeled_number_slider(
     text: []const u8, 
     value: *f32, 
-    settings: eng.ui.Imui.NumberSliderSettings,
+    settings: eng.Imui.Imui.NumberSliderSettings,
     key: anytype
 ) void {
     const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});

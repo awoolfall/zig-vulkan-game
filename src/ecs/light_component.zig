@@ -36,7 +36,7 @@ pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std
     };
 }
 
-pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: anytype) !void {
+pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key: anytype) !void {
     _ = entity;
 
     const outer_layout = imui.push_layout(.Y, key ++ .{@src()});
@@ -47,8 +47,8 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
         w.children_gap = 5.0;
     }
 
-    const light_type_combobox = eng.ui.widgets.combobox.create(imui, key ++ .{@src()});
-    const light_type_combobox_data, _ = imui.get_widget_data(eng.ui.widgets.combobox.ComboBoxState, light_type_combobox.id) catch unreachable;
+    const light_type_combobox = eng.Imui.widgets.combobox.create(imui, key ++ .{@src()});
+    const light_type_combobox_data, _ = imui.get_widget_data(eng.Imui.widgets.combobox.ComboBoxState, light_type_combobox.id) catch unreachable;
     if (light_type_combobox.init) {
         light_type_combobox_data.can_be_default = false;
 
@@ -71,7 +71,7 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
         _ = imui.push_form_layout_item(.{@src()});
         defer imui.pop_layout();
 
-        _ = eng.ui.widgets.label.create(imui, "colour: ");
+        _ = eng.Imui.widgets.label.create(imui, "colour: ");
         
         // _ = imui.push_layout(.X, key ++ .{@src()});
         // defer imui.pop_layout();
@@ -82,7 +82,7 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
         // }
 
         var colour: ?zm.F32x4 = component.light.colour;
-        const colour_indicator_signals = eng.ui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
+        const colour_indicator_signals = eng.Imui.widgets.colour_indicator.create(imui, &colour.?, key ++ .{@src()});
         const colour_indicator_data, _ = imui.get_widget_data(bool, colour_indicator_signals.id) catch unreachable;
 
         if (colour_indicator_signals.init) {
@@ -112,8 +112,8 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
                 picker_floating_position[1] += mouse_delta[1];
             }
 
-            _ = eng.ui.widgets.label.create(imui, "colour picker");
-            const picker_signals = eng.ui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
+            _ = eng.Imui.widgets.label.create(imui, "colour picker");
+            const picker_signals = eng.Imui.widgets.colour_picker.create(imui, &colour, key ++ .{@src()});
             if (picker_signals.data_changed) {
                 if (colour) |c| {
                     component.light.colour = c;
@@ -140,7 +140,7 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
     }
 }
 
-fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {
+fn set_background_widget_layout(background_widget: *eng.Imui.Widget) void {
     background_widget.semantic_size[0].minimum_pixel_size = 400;
     background_widget.flags.clickable = true;
     background_widget.flags.render = true;
@@ -152,7 +152,7 @@ fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {
 }
 
 fn create_form_number_slider(
-    imui: *eng.ui,
+    imui: *eng.Imui,
     text: []const u8,
     value: *f32, 
     key: anytype
@@ -160,6 +160,6 @@ fn create_form_number_slider(
     _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
 
-    _ = eng.ui.widgets.label.create(imui, text);
-    _ = eng.ui.widgets.number_slider.create(imui, value, .{}, key ++ .{@src()});
+    _ = eng.Imui.widgets.label.create(imui, text);
+    _ = eng.Imui.widgets.number_slider.create(imui, value, .{}, key ++ .{@src()});
 }

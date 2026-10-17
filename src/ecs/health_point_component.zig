@@ -32,7 +32,7 @@ pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std
     return component;
 }
 
-pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: anytype) !void {
+pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key: anytype) !void {
     _ = entity;
 
     _ = imui.push_layout(.Y, key ++ .{@src()});
@@ -42,9 +42,9 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
         _ = imui.push_form_layout_item(key ++ .{@src()});
         defer imui.pop_layout();
 
-        _ = eng.ui.widgets.label.create(imui, "health points: ");
+        _ = eng.Imui.widgets.label.create(imui, "health points: ");
         var float_health_points: f32 = @floatFromInt(component.health_points);
-        const hp_slider = eng.ui.widgets.number_slider.create(imui, &float_health_points, .{ .scale = 1.0, }, key ++ .{@src()});
+        const hp_slider = eng.Imui.widgets.number_slider.create(imui, &float_health_points, .{ .scale = 1.0, }, key ++ .{@src()});
         if (hp_slider.data_changed) {
             component.health_points = @intFromFloat(float_health_points);
         }

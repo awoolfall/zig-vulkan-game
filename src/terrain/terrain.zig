@@ -6,7 +6,7 @@ const TerrainRenderer = @import("terrain_renderer.zig");
 const KeyCode = eng.input.KeyCode;
 const zm = eng.zmath;
 const gf = eng.gfx;
-const Imui = eng.ui;
+const Imui = eng.Imui;
 const ph = eng.physics;
 const as = eng.assets;
 const path = eng.path;
@@ -293,7 +293,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 }
 
 pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
-    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
+    const imui = eng.get().ecs.get_resource(Imui) catch return;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
     defer imui.pop_layout();

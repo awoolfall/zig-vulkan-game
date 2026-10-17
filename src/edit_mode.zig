@@ -20,7 +20,7 @@ const assets = eng.assets;
 const KeyCode = eng.input.KeyCode;
 const Transform = eng.Transform;
 const Camera = eng.camera.Camera;
-const Imui = eng.ui;
+const Imui = eng.Imui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
 const SelectionOutlineRenderer = @import("edit_mode/selection_outline.zig");
 
@@ -114,7 +114,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), stand
 
 fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32), standard_renderer: *StandardRenderer, terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
     _ = standard_renderer;
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
     
     if (!imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().os, &eng.get().input, &eng.get().time);
@@ -222,7 +222,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
 }
 
 fn top_bar_ui(self: *Self, key: anytype) !void {
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
 
     const top_bar_background = imui.push_layout(.X, key ++ .{@src()});
     defer imui.pop_layout();
@@ -305,7 +305,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const save_button = Imui.widgets.badge.create(imui, "Save Scene", key ++ .{@src()});
-                save_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                save_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
                         var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
@@ -320,7 +320,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                     }
                 }
                 const load_button = Imui.widgets.badge.create(imui, "Load Scene", key ++ .{@src()});
-                load_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                load_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (load_button.clicked) {
                     self.load_scene_popup_is_open = true;
                 }
@@ -357,7 +357,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 defer imui.pop_layout();
 
                 const new_button = Imui.widgets.badge.create(imui, "New Entity", key ++ .{@src()});
-                new_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                new_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (new_button.clicked) {
                     self.create_new_entity() catch |err| {
                         std.log.err("Failed to create new entity: {}", .{err});
@@ -365,13 +365,13 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const delete_button = Imui.widgets.badge.create(imui, "Delete Entity", key ++ .{@src()});
-                delete_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                delete_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
 
                 const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
-                duplicate_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                duplicate_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity() catch |err| {
                         std.log.err("Failed to duplicate entity: {}", .{err});
@@ -513,7 +513,7 @@ fn entity_editor_ui(
     self: *Self,
     key: anytype,
 ) void {
-    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
+    const imui = eng.get().ecs.get_resource(eng.Imui) catch return;
 
     const entity = self.selected_entity orelse return;
 
@@ -600,8 +600,8 @@ fn entity_editor_ui(
             }
         }
 
-        const component_search_line_edit = eng.ui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
-        const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.ui.widgets.line_edit.TextInputState, imui) catch unreachable;
+        const component_search_line_edit = eng.Imui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
+        const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.Imui.widgets.line_edit.TextInputState, imui) catch unreachable;
         {
             const w = component_search_line_edit.id.box.get();
             w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
@@ -616,7 +616,7 @@ fn entity_editor_ui(
             data.dropdown_is_open = false;
         }
 
-        var component_add_button = eng.ui.widgets.badge.create(imui, "add", key ++ .{@src()});
+        var component_add_button = eng.Imui.widgets.badge.create(imui, "add", key ++ .{@src()});
 
         // if the dropdown should be shown then render it
         dropdown_is_open: { if (data.dropdown_is_open) {
@@ -687,7 +687,7 @@ fn entity_editor_ui(
                     }
                 }
                 
-                _ = eng.ui.widgets.label.create(imui, option);
+                _ = eng.Imui.widgets.label.create(imui, option);
                 is_first_item = false;
             }
 
@@ -725,7 +725,7 @@ fn entity_editor_ui(
             const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
 
             // add remove component button
-            const remove_button = eng.ui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
+            const remove_button = eng.Imui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
 
             // dont enable remove button functionality for the transform component.
             // we dont want to make it possible to remove the transform component.
@@ -750,7 +750,7 @@ fn entity_editor_ui(
 
                 const component_idx = eng.get().ecs.entity_data.get(entity.idx).?.components.get(pair.key_ptr.*).?;
 
-                pair.value_ptr.functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.ui.gen_key(key ++ .{@src(), idx}));
+                pair.value_ptr.functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.Imui.gen_key(key ++ .{@src(), idx}));
             }
         }
     }
@@ -917,7 +917,7 @@ fn create_form_number_slider(
     value: *f32, 
     key: anytype
 ) void {
-    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
+    const imui = eng.get().ecs.get_resource(eng.Imui) catch return;
 
     _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
@@ -946,7 +946,7 @@ const LoadScenePopup = struct {
 };
 
 fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
 
     _ = imui.push_layout(.Y, key ++ .{@src()});
     defer imui.pop_layout();

@@ -58,7 +58,7 @@ pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.Animation
 }
 
 pub fn player_control_system() !void {
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
     const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
 
     var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });

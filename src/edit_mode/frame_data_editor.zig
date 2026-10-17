@@ -71,7 +71,7 @@ pub fn enter_mode(self: *Self) !void {
 }
 
 pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !void {
-    const imui = try eng.get().ecs.get_resource(eng.ui);
+    const imui = try eng.get().ecs.get_resource(eng.Imui);
 
     {
         const background_box = imui.push_floating_layout(.Y, 0.0, 0.0, .{@src()});
@@ -88,11 +88,11 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
             background_widget.pivot = .{ 1.0, 0.0 };
         }
 
-        _ = eng.ui.widgets.label.create(imui, "Frame Data Editor");
+        _ = eng.Imui.widgets.label.create(imui, "Frame Data Editor");
 
-        _ = eng.ui.widgets.label.create(imui, "Display Model:");
-        const model_drop_zone = eng.ui.widgets.file_drop_zone.create(imui, .{@src()});
-        model_drop_zone.id.get().semantic_size[1] = eng.ui.SemanticSize { .kind = .Pixels, .value = 25.0, };
+        _ = eng.Imui.widgets.label.create(imui, "Display Model:");
+        const model_drop_zone = eng.Imui.widgets.file_drop_zone.create(imui, .{@src()});
+        model_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize { .kind = .Pixels, .value = 25.0, };
         if (model_drop_zone.data_changed) blk: {
             std.debug.assert(eng.get().input.get_dropped_files().len != 0);
             const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
@@ -104,9 +104,9 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
             };
         }
 
-        _ = eng.ui.widgets.label.create(imui, "Animation Source:");
-        var anim_drop_zone = eng.ui.widgets.file_drop_zone.create(imui, .{@src()});
-        anim_drop_zone.id.get().semantic_size[1] = eng.ui.SemanticSize { .kind = .Pixels, .value = 25.0, };
+        _ = eng.Imui.widgets.label.create(imui, "Animation Source:");
+        var anim_drop_zone = eng.Imui.widgets.file_drop_zone.create(imui, .{@src()});
+        anim_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize { .kind = .Pixels, .value = 25.0, };
         if (anim_drop_zone.data_changed) blk: {
             std.debug.assert(eng.get().input.get_dropped_files().len != 0);
             const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
@@ -118,9 +118,9 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
             };
         }
 
-        var animation_combobox = eng.ui.widgets.combobox.create(imui, .{@src()});
+        var animation_combobox = eng.Imui.widgets.combobox.create(imui, .{@src()});
         if (animation_combobox.init) {
-            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.ui.widgets.combobox.ComboBoxState, imui);
+            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.Imui.widgets.combobox.ComboBoxState, imui);
             cb_data.default_text = try imui.widget_allocator().dupe(u8, "Select an animation");
             cb_data.can_be_default = true;
             cb_data.selected_index = null;
@@ -129,7 +129,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
             }
         }
         if (anim_drop_zone.data_changed) {
-            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.ui.widgets.combobox.ComboBoxState, imui);
+            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.Imui.widgets.combobox.ComboBoxState, imui);
             cb_data.options.clearRetainingCapacity();
             const animation_model: *eng.assets.ModelAsset.BaseType = try eng.get().asset_manager.get_asset(eng.assets.ModelAsset, self.animation_model.?);
             for (animation_model.animations) |*anim| {
@@ -145,14 +145,14 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
             animation_combobox.data_changed = true;
         }
         if (animation_combobox.data_changed) {
-            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.ui.widgets.combobox.ComboBoxState, imui);
+            const cb_data, _ = try animation_combobox.id.get_widget_data(eng.Imui.widgets.combobox.ComboBoxState, imui);
             const animation_model_metadata: eng.assets.AssetManager.AssetMetadata = eng.get().asset_manager.asset_metadata.get(self.animation_model.?.unique_id) orelse return error.NoMetadata;
             const animation_uri = try std.fmt.allocPrint(eng.get().frame_allocator, "{s}/animations/{s}", .{animation_model_metadata.uri, cb_data.options.items[cb_data.selected_index.?]});
             self.animation = try eng.get().asset_manager.get_asset_id(animation_uri);
             self.animation_graph.nodes.items[0].node.Basic.animation = self.animation.?;
         }
 
-        const add_physics_shape = eng.ui.widgets.badge.create(imui, "add physics shape", .{@src()});
+        const add_physics_shape = eng.Imui.widgets.badge.create(imui, "add physics shape", .{@src()});
         if (add_physics_shape.clicked) {
         }
     }
@@ -166,7 +166,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         bottom_bar.get().anchor = .{ 0.5, 1.0 };
         bottom_bar.get().flags.render = true;
 
-        _ = eng.ui.widgets.label.create(imui, "Hello bottom bar");
+        _ = eng.Imui.widgets.label.create(imui, "Hello bottom bar");
         const animation_duration_s, const animation_duration_ticks = blk: {
             const animation_id = self.animation orelse break :blk .{ 0.0, 1 };
             const animation_ptr: *eng.assets.AnimationAsset.BaseType = eng.get().asset_manager.get_asset(eng.assets.AnimationAsset, animation_id) catch break :blk .{ 0.0, 1 };
@@ -175,7 +175,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         };
         _ = animation_duration_ticks;
         var progress = @mod(self.animation_control_data.active_time / animation_duration_s, 1.0);
-        const progress_slider = eng.ui.widgets.slider.create(imui, &progress , .{
+        const progress_slider = eng.Imui.widgets.slider.create(imui, &progress , .{
             .min = 0.0,
             .max = 1.0,
             //.step = 1.0 / @as(f32, @floatFromInt(animation_duration_ticks)),
@@ -210,7 +210,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
     self.camera.orbit_camera_update(zm.f32x4s(0.0), &eng.get().os, &eng.get().input, &eng.get().time);
 }
 
-fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {
+fn set_background_widget_layout(background_widget: *eng.Imui.Widget) void {
     background_widget.semantic_size[0].minimum_pixel_size = 400;
     background_widget.flags.clickable = true;
     background_widget.flags.render = true;
