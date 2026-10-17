@@ -46,6 +46,10 @@ particles_renderer: eng.particles_renderer.ParticleRenderer,
 
 edit_mode: EditMode,
 current_mode: enum { Edit, Play } = .Edit,
+state: ?struct {
+    arena: std.heap.ArenaAllocator,
+    entities: []const EditMode.SerializedEntity,
+} = null,
 
 command_pool: gfx.CommandPool.Ref,
 command_buffers: [4]gfx.CommandBuffer,
@@ -60,6 +64,10 @@ pub export fn app_deinit(app_opaqueptr: ?*anyopaque) void {
 
 fn _deinit(self: *Self) void {
     std.log.info("App deinit!", .{});
+
+    if (self.state) |state| {
+        state.arena.deinit();
+    }
 
     self.player_attack_particle_system.deinit();
 
@@ -100,7 +108,8 @@ fn _init() !Self {
     defer __tracy_zone.End();
 
     std.log.info("App init!", .{});
-    const engine = eng.get();
+
+    try eng.get().ecs.create_resource(eng.ui);
 
     // register app components
     inline for (ecs.EntityComponents) |T| {
@@ -136,7 +145,7 @@ fn _init() !Self {
         .{ .Drag = 5.0 },
     });
 
-    var player_attack_particle_system = try eng.particles.ParticleSystem.init(engine.general_allocator, player_attack_particle_system_settings);
+    var player_attack_particle_system = try eng.particles.ParticleSystem.init(eng.get().general_allocator, player_attack_particle_system_settings);
     errdefer player_attack_particle_system.deinit();
 
     var character_animation_graph = try @import("character_animation.zig").character_animation_graph();
@@ -176,7 +185,7 @@ fn _init() !Self {
     var clouds = try Clouds.init(eng.get().general_allocator);
     errdefer clouds.deinit();
 
-    var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(engine.general_allocator);
+    var particles_renderer = try eng.particles_renderer.ParticleRenderer.init(eng.get().general_allocator);
     errdefer particles_renderer.deinit();
 
     var edit_mode = try EditMode.init(&standard_renderer);
@@ -217,26 +226,38 @@ fn _update(self: *Self) !void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app::update");
     defer __tracy_zone.End();
 
-    const engine = eng.get();
+    defer self.standard_renderer.clear();
+    defer self.particles_renderer.clear();
+
+    const imui = try eng.get().ecs.get_resource(eng.ui);
+    imui.start_new_frame();
 
     // switch modes
-    if (!engine.imui.has_focus() and engine.input.get_key_down(KeyCode.F1)) {
+    if (!imui.has_focus() and eng.get().input.get_key_down(KeyCode.F1)) {
         switch (self.current_mode) {
             .Edit => {
+                if (self.state) |state| {
+                    state.arena.deinit();
+                }
+
+                var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
+                const entities = EditMode.serialize_entities(&arena, &eng.get().ecs) catch unreachable;
+                self.state = .{
+                    .arena = arena,
+                    .entities = entities,
+                };
+
                 self.current_mode = .Play;
-                engine.time.time_scale = 1.0;
+                eng.get().time.time_scale = 1.0;
             },
             .Play => {
                 self.current_mode = .Edit;
-                engine.time.time_scale = 0.01;
+                eng.get().time.time_scale = 0.0;
 
-                blk: {
-                    var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
-                    const camera_component: *ecs.CameraComponent,
-                    const camera_transform: *eng.ecs.TransformComponent = camera_query.next() orelse break :blk;
-
-                    _ = camera_component;
-                    self.edit_mode.editor_camera.transform = camera_transform.transform;
+                if (self.state) |state| {
+                    eng.get().ecs.clear(.{eng.ui});
+                    EditMode.load_serialized_entities_into_ecs(&eng.get().ecs, state.entities);
+                    self.character_entity = null; // @TODO fix this shouldn't be required. character entity reference should not exist in app...
                 }
             },
         }
@@ -314,14 +335,14 @@ fn _update(self: *Self) !void {
                 }) catch unreachable;
 
                 {
-                    _ = engine.imui.push_floating_layout(.Y, 100, 500, .{@src()});
-                    const l = Imui.widgets.label.create(&eng.get().imui, vel_text);
-                    if (engine.imui.get_widget(l.id)) |tw| {
+                    _ = imui.push_floating_layout(.Y, 100, 500, .{@src()});
+                    const l = Imui.widgets.label.create(imui, vel_text);
+                    if (imui.get_widget(l.id)) |tw| {
                         tw.text_content.?.font = .GeistMono;
                         tw.text_content.?.size = 15;
-                        tw.text_content.?.colour = eng.get().imui.palette().text_dark;
+                        tw.text_content.?.colour = imui.palette().text_dark;
                     }
-                    _ = engine.imui.pop_layout();
+                    _ = imui.pop_layout();
                 }
             }
 
@@ -333,11 +354,12 @@ fn _update(self: *Self) !void {
 
                 var target_pos = zm.f32x4s(0.0);
                 if (self.character_entity) |character_entity| {
-                    const visual_transform = engine.physics.calculate_entity_visual_transform(character_entity);
-                    target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0);
+                    const visual_transform = eng.get().physics.calculate_entity_visual_transform(character_entity);
+                    const camera_right = camera_transform.transform.right_direction();
+                    target_pos = visual_transform.position + zm.f32x4(0.0, 1.5, 0.0, 0.0) + camera_right * zm.f32x4s(1.0);
                 }
 
-                camera_component.camera_data.orbit_camera_update(target_pos, &engine.os, &engine.input, &engine.time);
+                camera_component.camera_data.orbit_camera_update(target_pos, &eng.get().os, &eng.get().input, &eng.get().time);
                 camera_transform.transform = camera_component.camera_data.transform; // TODO: we shouldn't use two transforms. convert camera update to use ecs
 
                 render_camera = &camera_component.camera_data;
@@ -348,37 +370,37 @@ fn _update(self: *Self) !void {
     }
 
     // update particle systems
-    var particle_system_iter = engine.ecs.query_iterator(.{ eng.ecs.TransformComponent, ecs.ParticleSystemComponent });
+    var particle_system_iter = eng.get().ecs.query_iterator(.{ eng.ecs.TransformComponent, ecs.ParticleSystemComponent });
     while (particle_system_iter.next()) |components| {
         const entity_transform: *eng.ecs.TransformComponent,
         const entity_particle_system: *ecs.ParticleSystemComponent = components;
 
         entity_particle_system.particle_system.settings.spawn_origin = entity_transform.transform.position;
-        entity_particle_system.particle_system.update(&engine.time);
+        entity_particle_system.particle_system.update(&eng.get().time);
     }
 
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
     const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
-        engine.time.get_fps(),
-        (1.0 / engine.time.get_fps()) * std.time.ms_per_s,
-        engine.time.last_frame_wait_time_s * std.time.ms_per_s,
-        (engine.time.last_frame_wait_time_s / engine.time.last_frame_time_s) * 100.0
+        eng.get().time.get_fps(),
+        (1.0 / eng.get().time.get_fps()) * std.time.ms_per_s,
+        eng.get().time.last_frame_wait_time_s * std.time.ms_per_s,
+        (eng.get().time.last_frame_wait_time_s / eng.get().time.last_frame_time_s) * 100.0
     }) catch unreachable;
 
     {
-        _ = engine.imui.push_floating_layout(
+        _ = imui.push_floating_layout(
             .Y, 
             5.0, 
-            25.0 + engine.imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
+            25.0 + imui.get_font(FontEnum.GeistMono).font_metrics.descender * 12.0, 
             .{@src()}
         );
-        const l = Imui.widgets.label.create(&eng.get().imui, fps_text);
-        if (engine.imui.get_widget(l.id)) |tw| {
+        const l = Imui.widgets.label.create(imui, fps_text);
+        if (imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
-            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
+            tw.text_content.?.colour = imui.palette().text_dark;
         }
-        _ = engine.imui.pop_layout();
+        _ = imui.pop_layout();
     }
 
     var rev_buf: [64]u8 = [_]u8{0} ** 64;
@@ -387,15 +409,15 @@ fn _update(self: *Self) !void {
         blk: { if (gitchanged) { break :blk "*"; } else { break :blk ""; } },
     }) catch unreachable;
     {
-        _ = engine.imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(engine.gfx.swapchain_size()[1])) - 
-            engine.imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
-        const l = Imui.widgets.label.create(&eng.get().imui, rev_text);
-        if (engine.imui.get_widget(l.id)) |tw| {
+        _ = imui.push_floating_layout(.Y, 10.0, @as(f32, @floatFromInt(eng.get().gfx.swapchain_size()[1])) - 
+            imui.get_font(FontEnum.GeistMono).font_metrics.line_height * 12.0, .{@src()});
+        const l = Imui.widgets.label.create(imui, rev_text);
+        if (imui.get_widget(l.id)) |tw| {
             tw.text_content.?.font = .GeistMono;
             tw.text_content.?.size = 12;
-            tw.text_content.?.colour = eng.get().imui.palette().text_dark;
+            tw.text_content.?.colour = imui.palette().text_dark;
         }
-        _ = engine.imui.pop_layout();
+        _ = imui.pop_layout();
     }
 
     // Update animation times
@@ -408,9 +430,9 @@ fn _update(self: *Self) !void {
 
     // Draw frame
     const camera_view_matrix = render_camera.transform.generate_view_matrix();
-    const camera_projection_matrix = render_camera.generate_perspective_matrix(engine.gfx.swapchain_aspect());
+    const camera_projection_matrix = render_camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect());
 
-    const frame_ready_semaphore = engine.gfx.begin_frame() catch |err| {
+    const frame_ready_semaphore = eng.get().gfx.begin_frame() catch |err| {
         std.log.warn("Unable to begin frame: {}", .{err});
         return;
     };
@@ -454,7 +476,6 @@ fn _update(self: *Self) !void {
     ) catch |err| {
         std.log.warn("Unable to render standard renderer: {}", .{err});
     };
-    defer self.standard_renderer.clear();
 
     // render terrains
     var terrain_query_iterator = eng.get().ecs.query_iterator(.{ ecs.TerrainComponent, eng.ecs.TransformComponent });
@@ -498,7 +519,6 @@ fn _update(self: *Self) !void {
     self.particles_renderer.render(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render particle systems: {}", .{err});
     };
-    self.particles_renderer.clear();
 
     // render atmosphere sky (after geometry/ocean, reads depth to discard non-sky pixels)
     self.atmosphere.render(cmd, render_camera, atm_sun_dir);
@@ -509,7 +529,7 @@ fn _update(self: *Self) !void {
     };
 
     // apply bloom
-    engine.gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
+    eng.get().gfx.bloom_filter.render_bloom(cmd, .{}) catch |err| {
         std.log.warn("Unable to apply bloom filter: {}", .{err});
     };
 
@@ -529,7 +549,7 @@ fn _update(self: *Self) !void {
     });
 
     // Tonemap HDR image onto LDR buffer
-    engine.gfx.tone_mapping_filter.apply_filter(cmd) catch |err| {
+    eng.get().gfx.tone_mapping_filter.apply_filter(cmd) catch |err| {
         std.log.warn("Unable to apply tone mapping filter: {}", .{err});
     };
 
@@ -538,19 +558,19 @@ fn _update(self: *Self) !void {
         self.edit_mode.render_cmd(cmd);
     }
 
-    if (!engine.imui.has_focus() and engine.input.get_key(KeyCode.C)) {
-        engine.physics.debug_draw_bodies(
+    if (!imui.has_focus() and eng.get().input.get_key(KeyCode.C)) {
+        eng.get().physics.debug_draw_bodies(
             cmd,
             camera_projection_matrix,
             camera_view_matrix,
         );
     }
 
-    engine.debug.render_cmd(cmd, render_camera) catch |err| {
+    eng.get().debug.render_cmd(cmd, render_camera) catch |err| {
         std.log.warn("Unable to render debug: {}", .{err});
     };
 
-    engine.imui.render_imui(cmd) catch |err| {
+    imui.render_imui(cmd) catch |err| {
         std.log.warn("Unable to render imui: {}", .{err});
     };
 
@@ -561,7 +581,7 @@ fn _update(self: *Self) !void {
     };
 
     const uber_semaphore = &self.uber_cmd_semaphores[gfx.GfxState.get().current_frame_index()];
-    engine.gfx.submit_command_buffer(.{
+    eng.get().gfx.submit_command_buffer(.{
         .command_buffers = &.{ cmd },
         .wait_semaphores = &.{ .{
             .semaphore = &frame_ready_semaphore,
@@ -574,7 +594,7 @@ fn _update(self: *Self) !void {
     };
 
     // Present
-    engine.gfx.present(&.{ uber_semaphore }) catch |err| {
+    eng.get().gfx.present(&.{ uber_semaphore }) catch |err| {
         std.log.err("Unable to present frame: {}", .{err});
         return;
     };

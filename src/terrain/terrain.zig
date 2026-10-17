@@ -51,13 +51,13 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator) !Self {
-    const hmt_id = try eng.get().asset_manager.get_asset_id("res:heightmap/rugged_peaks.r32");
+    const hmt_id = try eng.get().asset_manager.get_asset_id("res:heightmap/download.r32");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
     
     const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
     errdefer heightmap_texture_view.deinit();
 
-    const albedo_id = try eng.get().asset_manager.get_asset_id("res:heightmap/rugged_peaks.png");
+    const albedo_id = try eng.get().asset_manager.get_asset_id("res:heightmap/download_colour.png");
     const albedo = try eng.get().asset_manager.get_asset(as.ImageAsset, albedo_id);
 
     const albedo_view = try gf.ImageView.init(.{ .image = albedo.*, .view_type = .ImageView2DArray, });
@@ -291,7 +291,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 }
 
 pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
-    const imui = &eng.get().imui;
+    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
     defer imui.pop_layout();

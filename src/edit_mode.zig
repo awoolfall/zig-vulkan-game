@@ -24,7 +24,7 @@ const Imui = eng.ui;
 const GenerationalIndex = eng.gen.GenerationalIndex;
 const SelectionOutlineRenderer = @import("edit_mode/selection_outline.zig");
 
-const ecs = @import("ecs.zig");
+const app_ecs = @import("ecs.zig");
 
 const EditorMode = enum {
     SceneEditor,
@@ -114,8 +114,9 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), stand
 
 fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32), standard_renderer: *StandardRenderer, terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
     _ = standard_renderer;
+    const imui = try eng.get().ecs.get_resource(eng.ui);
     
-    if (!eng.get().imui.has_focus()) {
+    if (!imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().os, &eng.get().input, &eng.get().time);
 
         // focus camera on selected entity
@@ -156,7 +157,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
 
         if (interaction_available) {
             if (self.selected_entity) |selected_entity| blk: {
-                const entity_terrain = eng.get().ecs.get_component(ecs.TerrainComponent, selected_entity) orelse break :blk;
+                const entity_terrain = eng.get().ecs.get_component(app_ecs.TerrainComponent, selected_entity) orelse break :blk;
 
                 const modified = entity_terrain.terrain.edit_terrain(terrain_renderer) catch |err| {
                     std.log.err("Failed to edit terrain: {}", .{err});
@@ -200,8 +201,6 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
         }
     }
 
-    const imui = &eng.get().imui;
-
     self.entity_editor_ui(.{self.selected_entity, @src()});
 
     if (self.edit_ocean_params_open) {
@@ -223,7 +222,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
 }
 
 fn top_bar_ui(self: *Self, key: anytype) !void {
-    const imui = &eng.get().imui;
+    const imui = try eng.get().ecs.get_resource(eng.ui);
 
     const top_bar_background = imui.push_layout(.X, key ++ .{@src()});
     defer imui.pop_layout();
@@ -309,9 +308,14 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 save_button.id.box.get().semantic_size[0] = eng.ui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
-                        save_entities_to_scene(scene_name) catch |err| {
+                        var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
+                        defer arena.deinit();
+
+                        const serialized_entities = serialize_entities(&arena, &eng.get().ecs) catch unreachable;
+                        save_entities_to_scene(scene_name, serialized_entities) catch |err| {
                             std.log.err("Failed to save scene: {}", .{err});
                         };
+
                         std.log.debug("saved scene {s}!", .{scene_name});
                     }
                 }
@@ -509,7 +513,7 @@ fn entity_editor_ui(
     self: *Self,
     key: anytype,
 ) void {
-    const imui = &eng.get().imui;
+    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
 
     const entity = self.selected_entity orelse return;
 
@@ -574,10 +578,6 @@ fn entity_editor_ui(
             };
         }
     }
-
-    // @TODO FIX
-
-    //const ecs_component_info = @typeInfo(@TypeOf(eng.AppEcsSystem.ComponentTypes));
 
     {
         const component_add_layout = imui.push_layout(.X, key ++ .{@src()});
@@ -730,7 +730,7 @@ fn entity_editor_ui(
             // dont enable remove button functionality for the transform component.
             // we dont want to make it possible to remove the transform component.
             // TODO make this visible by greying out the button
-            if (pair.key_ptr.* != comptime eng.ecs.GenericEcsSystem.get_component_id(eng.ecs.TransformComponent)) {
+            if (pair.key_ptr.* != comptime eng.ecs.GenericEcsSystem.get_type_id(eng.ecs.TransformComponent)) {
                 if (remove_button.clicked) {
                     eng.get().ecs.remove_component_generic(pair.key_ptr.*, entity);
                 }
@@ -750,7 +750,7 @@ fn entity_editor_ui(
 
                 const component_idx = eng.get().ecs.entity_data.get(entity.idx).?.components.get(pair.key_ptr.*).?;
 
-                pair.value_ptr.component_functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.ui.gen_key(key ++ .{@src(), idx}));
+                pair.value_ptr.functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.ui.gen_key(key ++ .{@src(), idx}));
             }
         }
     }
@@ -917,7 +917,7 @@ fn create_form_number_slider(
     value: *f32, 
     key: anytype
 ) void {
-    const imui = &eng.get().imui;
+    const imui = eng.get().ecs.get_resource(eng.ui) catch return;
 
     _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
@@ -946,7 +946,7 @@ const LoadScenePopup = struct {
 };
 
 fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
-    const imui = &eng.get().imui;
+    const imui = try eng.get().ecs.get_resource(eng.ui);
 
     _ = imui.push_layout(.Y, key ++ .{@src()});
     defer imui.pop_layout();
@@ -983,14 +983,16 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
         const load_button = Imui.widgets.button.create(imui, "Load", key ++ .{@src()});
         if (load_button.clicked) {
             if (data.selected_name) |name| {
-                // Remove all existing entities
-                var entity_iterator = eng.get().ecs.entity_iterator();
-                while (entity_iterator.next()) |entity| {
-                    eng.get().ecs.remove_entity(entity);
-                }
+                // remove all entities (and components)
+                eng.get().ecs.clear(.{eng.ui});
 
                 // Create new entities and set scene name
-                try create_scene_entities(name);
+                var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
+                defer arena.deinit();
+
+                const serialized_entities = try load_serialized_entites_from_scene(&arena, name);
+                load_serialized_entities_into_ecs(&eng.get().ecs, serialized_entities);
+
                 try self.set_loaded_scene_name(name);
 
                 // close the load scene popup
@@ -1006,13 +1008,35 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
     }
 }
 
+pub const SerializedEntity = struct {
+    id: u32,
+    entity_s: std.json.Value,
+};
+
 fn open_scenes_dir(enableIterate: bool) !std.fs.Dir {
     return try std.fs.cwd().makeOpenPath("scenes", .{ .iterate = enableIterate, });
 }
 
-fn create_scene_entities(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
-    defer arena.deinit();
+pub fn load_serialized_entities_into_ecs(ecs: *eng.ecs.GenericEcsSystem, serialized_entities: []const SerializedEntity) void {
+    for (serialized_entities) |serialized_entity| {
+        const id = serialized_entity.id;
+        const entity_s = serialized_entity.entity_s;
+
+        const new_entity = ecs.deserialize_to_entity(entity_s) catch |err| {
+            std.log.err("Failed to deserialize entity {}: {}", .{ id, err });
+            continue;
+        };
+        
+        // all loaded entities will be serialized so make sure it has the serialization component
+        _ = ecs.add_component(eng.ecs.SerializationComponent, new_entity) catch |err| {
+            std.log.warn("Unable to add serialization component to new entity: {}", .{err});
+        };
+    }
+}
+
+pub fn load_serialized_entites_from_scene(arena: *std.heap.ArenaAllocator, scene_name: []const u8) ![]const SerializedEntity {
+    var serialized_arraylist = std.ArrayList(SerializedEntity).empty;
+    errdefer serialized_arraylist.deinit(arena.allocator());
 
     var scenes_dir = try open_scenes_dir(true);
     defer scenes_dir.close();
@@ -1022,7 +1046,6 @@ fn create_scene_entities(scene_name: []const u8) !void {
 
     var iter = dir.iterate();
     while (try iter.next()) |entry| {
-        _ = arena.reset(.retain_capacity);
         if (entry.kind == .file) {
             const ent_file = dir.openFile(entry.name, .{}) catch |err| {
                 std.log.err("Failed to open file {s}: {}", .{ entry.name, err });
@@ -1030,11 +1053,11 @@ fn create_scene_entities(scene_name: []const u8) !void {
             };
             defer ent_file.close();
 
-            const ent_str = ent_file.readToEndAlloc(arena.allocator(), 1024 * 1024) catch |err| {
+            const ent_str = ent_file.readToEndAlloc(eng.get().general_allocator, 1024 * 1024) catch |err| {
                 std.log.err("Failed to read file {s}: {}", .{ entry.name, err });
                 continue;
             };
-            defer arena.allocator().free(ent_str);
+            defer eng.get().general_allocator.free(ent_str);
 
             const ent_s = std.json.parseFromSliceLeaky(
                 std.json.Value,
@@ -1046,36 +1069,23 @@ fn create_scene_entities(scene_name: []const u8) !void {
                 continue;
             };
 
-            const new_entity = eng.get().ecs.deserialize_to_entity(ent_s) catch |err| {
-                std.log.err("Failed to deserialize entity {s}: {}", .{ entry.name, err });
+            const id = std.fmt.parseInt(u32, std.fs.path.stem(entry.name), 10) catch |err| {
+                std.log.warn("Unable to determine entity id number for file {s}: {}", .{entry.name, err});
                 continue;
             };
-            
-            // all loaded entities will be serialized so make sure it has the serialization component
-            _ = eng.get().ecs.add_component(eng.ecs.SerializationComponent, new_entity) catch |err| {
-                std.log.warn("Unable to add serialization component to new entity: {}", .{err});
-            };
 
-            std.log.info("Loaded entity: {}", .{new_entity});
+            try serialized_arraylist.append(arena.allocator(), .{.id = id, .entity_s = ent_s});
         }
     }
+
+    return try serialized_arraylist.toOwnedSlice(arena.allocator());
 }
 
-fn save_entities_to_scene(scene_name: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
-    defer arena.deinit();
+pub fn serialize_entities(arena: *std.heap.ArenaAllocator, ecs: *eng.ecs.GenericEcsSystem) ![]const SerializedEntity {
+    var serialized_arraylist = std.ArrayList(SerializedEntity).empty;
+    errdefer serialized_arraylist.deinit(arena.allocator());
 
-    var scenes_dir = try open_scenes_dir(true);
-    defer scenes_dir.close();
-
-    scenes_dir.deleteTree(scene_name) catch |err| {
-        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
-    };
-
-    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
-    defer scene_dir.close();
-
-    var serialize_component_iterator = eng.get().ecs.query_iterator(.{eng.ecs.SerializationComponent});
+    var serialize_component_iterator = ecs.query_iterator(.{eng.ecs.SerializationComponent});
     var largest_serialize_id: u32 = 0;
     while (serialize_component_iterator.next()) |components| {
         const serialize_component = components.@"0";
@@ -1084,9 +1094,6 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
 
     var entity_iterator = eng.get().ecs.entity_iterator();
     while (entity_iterator.next()) |entity| {
-
-        _ = arena.reset(.retain_capacity);
-
         const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity)
             orelse continue;
 
@@ -1100,6 +1107,34 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             continue;
         };
 
+        try serialized_arraylist.append(arena.allocator(), .{.id = entity_serialize_component.serialize_id.?, .entity_s = entity_s});
+    }
+
+    return serialized_arraylist.toOwnedSlice(arena.allocator());
+}
+
+pub fn save_entities_to_scene(scene_name: []const u8, serialized_entities: []const SerializedEntity) !void {
+    var scenes_dir = try open_scenes_dir(true);
+    defer scenes_dir.close();
+
+    scenes_dir.deleteTree(scene_name) catch |err| {
+        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+    };
+
+    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
+    defer scene_dir.close();
+
+    var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
+    defer arena.deinit();
+
+    for (serialized_entities) |serialized_entity| {
+        if (!arena.reset(.retain_capacity)) {
+            _ = arena.reset(.free_all);
+        }
+
+        const id = serialized_entity.id;
+        const entity_s = serialized_entity.entity_s;
+
         var json_writer = std.io.Writer.Allocating.init(arena.allocator());
         defer json_writer.deinit();
 
@@ -1109,12 +1144,12 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
         json.options.whitespace = .indent_2;
 
         json.write(entity_s) catch |err| {
-            std.log.err("unable to produce json for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+            std.log.err("unable to write json for entity: {}", .{err});
             continue;
         };
 
-        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{entity_serialize_component.serialize_id.?}) catch |err| {
-            std.log.err("unable to produce file path for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+        const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{id}) catch |err| {
+            std.log.err("unable to produce file path for entity {}: {}\n", .{id, err});
             continue;
         };
 
@@ -1123,7 +1158,7 @@ fn save_entities_to_scene(scene_name: []const u8) !void {
             .data = json_writer.written(),
             .flags = .{ .read = false, .truncate = true, },
         }) catch |err| {
-            std.log.err("unable to write file for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+            std.log.err("unable to write file for entity {}: {}\n", .{id, err});
             continue;
         };
     }

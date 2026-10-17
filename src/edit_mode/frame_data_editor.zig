@@ -71,7 +71,7 @@ pub fn enter_mode(self: *Self) !void {
 }
 
 pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !void {
-    const imui = &eng.get().imui;
+    const imui = try eng.get().ecs.get_resource(eng.ui);
 
     {
         const background_box = imui.push_floating_layout(.Y, 0.0, 0.0, .{@src()});

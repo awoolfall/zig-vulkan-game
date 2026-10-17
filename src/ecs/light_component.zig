@@ -127,15 +127,15 @@ pub fn editor_ui(imui: *eng.ui, entity: eng.ecs.Entity, component: *Self, key: a
         // _ = Imui.widgets.number_slider.create(imui, &light.colour[2], .{}, key ++ .{@src()});
     }
 
-    create_form_number_slider("intensity:", &component.light.intensity, key ++ .{@src()});
+    create_form_number_slider(imui, "intensity:", &component.light.intensity, key ++ .{@src()});
 
     if (component.light.light_type == .Spot) {
         var umbra_degrees = std.math.radiansToDegrees(component.light.umbra);
-        create_form_number_slider("umbra:", &umbra_degrees, key ++ .{@src()});
+        create_form_number_slider(imui, "umbra:", &umbra_degrees, key ++ .{@src()});
         component.light.umbra = std.math.degreesToRadians(umbra_degrees);
 
         var penumbra_degrees = std.math.radiansToDegrees(component.light.delta_penumbra);
-        create_form_number_slider("delta penumbra:", &penumbra_degrees, key ++ .{@src()});
+        create_form_number_slider(imui, "delta penumbra:", &penumbra_degrees, key ++ .{@src()});
         component.light.delta_penumbra = std.math.degreesToRadians(penumbra_degrees);
     }
 }
@@ -152,12 +152,11 @@ fn set_background_widget_layout(background_widget: *eng.ui.Widget) void {
 }
 
 fn create_form_number_slider(
+    imui: *eng.ui,
     text: []const u8,
     value: *f32, 
     key: anytype
 ) void {
-    const imui = &eng.get().imui;
-
     _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
 
