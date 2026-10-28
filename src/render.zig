@@ -46,6 +46,7 @@ pub const AnimatedRenderObject = struct {
 
 const InstanceStruct = extern struct {
     model_matrix: zm.Mat,
+    inverse_model_matrix: zm.Mat,
     entity_id: u32,
     flags: packed struct(u32) {
         unlit: bool,
@@ -1107,6 +1108,7 @@ pub fn render_cmd(
         const entity_id = if (ro.entity_id) |e| e else 0;
         mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct {
             .model_matrix = ro.transform,
+            .inverse_model_matrix = zm.inverse(ro.transform),
             .entity_id = entity_id,
             .flags = .{
                 .unlit = ro.material.unlit,
@@ -1253,6 +1255,7 @@ pub fn render_cmd(
         const entity_id = if (ro.entity_id) |e| e else 0;
         mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct {
             .model_matrix = ro.transform,
+            .inverse_model_matrix = zm.inverse(ro.transform),
             .entity_id = entity_id,
             .flags = .{
                 .unlit = ro.material.unlit,

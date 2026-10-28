@@ -5,21 +5,24 @@ const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
 const KeyCode = eng.input.KeyCode;
 
-pub fn spawn_character(transform: eng.Transform, animation_graph: *eng.AnimationGraph) !eng.ecs.Entity {
-    const chara_shape = eng.physics.ShapeSettings {
+pub fn spawn_character(
+    transform: eng.Transform,
+    animation_graph: *eng.AnimationGraph,
+) !eng.ecs.Entity {
+    const chara_shape = eng.physics.ShapeSettings{
         .shape = .{ .Capsule = .{
             .half_height = 0.7,
             .radius = 0.2,
         } },
-        .offset_transform = eng.Transform {
+        .offset_transform = eng.Transform{
             .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
             .rotation = zm.qidentity(),
         },
     };
 
-    const character_virtual_settings = eng.physics.CharacterVirtualSettings {
+    const character_virtual_settings = eng.physics.CharacterVirtualSettings{
         .shape = chara_shape,
-        .up_direction = [4]f32{0.0, 1.0, 0.0, 0.0},
+        .up_direction = [4]f32{ 0.0, 1.0, 0.0, 0.0 },
         .max_slope_angle = std.math.degreesToRadians(70.0),
         .mass = 70.0,
         .character_padding = 0.02,
@@ -62,8 +65,9 @@ pub fn player_control_system() !void {
     const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
 
     var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
-    const camera_component: *ecs.CameraComponent,
-    const camera_transform_component: *eng.ecs.TransformComponent = camera_query.next() orelse return error.NoMainCamera;
+    const query_components = camera_query.next() orelse return error.NoMainCamera;
+    const camera_component: *ecs.CameraComponent = query_components.@"0";
+    const camera_transform_component: *eng.ecs.TransformComponent = query_components.@"1";
     _ = camera_component;
 
     var query = eng.get().ecs.query_iterator(.{
@@ -74,13 +78,12 @@ pub fn player_control_system() !void {
         eng.ecs.AnimationControllerComponent,
     });
 
-
     while (query.next()) |components| {
-        const player_character_component: *ecs.PlayerCharacterComponent,
-        const transform_component: *eng.ecs.TransformComponent,
-        const physics_component: *eng.ecs.PhysicsComponent,
-        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent,
-        const anim_controller_component: *eng.ecs.AnimationControllerComponent = components;
+        const player_character_component: *ecs.PlayerCharacterComponent = components.@"0";
+        const transform_component: *eng.ecs.TransformComponent = components.@"1";
+        const physics_component: *eng.ecs.PhysicsComponent = components.@"2";
+        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent = components.@"3";
+        const anim_controller_component: *eng.ecs.AnimationControllerComponent = components.@"4";
 
         // Input to move the model around
         {
@@ -102,12 +105,12 @@ pub fn player_control_system() !void {
                 movement_direction = zm.normalize3(movement_direction);
             }
 
-            const camera_right = camera_transform_component.transform.right_direction(); // self.camera.transform.right_direction();
+            const camera_right = camera_transform_component.transform.right_direction();
             const camera_forward_no_pitch = zm.cross3(zm.f32x4(0.0, 1.0, 0.0, 0.0), camera_right);
 
-            var world_movement_direction = 
-                camera_forward_no_pitch * zm.f32x4s(movement_direction[2])
-                + camera_right * zm.f32x4s(movement_direction[0]);
+            var world_movement_direction =
+                camera_forward_no_pitch * zm.f32x4s(movement_direction[2]) +
+                camera_right * zm.f32x4s(movement_direction[0]);
 
             // eng.get().debug.draw_line(.{
             //     .p0 = character_entity.transform.position,
@@ -117,16 +120,44 @@ pub fn player_control_system() !void {
 
             const character = physics_runtime_component.runtime_data.CharacterVirtual.virtual;
 
-            var character_velocity = physics_component.velocity;// zm.loadArr3(character.getLinearVelocity());
+            var character_velocity = physics_component.velocity;
 
             var character_move_state: enum {
                 Walking,
                 Running,
                 Dashing,
                 Falling,
+                Blocking,
             } = .Falling;
 
-            if (character_is_supported(character)) {
+            if (eng.get().input.get_key_down(KeyCode.ControlLeft) and (player_character_component.parry_start_time == null)) {
+                player_character_component.parry_start_time = eng.get().time.frame_start_time;
+            }
+
+            if (!eng.get().input.get_key(KeyCode.ControlLeft)) {
+                player_character_component.parry_start_time = null;
+            }
+
+            if (player_character_component.parry_start_time != null) {
+                character_move_state = .Blocking;
+            }
+
+            if (player_character_component.parry_start_time != null) {
+                if (!imui.has_focus() and eng.get().input.get_key(KeyCode.W)) {
+                    // perform dodge jump
+                }
+                if (!imui.has_focus() and eng.get().input.get_key(KeyCode.S)) {
+                    // perform dodge duck
+                }
+                if (!imui.has_focus() and eng.get().input.get_key(KeyCode.D)) {
+                    // perform dodge right
+                }
+                if (!imui.has_focus() and eng.get().input.get_key(KeyCode.A)) {
+                    // perform dodge left
+                }
+            }
+
+            if (character_move_state != .Blocking and character_is_supported(character)) {
                 // remove any gravity
                 if (character_velocity[1] < 0.0) {
                     character_velocity[1] = 0.0;
@@ -152,18 +183,21 @@ pub fn player_control_system() !void {
                 }
             }
 
+            const dtx4 = zm.f32x4s(eng.get().time.delta_time_f32());
+
             switch (character_move_state) {
+                .Blocking => {},
                 .Falling => {
                     // if not supported then apply gravity
-                    character_velocity = character_velocity
-                        + zm.loadArr3(physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                    character_velocity += zm.loadArr3(physics.zphysics.system.getGravity()) * dtx4;
                 },
                 .Walking => {
                     const move_t = 1.0 - std.math.exp(-20.0 * eng.get().time.delta_time_f32());
                     if (zm.length3(world_movement_direction)[0] > 0.0) {
+                        const end_velocity = world_movement_direction * zm.f32x4s(player_character_component.movement_speed);
                         character_velocity =
                             (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) +
-                            (zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed), move_t) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
+                            (zm.lerp(character_velocity, end_velocity, move_t) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                     } else {
                         character_velocity =
                             (character_velocity * zm.f32x4(0.0, 1.0, 0.0, 0.0)) +
@@ -180,7 +214,7 @@ pub fn player_control_system() !void {
 
                     const dash_speed_multiplier = 4.0 * std.math.lerp(1.0, 0.2, (@as(f32, @floatFromInt(time_since_dash)) / std.time.ns_per_s) / 0.3);
                     character_velocity =
-                            (world_movement_direction * zm.f32x4s(player_character_component.movement_speed) * zm.f32x4s(dash_speed_multiplier));
+                        (world_movement_direction * zm.f32x4s(player_character_component.movement_speed) * zm.f32x4s(dash_speed_multiplier));
                 },
                 .Running => {
                     const move_t = 1.0 - std.math.exp(-20.0 * eng.get().time.delta_time_f32());
@@ -189,8 +223,8 @@ pub fn player_control_system() !void {
                         (zm.lerp(character_velocity, world_movement_direction * zm.f32x4s(player_character_component.movement_speed) * zm.f32x4s(2.0), move_t) * zm.f32x4(1.0, 0.0, 1.0, 1.0));
                 },
             }
-            
-            if (!imui.has_focus() and eng.get().input.get_key_down(KeyCode.Space)) {
+
+            if (!imui.has_focus() and character_move_state != .Blocking and eng.get().input.get_key_down(KeyCode.Space)) {
                 if (character_is_supported(character)) {
                     const jump_velocity = 7.0;
                     character_velocity[1] = jump_velocity;
@@ -203,31 +237,27 @@ pub fn player_control_system() !void {
             // Rotate character model to match the input desired direction
             // If no input desired direction (normalized to nan) then remain in last rotation
             const rotate_towards_dir = switch (character_move_state) {
-                .Walking => 
-                    if (zm.length3(movement_direction)[0] > 0.0) zm.normalize3(camera_forward_no_pitch)
-                    else zm.f32x4s(std.math.nan(f32))
-                ,
+                .Walking, .Blocking => if (zm.length3(movement_direction)[0] > 0.0) zm.normalize3(camera_forward_no_pitch) else zm.f32x4s(std.math.nan(f32)),
                 .Dashing, .Falling => zm.normalize3(camera_forward_no_pitch),
                 .Running => zm.normalize3(world_movement_direction),
             };
 
             if (!std.math.isNan(rotate_towards_dir[0])) {
-                const rot = zm.lookAtRh(
-                    zm.f32x4s(0.0),
-                    rotate_towards_dir * zm.f32x4(1.0, 1.0, -1.0, 0.0),
-                    zm.f32x4(0.0, 1.0, 0.0, 0.0)
-                );
+                const rot = zm.lookAtRh(zm.f32x4s(0.0), rotate_towards_dir * zm.f32x4(1.0, 1.0, -1.0, 0.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
                 transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 1.0 - std.math.exp(-6.0 * eng.get().time.delta_time_f32()));
             }
 
-            if (!imui.has_focus() and eng.get().input.get_key_down(KeyCode.MouseLeft) and switch(character_move_state){.Walking => true, else => false}) {
+            if (!imui.has_focus() and eng.get().input.get_key_down(KeyCode.MouseLeft) and switch (character_move_state) {
+                .Walking => true,
+                else => false,
+            }) {
                 var collector = eng.physics.util.CollideShapeCollector.init(eng.get().frame_allocator) catch |err| {
                     std.log.warn("Unable to create physics collector: {}", .{err});
                     unreachable;
                 };
                 defer collector.deinit();
 
-                const box_shape_settings = eng.physics.zphy.BoxShapeSettings.create([3]f32{0.5, 0.5, 0.5}) catch unreachable;
+                const box_shape_settings = eng.physics.zphy.BoxShapeSettings.create([3]f32{ 0.5, 0.5, 0.5 }) catch unreachable;
                 defer box_shape_settings.asShapeSettings().release();
 
                 const box_shape = box_shape_settings.asShapeSettings().createShape() catch unreachable;
@@ -239,26 +269,17 @@ pub fn player_control_system() !void {
 
                 const shape_position = transform_component.transform.position + zm.f32x4(0.0, 0.6, 0.0, 0.0) + (camera_forward_2d);
 
-                const matrix = zm.matToArr((eng.Transform {
-                    .position = shape_position
-                }).generate_model_matrix());
+                const matrix = zm.matToArr((eng.Transform{ .position = shape_position }).generate_model_matrix());
 
                 anim_controller_component.trigger_event("character attack");
 
-                // particles!
-                // @TODO: FIX
-                //self.player_attack_particle_system.settings.spawn_origin = shape_position;
-                //self.player_attack_particle_system.settings.spawn_offset = camera_right;
-                //self.player_attack_particle_system.settings.initial_velocity = zm.f32x4s(0.0); //camera_forward_2d * zm.f32x4s(10.0);
-                //self.player_attack_particle_system.emit_particle_burst();
-
                 physics.zphysics.system.getNarrowPhaseQuery().collideShape(
                     box_shape,
-                    [3]f32{1.0, 1.0, 1.0},
+                    [3]f32{ 1.0, 1.0, 1.0 },
                     matrix,
-                    [3]eng.physics.zphy.Real{0.0, 0.0, 0.0},
+                    [3]eng.physics.zphy.Real{ 0.0, 0.0, 0.0 },
                     @ptrCast(&collector),
-                    .{}
+                    .{},
                 );
 
                 std.log.info("hits: {}", .{collector.hits.items.len});
@@ -269,15 +290,15 @@ pub fn player_control_system() !void {
                     const user_data = eng.physics.PhysicsSystem.extract_entity_from_user_data(read_lock.body.getUserData());
 
                     hitblk: {
-                        const hit_entity = eng.ecs.Entity{.idx = user_data.entity };
+                        const hit_entity = eng.ecs.Entity{ .idx = user_data.entity };
                         const hit_entity_name = eng.get().ecs.get_entity_name(hit_entity) orelse "unnamed";
-                        std.log.info("- {s}", .{ hit_entity_name });
+                        std.log.info("- {s}", .{hit_entity_name});
 
                         const healthpoint_component = eng.get().ecs.get_component(ecs.HealthPointComponent, hit_entity) orelse break :hitblk;
                         healthpoint_component.health_points -= 10;
 
                         if (healthpoint_component.health_points <= 0) {
-                            std.log.info("'{s}' fainted!", .{ hit_entity_name });
+                            std.log.info("'{s}' fainted!", .{hit_entity_name});
                         }
                     }
                 }

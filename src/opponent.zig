@@ -5,20 +5,20 @@ const ecs = @import("ecs.zig");
 const character_animation = @import("character_animation.zig");
 
 pub fn spawn_opponent_character(transform: eng.Transform, animation_graph: *eng.AnimationGraph) !eng.ecs.Entity {
-    const chara_shape = eng.physics.ShapeSettings {
+    const chara_shape = eng.physics.ShapeSettings{
         .shape = .{ .Capsule = .{
             .half_height = 0.7,
             .radius = 0.2,
         } },
-        .offset_transform = eng.Transform {
+        .offset_transform = eng.Transform{
             .position = zm.f32x4(0.0, 0.7 + 0.2, 0.0, 0.0),
             .rotation = zm.qidentity(),
         },
     };
 
-    const character_virtual_settings = eng.physics.CharacterVirtualSettings {
+    const character_virtual_settings = eng.physics.CharacterVirtualSettings{
         .shape = chara_shape,
-        .up_direction = [4]f32{0.0, 1.0, 0.0, 0.0},
+        .up_direction = [4]f32{ 0.0, 1.0, 0.0, 0.0 },
         .max_slope_angle = std.math.degreesToRadians(70.0),
         .mass = 70.0,
         .character_padding = 0.02,
@@ -58,17 +58,18 @@ pub fn opponent_behaviour_system() !void {
     const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
 
     var player_query = eng.get().ecs.query_iterator(.{ ecs.PlayerCharacterComponent, eng.ecs.TransformComponent });
-    const player_character_component: *ecs.PlayerCharacterComponent,
-    const player_transform_component: *eng.ecs.TransformComponent = player_query.next() orelse return error.UnableToFindPlayerCharacter;
+    const player_components = player_query.next() orelse return error.UnableToFindPlayerCharacter;
+    const player_character_component: *ecs.PlayerCharacterComponent = player_components.@"0";
+    const player_transform_component: *eng.ecs.TransformComponent = player_components.@"1";
     _ = player_character_component;
 
     var query = eng.get().ecs.query_iterator(.{ ecs.OpponentCharacterComponent, eng.ecs.TransformComponent, eng.ecs.PhysicsComponent, eng.ecs.PhysicsRuntimeComponent, eng.ecs.AnimationControllerComponent });
     while (query.next()) |components| {
-        const opponent_component: *ecs.OpponentCharacterComponent,
-        const transform_component: *eng.ecs.TransformComponent,
-        const physics_component: *eng.ecs.PhysicsComponent,
-        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent,
-        const animation_component: *eng.ecs.AnimationControllerComponent = components;
+        const opponent_component: *ecs.OpponentCharacterComponent = components.@"0";
+        const transform_component: *eng.ecs.TransformComponent = components.@"1";
+        const physics_component: *eng.ecs.PhysicsComponent = components.@"2";
+        const physics_runtime_component: *eng.ecs.PhysicsRuntimeComponent = components.@"3";
+        const animation_component: *eng.ecs.AnimationControllerComponent = components.@"4";
 
         var desired_movement_direction = zm.f32x4s(0.0);
 
@@ -94,12 +95,11 @@ pub fn opponent_behaviour_system() !void {
                 character_velocity = character_velocity
                     // apply supported movement
                     + desired_movement_direction * zm.f32x4s(opponent_component.movement_speed * friction * eng.get().time.delta_time_f32())
-                    // apply friction
+                        // apply friction
                     - character_velocity * zm.f32x4s(friction * eng.get().time.delta_time_f32());
             } else {
                 // if not supported then apply gravity
-                character_velocity = character_velocity
-                    + zm.loadArr3(physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
+                character_velocity = character_velocity + zm.loadArr3(physics.zphysics.system.getGravity()) * zm.f32x4s(eng.get().time.delta_time_f32());
             }
 
             physics_component.velocity = character_velocity;
@@ -113,7 +113,11 @@ pub fn opponent_behaviour_system() !void {
         var player_location = player_transform_component.transform.position;
         player_location[1] = transform_component.transform.position[1];
 
-        const rot = zm.lookAtRh(transform_component.transform.position * zm.f32x4(1.0,1.0,-1.0,1.0), player_location * zm.f32x4(1.0,1.0,-1.0,1.0), zm.f32x4(0.0, 1.0, 0.0, 0.0));
+        const rot = zm.lookAtRh(
+            transform_component.transform.position * zm.f32x4(1.0, 1.0, -1.0, 1.0),
+            player_location * zm.f32x4(1.0, 1.0, -1.0, 1.0),
+            zm.f32x4(0.0, 1.0, 0.0, 0.0),
+        );
         transform_component.transform.rotation = zm.slerp(transform_component.transform.rotation, zm.matToQuat(rot), 1.0 - std.math.exp(-6.0 * eng.get().time.delta_time_f32()));
         // opponent_physics.setRotation(
         //     zm.slerp(opponent.transform.rotation, zm.matToQuat(rot), 0.1)

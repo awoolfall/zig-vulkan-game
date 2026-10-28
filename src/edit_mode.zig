@@ -73,11 +73,11 @@ pub fn init(standard_renderer: *const StandardRenderer) !Self {
     var frame_data_editor = try FrameDataEditor.init();
     errdefer frame_data_editor.deinit();
 
-    return Self {
+    return Self{
         .gizmo = gizmo,
         .selection_outline_renderer = selection_outline_renderer,
         .load_scene_popup_data = try LoadScenePopup.init(),
-        .editor_camera = Camera {
+        .editor_camera = Camera{
             .field_of_view_y = Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 10000.0,
@@ -115,7 +115,7 @@ pub fn update(self: *Self, selection_textures: *st.SelectionTextures(u32), stand
 fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32), standard_renderer: *StandardRenderer, terrain_renderer: *TerrainRenderer, ocean: *Ocean) !void {
     _ = standard_renderer;
     const imui = try eng.get().ecs.get_resource(eng.Imui);
-    
+
     if (!imui.has_focus()) {
         self.editor_camera.fly_camera_update(&eng.get().os, &eng.get().input, &eng.get().time);
 
@@ -124,7 +124,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
             if (self.selected_entity) |si| {
                 const selected_entity_transform = eng.get().ecs.get_component(eng.ecs.TransformComponent, si) orelse break :blk;
 
-                self.editor_camera.transform.position = 
+                self.editor_camera.transform.position =
                     selected_entity_transform.transform.position -
                     (self.editor_camera.transform.forward_direction() * zm.f32x4s(10.0));
             }
@@ -185,7 +185,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
             } else {
                 if (selection_entity_id < eng.get().ecs.entity_data.data.items.len) {
                     const entity_item = eng.get().ecs.entity_data.data.items[selection_entity_id];
-                    const entity = eng.ecs.Entity { .idx = .{ .index = selection_entity_id, .generation = entity_item.generation, } };
+                    const entity = eng.ecs.Entity{ .idx = .{ .index = selection_entity_id, .generation = entity_item.generation } };
                     if (entity_item.item_data) |_| {
                         const entity_name = eng.get().ecs.get_entity_name(entity) orelse "unnamed";
                         std.log.info("selected new entity with name: {s}", .{entity_name});
@@ -201,7 +201,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
         }
     }
 
-    self.entity_editor_ui(.{self.selected_entity, @src()});
+    self.entity_editor_ui(.{ self.selected_entity, @src() });
 
     if (self.edit_ocean_params_open) {
         ocean_edit_ui(self, imui, ocean, .{@src()});
@@ -216,8 +216,7 @@ fn update_and_render(self: *Self, selection_textures: *st.SelectionTextures(u32)
             set_background_widget_layout(bg);
         }
 
-        self.load_scene_popup(&self.load_scene_popup_data, .{@src()})
-            catch unreachable;
+        self.load_scene_popup(&self.load_scene_popup_data, .{@src()}) catch unreachable;
     }
 }
 
@@ -232,26 +231,20 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
         top_widget.semantic_size[0].kind = .ParentPercentage;
         top_widget.semantic_size[0].value = 1.0;
         top_widget.semantic_size = .{
-            .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, },
-            .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = false, },
+            .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false },
+            .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = false },
         };
-        top_widget.padding_px = .{
-            .left = 10,
-            .right = 10,
-            .top = 0,
-            .bottom = 0,
-        };
+        top_widget.padding_px = .{ .left = 10, .right = 10, .top = 0, .bottom = 0 };
         top_widget.children_gap = 5;
         top_widget.flags.render = true;
         top_widget.background_colour = imui.palette().background;
         top_widget.background_colour.?[3] = 0.5;
     }
 
-    const l = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Edit Mode{s}", .{
-        if (self.loaded_scene_name) |scene_name|
-            try std.fmt.allocPrint(eng.get().frame_allocator, ": {s}", .{scene_name})
-         else ""
-    }));
+    const l = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Edit Mode{s}", .{if (self.loaded_scene_name) |scene_name|
+        try std.fmt.allocPrint(eng.get().frame_allocator, ": {s}", .{scene_name})
+    else
+        ""}));
     if (imui.get_widget(l.id)) |label_widget| {
         label_widget.anchor = .{ 0.5, 0.5 };
         label_widget.pivot = .{ 0.5, 0.5 };
@@ -305,7 +298,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const save_button = Imui.widgets.badge.create(imui, "Save Scene", key ++ .{@src()});
-                save_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                save_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
                 if (save_button.clicked) {
                     if (self.loaded_scene_name) |scene_name| {
                         var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
@@ -320,7 +313,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                     }
                 }
                 const load_button = Imui.widgets.badge.create(imui, "Load Scene", key ++ .{@src()});
-                load_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                load_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
                 if (load_button.clicked) {
                     self.load_scene_popup_is_open = true;
                 }
@@ -357,7 +350,7 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 defer imui.pop_layout();
 
                 const new_button = Imui.widgets.badge.create(imui, "New Entity", key ++ .{@src()});
-                new_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                new_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
                 if (new_button.clicked) {
                     self.create_new_entity() catch |err| {
                         std.log.err("Failed to create new entity: {}", .{err});
@@ -365,13 +358,13 @@ fn top_bar_ui(self: *Self, key: anytype) !void {
                 }
 
                 const delete_button = Imui.widgets.badge.create(imui, "Delete Entity", key ++ .{@src()});
-                delete_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                delete_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
                 if (delete_button.clicked) {
                     self.remove_selected_entity();
                 }
 
                 const duplicate_button = Imui.widgets.badge.create(imui, "Duplicate Entity", key ++ .{@src()});
-                duplicate_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize { .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+                duplicate_button.id.box.get().semantic_size[0] = eng.Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
                 if (duplicate_button.clicked) {
                     self.duplicate_selected_entity() catch |err| {
                         std.log.err("Failed to duplicate entity: {}", .{err});
@@ -466,7 +459,7 @@ const PhysicsData = struct {
 
     pub fn init(alloc: std.mem.Allocator) !PhysicsData {
         _ = alloc;
-        return PhysicsData { .settings = .{ .None = {} } };
+        return PhysicsData{ .settings = .{ .None = {} } };
     }
 
     pub fn clone(self: *PhysicsData, alloc: std.mem.Allocator) !PhysicsData {
@@ -488,7 +481,7 @@ const ItemSearchData = struct {
 
     pub fn init(alloc: std.mem.Allocator) !ItemSearchData {
         _ = alloc;
-        return ItemSearchData {
+        return ItemSearchData{
             .options = .empty,
         };
     }
@@ -501,7 +494,7 @@ const ItemSearchData = struct {
             try new_options.append(alloc, try alloc.dupe(u8, o));
         }
 
-        return ItemSearchData {
+        return ItemSearchData{
             .options = new_options,
             .dropdown_is_open = self.dropdown_is_open,
         };
@@ -531,9 +524,7 @@ fn entity_editor_ui(
         background_widget.pivot = .{ 1.0, 0.0 };
     }
 
-    const form_label_size = Imui.SemanticSize {
-        .kind = .ParentPercentage, .value = 0.3, .shrinkable = false,
-    };
+    const form_label_size = Imui.SemanticSize{ .kind = .ParentPercentage, .value = 0.3, .shrinkable = false };
 
     const entity_editor_background_signals = imui.generate_widget_signals(background_box);
     if (entity_editor_background_signals.init) {
@@ -554,7 +545,7 @@ fn entity_editor_ui(
     {
         const ll = imui.push_layout(.X, key ++ .{@src()});
         if (imui.get_widget(ll)) |ll_widget| {
-            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+            ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
             ll_widget.children_gap = 4;
         }
         defer imui.pop_layout();
@@ -584,7 +575,7 @@ fn entity_editor_ui(
         defer imui.pop_layout();
         {
             const w = component_add_layout.get();
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
             w.children_gap = 2.0;
         }
 
@@ -604,14 +595,12 @@ fn entity_editor_ui(
         const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.Imui.widgets.line_edit.TextInputState, imui) catch unreachable;
         {
             const w = component_search_line_edit.id.box.get();
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
         }
 
         if (imui.focus_item) |focus_item| {
-            data.dropdown_is_open = (
-                focus_item == component_search_line_edit.id.box.get().key or
-                focus_item == component_search_line_edit.id.text.get().key
-            );
+            data.dropdown_is_open = (focus_item == component_search_line_edit.id.box.get().key or
+                focus_item == component_search_line_edit.id.text.get().key);
         } else {
             data.dropdown_is_open = false;
         }
@@ -619,80 +608,79 @@ fn entity_editor_ui(
         var component_add_button = eng.Imui.widgets.badge.create(imui, "add", key ++ .{@src()});
 
         // if the dropdown should be shown then render it
-        dropdown_is_open: { if (data.dropdown_is_open) {
-            // determine the position of the dropdown options based on the primary combobox rect
-            const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b| 
-                .{ b.rect().left, b.rect().bottom + 4 }
-                else break :dropdown_is_open;
+        dropdown_is_open: {
+            if (data.dropdown_is_open) {
+                // determine the position of the dropdown options based on the primary combobox rect
+                const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b|
+                    .{ b.rect().left, b.rect().bottom + 4 }
+                else
+                    break :dropdown_is_open;
 
-            // push the options background layout
-            const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
-            if (imui.get_widget(options_background)) |options_background_widget| {
-                options_background_widget.semantic_size[0] = .{
-                    .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
-                };
-                options_background_widget.semantic_size[1] = .{
-                    .kind = .ChildrenSize, .value = 1.0, .shrinkable = true,
-                };
+                // push the options background layout
+                const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
+                if (imui.get_widget(options_background)) |options_background_widget| {
+                    options_background_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+                    options_background_widget.semantic_size[1] = .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = true };
 
-                options_background_widget.flags.render = true;
-                options_background_widget.border_width_px = .all(1);
-                options_background_widget.padding_px = .all(4);
-                options_background_widget.children_gap = 2;
-                options_background_widget.corner_radii_px = .all(4);
-            }
-
-            // push each of the options into the dropdown menu
-            const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
-            defer eng.get().frame_allocator.free(lower_line_edit_text);
-
-            var is_first_item = true;
-            for (data.options.items, 0..) |option, i| {
-                const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
-                defer eng.get().frame_allocator.free(lower_option);
-
-                //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
-                if (lower_line_edit_text.len > 0) {
-                    if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) { continue; }
+                    options_background_widget.flags.render = true;
+                    options_background_widget.border_width_px = .all(1);
+                    options_background_widget.padding_px = .all(4);
+                    options_background_widget.children_gap = 2;
+                    options_background_widget.corner_radii_px = .all(4);
                 }
 
-                const option_background = imui.push_layout(.X, key ++ .{@src(), i});
-                defer imui.pop_layout();
+                // push each of the options into the dropdown menu
+                const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
+                defer eng.get().frame_allocator.free(lower_line_edit_text);
 
-                // give the option a hover effect
-                if (imui.get_widget(option_background)) |option_background_widget| {
-                    option_background_widget.semantic_size[0] = .{
-                        .kind = .ParentPercentage, .value = 1.0, .shrinkable = true,
-                    };
-                    option_background_widget.flags.clickable = true;
-                    option_background_widget.flags.render = true;
-                    option_background_widget.padding_px = .all(4);
-                    option_background_widget.corner_radii_px = .all(4);
-                }
+                var is_first_item = true;
+                for (data.options.items, 0..) |option, i| {
+                    const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
+                    defer eng.get().frame_allocator.free(lower_option);
 
-                // if the option is clicked then set text field and simulate click on add button
-                if (imui.generate_widget_signals(option_background).clicked) {
-                    line_edit_data.text.clearRetainingCapacity();
-                    line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
-                    component_add_button.clicked = true;
-                }
+                    //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
+                    if (lower_line_edit_text.len > 0) {
+                        if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) {
+                            continue;
+                        }
+                    }
 
-                // if enter is clicked then set the text field to the first item and simulate click on add button
-                if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
-                    if (is_first_item) {
+                    const option_background = imui.push_layout(.X, key ++ .{ @src(), i });
+                    defer imui.pop_layout();
+
+                    // give the option a hover effect
+                    if (imui.get_widget(option_background)) |option_background_widget| {
+                        option_background_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+                        option_background_widget.flags.clickable = true;
+                        option_background_widget.flags.render = true;
+                        option_background_widget.padding_px = .all(4);
+                        option_background_widget.corner_radii_px = .all(4);
+                    }
+
+                    // if the option is clicked then set text field and simulate click on add button
+                    if (imui.generate_widget_signals(option_background).clicked) {
                         line_edit_data.text.clearRetainingCapacity();
                         line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
                         component_add_button.clicked = true;
-                        imui.focus_item = null;
                     }
-                }
-                
-                _ = eng.Imui.widgets.label.create(imui, option);
-                is_first_item = false;
-            }
 
-            imui.pop_layout(); // options background layout
-        } }
+                    // if enter is clicked then set the text field to the first item and simulate click on add button
+                    if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
+                        if (is_first_item) {
+                            line_edit_data.text.clearRetainingCapacity();
+                            line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                            component_add_button.clicked = true;
+                            imui.focus_item = null;
+                        }
+                    }
+
+                    _ = eng.Imui.widgets.label.create(imui, option);
+                    is_first_item = false;
+                }
+
+                imui.pop_layout(); // options background layout
+            }
+        }
 
         if (component_add_button.clicked) {
             // add component with the same name as what is in the line edit
@@ -700,7 +688,7 @@ fn entity_editor_ui(
             while (component_iter.next()) |pair| {
                 if (std.mem.eql(u8, line_edit_data.text.items, pair.value_ptr.name)) {
                     eng.get().ecs.add_component_generic(pair.key_ptr.*, entity) catch |err| {
-                        std.log.err("Unable to add component '{s}' to entity: {}", .{pair.value_ptr.name, err});
+                        std.log.err("Unable to add component '{s}' to entity: {}", .{ pair.value_ptr.name, err });
                     };
                     break;
                 }
@@ -716,16 +704,16 @@ fn entity_editor_ui(
         idx += 1;
 
         if (eng.get().ecs.entity_has_component_generic(pair.key_ptr.*, entity)) {
-            const collapsible_outer_layout = imui.push_layout(.X, key ++ .{@src(), idx});
+            const collapsible_outer_layout = imui.push_layout(.X, key ++ .{ @src(), idx });
             if (imui.get_widget(collapsible_outer_layout)) |w| {
                 w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
             }
 
-            const collapsible = Imui.widgets.collapsible.create(imui, pair.value_ptr.name, null, key ++ .{@src(), idx});
+            const collapsible = Imui.widgets.collapsible.create(imui, pair.value_ptr.name, null, key ++ .{ @src(), idx });
             const collapsible_open, _ = imui.get_widget_data(bool, collapsible.id) catch .{ &false, .Cont };
 
             // add remove component button
-            const remove_button = eng.Imui.widgets.badge.create(imui, "-", key ++ .{@src(), idx});
+            const remove_button = eng.Imui.widgets.badge.create(imui, "-", key ++ .{ @src(), idx });
 
             // dont enable remove button functionality for the transform component.
             // we dont want to make it possible to remove the transform component.
@@ -739,7 +727,7 @@ fn entity_editor_ui(
             imui.pop_layout();
 
             if (collapsible_open.*) {
-                const component_outer_layout = imui.push_layout(.Y, key ++ .{@src(), idx});
+                const component_outer_layout = imui.push_layout(.Y, key ++ .{ @src(), idx });
                 defer imui.pop_layout();
 
                 if (imui.get_widget(component_outer_layout)) |w| {
@@ -750,22 +738,18 @@ fn entity_editor_ui(
 
                 const component_idx = eng.get().ecs.entity_data.get(entity.idx).?.components.get(pair.key_ptr.*).?;
 
-                pair.value_ptr.functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.Imui.gen_key(key ++ .{@src(), idx}));
+                pair.value_ptr.functions.fn_component_editor_ui(imui, &entity, pair.value_ptr.component_list, &component_idx, eng.Imui.gen_key(key ++ .{ @src(), idx }));
             }
         }
     }
 }
 
-fn physics_shape_editor_ui(
-    entity: *eng.entity.EntitySuperStruct,
-    shape_settings: *eng.physics.ShapeSettings, 
-    key: anytype
-) void {
+fn physics_shape_editor_ui(entity: *eng.entity.EntitySuperStruct, shape_settings: *eng.physics.ShapeSettings, key: anytype) void {
     const imui = &eng.get().imui;
 
     const shape_combobox = Imui.widgets.combobox.create(imui, key ++ .{@src()});
     const shape_combobox_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, shape_combobox.id) catch |err| {
-        std.log.err("Unable to get combobox widget data: {}", .{ err });
+        std.log.err("Unable to get combobox widget data: {}", .{err});
         unreachable;
     };
     if (shape_combobox.init) {
@@ -823,8 +807,7 @@ fn physics_shape_editor_ui(
             create_form_number_slider("height:", &b.height, key ++ .{@src()});
             create_form_number_slider("depth:", &b.depth, key ++ .{@src()});
         },
-        .ModelCompoundConvexHull => |_| {
-        },
+        .ModelCompoundConvexHull => |_| {},
     }
 
     imui.pop_layout(); // sl
@@ -857,7 +840,7 @@ fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
             const label_layout = imui.push_layout(.X, key ++ .{@src()});
             defer imui.pop_layout();
             if (imui.get_widget(label_layout)) |lw| {
-                lw.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+                lw.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
             }
 
             _ = Imui.widgets.label.create(imui, "Ocean Settings");
@@ -894,7 +877,7 @@ fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
         var cmd = (pool.get() catch |err| break :blk err).allocate_command_buffer(.{}) catch |err| break :blk err;
         defer cmd.deinit();
 
-        cmd.cmd_begin(.{ .one_time_submit = true, }) catch |err| break :blk err;
+        cmd.cmd_begin(.{ .one_time_submit = true }) catch |err| break :blk err;
         ocean.recreate_h0_image(&cmd, ocean_settings);
         cmd.cmd_end() catch |err| break :blk err;
 
@@ -902,7 +885,7 @@ fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
         defer fence.deinit();
 
         gfx.GfxState.get().submit_command_buffer(.{
-            .command_buffers = &.{ &cmd },
+            .command_buffers = &.{&cmd},
             .fence = fence,
         }) catch |err| break :blk err;
 
@@ -912,11 +895,7 @@ fn ocean_edit_ui(self: *Self, imui: *Imui, ocean: *Ocean, key: anytype) void {
     };
 }
 
-fn create_form_number_slider(
-    text: []const u8,
-    value: *f32, 
-    key: anytype
-) void {
+fn create_form_number_slider(text: []const u8, value: *f32, key: anytype) void {
     const imui = eng.get().ecs.get_resource(eng.Imui) catch return;
 
     _ = imui.push_form_layout_item(key ++ .{@src()});
@@ -963,9 +942,9 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
             continue;
         }
 
-        const b = Imui.widgets.button.create(imui, v.name, key ++ .{@src(), idx});
+        const b = Imui.widgets.button.create(imui, v.name, key ++ .{ @src(), idx });
         if (b.clicked) {
-           try data.set_selected_name(v.name);
+            try data.set_selected_name(v.name);
         }
     }
 
@@ -974,7 +953,7 @@ fn load_scene_popup(self: *Self, data: *LoadScenePopup, key: anytype) !void {
         std.log.info("should create new scene...", .{});
     }
 
-    _ = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Scene to load: '{s}'", .{ data.selected_name orelse "None" }));
+    _ = Imui.widgets.label.create(imui, try std.fmt.allocPrint(eng.get().frame_allocator, "Scene to load: '{s}'", .{data.selected_name orelse "None"}));
 
     {
         _ = imui.push_layout(.X, key ++ .{@src()});
@@ -1014,7 +993,9 @@ pub const SerializedEntity = struct {
 };
 
 fn open_scenes_dir(enableIterate: bool) !std.fs.Dir {
-    return try std.fs.cwd().makeOpenPath("scenes", .{ .iterate = enableIterate, });
+    return try std.fs.cwd().makeOpenPath("scenes", .{
+        .iterate = enableIterate,
+    });
 }
 
 pub fn load_serialized_entities_into_ecs(ecs: *eng.ecs.GenericEcsSystem, serialized_entities: []const SerializedEntity) void {
@@ -1026,7 +1007,7 @@ pub fn load_serialized_entities_into_ecs(ecs: *eng.ecs.GenericEcsSystem, seriali
             std.log.err("Failed to deserialize entity {}: {}", .{ id, err });
             continue;
         };
-        
+
         // all loaded entities will be serialized so make sure it has the serialization component
         _ = ecs.add_component(eng.ecs.SerializationComponent, new_entity) catch |err| {
             std.log.warn("Unable to add serialization component to new entity: {}", .{err});
@@ -1041,7 +1022,7 @@ pub fn load_serialized_entites_from_scene(arena: *std.heap.ArenaAllocator, scene
     var scenes_dir = try open_scenes_dir(true);
     defer scenes_dir.close();
 
-    var dir = try scenes_dir.openDir(scene_name, .{.iterate = true,});
+    var dir = try scenes_dir.openDir(scene_name, .{ .iterate = true });
     defer dir.close();
 
     var iter = dir.iterate();
@@ -1059,22 +1040,17 @@ pub fn load_serialized_entites_from_scene(arena: *std.heap.ArenaAllocator, scene
             };
             defer eng.get().general_allocator.free(ent_str);
 
-            const ent_s = std.json.parseFromSliceLeaky(
-                std.json.Value,
-                arena.allocator(),
-                ent_str,
-                .{ .ignore_unknown_fields = true, }
-            ) catch |err| {
+            const ent_s = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), ent_str, .{ .ignore_unknown_fields = true }) catch |err| {
                 std.log.err("Failed to parse file {s}: {}", .{ entry.name, err });
                 continue;
             };
 
             const id = std.fmt.parseInt(u32, std.fs.path.stem(entry.name), 10) catch |err| {
-                std.log.warn("Unable to determine entity id number for file {s}: {}", .{entry.name, err});
+                std.log.warn("Unable to determine entity id number for file {s}: {}", .{ entry.name, err });
                 continue;
             };
 
-            try serialized_arraylist.append(arena.allocator(), .{.id = id, .entity_s = ent_s});
+            try serialized_arraylist.append(arena.allocator(), .{ .id = id, .entity_s = ent_s });
         }
     }
 
@@ -1094,8 +1070,7 @@ pub fn serialize_entities(arena: *std.heap.ArenaAllocator, ecs: *eng.ecs.Generic
 
     var entity_iterator = eng.get().ecs.entity_iterator();
     while (entity_iterator.next()) |entity| {
-        const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity)
-            orelse continue;
+        const entity_serialize_component = eng.get().ecs.get_component(eng.ecs.SerializationComponent, entity) orelse continue;
 
         entity_serialize_component.serialize_id = entity_serialize_component.serialize_id orelse blk: {
             largest_serialize_id += 1;
@@ -1103,11 +1078,11 @@ pub fn serialize_entities(arena: *std.heap.ArenaAllocator, ecs: *eng.ecs.Generic
         };
 
         const entity_s = eng.get().ecs.serialize_entity(arena.allocator(), entity) catch |err| {
-            std.log.err("unable to produce serializable for entity {}: {}\n", .{entity_serialize_component.serialize_id.?, err});
+            std.log.err("unable to produce serializable for entity {}: {}\n", .{ entity_serialize_component.serialize_id.?, err });
             continue;
         };
 
-        try serialized_arraylist.append(arena.allocator(), .{.id = entity_serialize_component.serialize_id.?, .entity_s = entity_s});
+        try serialized_arraylist.append(arena.allocator(), .{ .id = entity_serialize_component.serialize_id.?, .entity_s = entity_s });
     }
 
     return serialized_arraylist.toOwnedSlice(arena.allocator());
@@ -1118,10 +1093,10 @@ pub fn save_entities_to_scene(scene_name: []const u8, serialized_entities: []con
     defer scenes_dir.close();
 
     scenes_dir.deleteTree(scene_name) catch |err| {
-        std.debug.print("unable to delete scene {s}: {}\n", .{scene_name, err});
+        std.debug.print("unable to delete scene {s}: {}\n", .{ scene_name, err });
     };
 
-    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true, });
+    var scene_dir = try scenes_dir.makeOpenPath(scene_name, .{ .iterate = true });
     defer scene_dir.close();
 
     var arena = std.heap.ArenaAllocator.init(eng.get().general_allocator);
@@ -1149,16 +1124,16 @@ pub fn save_entities_to_scene(scene_name: []const u8, serialized_entities: []con
         };
 
         const file_path = std.fmt.allocPrint(arena.allocator(), "{d}.json", .{id}) catch |err| {
-            std.log.err("unable to produce file path for entity {}: {}\n", .{id, err});
+            std.log.err("unable to produce file path for entity {}: {}\n", .{ id, err });
             continue;
         };
 
         scene_dir.writeFile(.{
             .sub_path = file_path,
             .data = json_writer.written(),
-            .flags = .{ .read = false, .truncate = true, },
+            .flags = .{ .read = false, .truncate = true },
         }) catch |err| {
-            std.log.err("unable to write file for entity {}: {}\n", .{id, err});
+            std.log.err("unable to write file for entity {}: {}\n", .{ id, err });
             continue;
         };
     }

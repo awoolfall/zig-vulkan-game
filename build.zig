@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const app_dll_option = b.option(i32, "app_dll", "only build the app dll");
+    const app_dll_option = b.option(bool, "app_dll", "only build the app dll");
 
     const app_library = b.addLibrary(.{
         .linkage = .dynamic,
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(app_library);
-    
+
     const exe = b.addExecutable(.{
         .name = "zig-dx11-game",
         .root_module = b.createModule(.{

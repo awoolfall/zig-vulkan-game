@@ -10,6 +10,7 @@ const Self = @This();
 movement_speed: f32 = 4.0,
 
 dash_start_time: ?std.time.Instant = null,
+parry_start_time: ?std.time.Instant = null,
 
 pub fn deinit(self: *Self) void {
     _ = self;

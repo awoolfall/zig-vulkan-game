@@ -30,6 +30,7 @@ ConstantBuffer<CameraData> camera_data : register(b0);
 struct InstanceData
 {
     float4x4 model_matrix;
+    float4x4 inverse_model_matrix;
     uint entity_id;
     uint flags;
 };
@@ -125,6 +126,23 @@ vs_out vs_main(vs_in input, uint vertId : SV_VertexID)
     output.tex_coord = input.tex_coord;
     output.tex_coord.y = 1.0 - output.tex_coord.y;
 
+    float3x3 m = float3x3(data.model_matrix);
+    float3x3 normal_matrix = transpose(float3x3(data.inverse_model_matrix));
+
+    float3 n = normalize(mul(input.normals, normal_matrix));
+    float3 t = normalize(mul(input.tangents, m));
+
+    // Re-orthogonalize T against N (Gram-Schmidt)
+    t = normalize(t - mul(n, dot(t, n)));
+
+    // @TODO: add handedness if this actually becomes a problem?
+    // // Bitangent from cross product; w holds handedness (+1/-1)
+    // float handedness = input.tangents.w * sign(determinant(m)); // flip for mirrored (negative) scale
+    // float b = cross(n, t) * handedness
+
+    output.normal = n;
+    output.tangent = t;
+
     return output;
 }
 
@@ -145,9 +163,9 @@ ps_out ps_main(vs_out input)
     ps_out output = (ps_out) 0;
 
     float3 normals = normalize(input.normal);
-    float3 tangents = normalize(input.tangent);
-    float3 bitangents = normalize(cross(tangents, normals));
-    float3x3 tbn = float3x3(tangents, bitangents, normals);
+    float3 tanngents = normalize(input.tangent);
+    float3 bitangents = cross(normals, tanngents);
+    float3x3 tbn = float3x3(tanngents, bitangents, normals);
 
     float4 diffuse_colour = diffuse_texture.Sample(diffuse_sampler, input.tex_coord);
 

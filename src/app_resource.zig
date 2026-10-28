@@ -127,7 +127,7 @@ pub fn init() !Self {
     var atmosphere = try Atmosphere.init(.{});
     errdefer atmosphere.deinit();
 
-    var ocean = try Ocean.init(.{ .amplitude = 0.08, .wind = .{ 9.0, 0.0 } }, atmosphere.cubemap_sampler_view);
+    var ocean = try Ocean.init(.{ .amplitude = 0.06, .wind = .{ 4.0, 0.0 } }, atmosphere.cubemap_sampler_view);
     errdefer ocean.deinit();
 
     var clouds = try Clouds.init(eng.get().general_allocator);
