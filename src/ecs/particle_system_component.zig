@@ -24,18 +24,18 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("particle_system_settings", try sr.serialize_value(eng.ParticleSystem.ParticleSystemSettings, alloc, self.particle_system.settings));
+    try sr.serialize_object_value(alloc, object, eng.ParticleSystem.ParticleSystemSettings, "particle_system_settings", self.particle_system.settings);
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
-    var particle_system_settings = try sr.deserialize_value(eng.ParticleSystem.ParticleSystemSettings, alloc, object.get("particle_system_settings"));
+    var particle_system_settings = try sr.deserialize_object_value(alloc, &object, eng.ParticleSystem.ParticleSystemSettings, "particle_system_settings") orelse eng.ParticleSystem.ParticleSystemSettings{};
     defer particle_system_settings.deinit(alloc);
 
     const particle_system = try eng.ParticleSystem.init(alloc, particle_system_settings);
     errdefer particle_system.deinit();
-    
-    return Self {
+
+    return Self{
         .particle_system = particle_system,
     };
 }

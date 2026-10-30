@@ -24,14 +24,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("light", try sr.serialize_value(StandardRenderer.Light, alloc, self.light));
+    try sr.serialize_object_value(alloc, object, StandardRenderer.Light, "light", self.light);
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
-    const light = try sr.deserialize_value(StandardRenderer.Light, alloc, object.get("light"));
+    const light = try sr.deserialize_object_value(alloc, &object, StandardRenderer.Light, "light") orelse StandardRenderer.Light{};
 
-    return Self {
+    return Self{
         .light = light,
     };
 }
@@ -72,7 +72,7 @@ pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key:
         defer imui.pop_layout();
 
         _ = eng.Imui.widgets.label.create(imui, "colour: ");
-        
+
         // _ = imui.push_layout(.X, key ++ .{@src()});
         // defer imui.pop_layout();
 
@@ -151,12 +151,7 @@ fn set_background_widget_layout(background_widget: *eng.Imui.Widget) void {
     background_widget.children_gap = 5;
 }
 
-fn create_form_number_slider(
-    imui: *eng.Imui,
-    text: []const u8,
-    value: *f32, 
-    key: anytype
-) void {
+fn create_form_number_slider(imui: *eng.Imui, text: []const u8, value: *f32, key: anytype) void {
     _ = imui.push_form_layout_item(key ++ .{@src()});
     defer imui.pop_layout();
 

@@ -119,12 +119,12 @@ pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
     const version = sr.deserialize_object_value(alloc, object, u32, "version") catch 1;
     _ = version;
 
-    self.heightmap_asset_id = sr.deserialize_object_value(alloc, object, ?as.ImageAssetId, "heightmap_asset_id") catch null;
-    self.map_length_m = sr.deserialize_object_value(alloc, object, f32, "map_length_m") catch self.map_length_m;
-    self.map_length_scale = sr.deserialize_object_value(alloc, object, f32, "map_length_scale") catch self.map_length_scale;
-    self.map_minimum_height = sr.deserialize_object_value(alloc, object, f32, "map_minimum_height") catch self.map_minimum_height;
-    self.map_maximum_height = sr.deserialize_object_value(alloc, object, f32, "map_maximum_height") catch self.map_maximum_height;
-    self.map_height_scale = sr.deserialize_object_value(alloc, object, f32, "map_height_scale") catch self.map_height_scale;
+    self.heightmap_asset_id = try sr.deserialize_object_value(alloc, object, ?as.ImageAssetId, "heightmap_asset_id") orelse null;
+    self.map_length_m = try sr.deserialize_object_value(alloc, object, f32, "map_length_m") orelse self.map_length_m;
+    self.map_length_scale = try sr.deserialize_object_value(alloc, object, f32, "map_length_scale") orelse self.map_length_scale;
+    self.map_minimum_height = try sr.deserialize_object_value(alloc, object, f32, "map_minimum_height") orelse self.map_minimum_height;
+    self.map_maximum_height = try sr.deserialize_object_value(alloc, object, f32, "map_maximum_height") orelse self.map_maximum_height;
+    self.map_height_scale = try sr.deserialize_object_value(alloc, object, f32, "map_height_scale") orelse self.map_height_scale;
 
     return self;
 }

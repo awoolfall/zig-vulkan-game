@@ -25,22 +25,20 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .max_orbit_distance = 10.0,
             .min_orbit_distance = 1.0,
             .orbit_distance = 5.0,
-        }
+        },
     };
 }
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("camera_data", try sr.serialize_value(eng.Camera, alloc, self.camera_data));
+    try sr.serialize_object_value(alloc, object, eng.Camera, "camera_data", self.camera_data);
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
-    var component: Self = .{
-        .camera_data = undefined,
-    };
+    var component: Self = try Self.init(alloc);
 
-    component.camera_data = try sr.deserialize_value(eng.Camera, alloc, object.get("camera_data"));
+    component.camera_data = try sr.deserialize_object_value(alloc, &object, eng.Camera, "camera_data") orelse component.camera_data;
 
     return component;
 }

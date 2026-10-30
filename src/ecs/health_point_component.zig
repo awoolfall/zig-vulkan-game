@@ -20,14 +20,14 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("health_points", try sr.serialize_value(i32, alloc, self.health_points));
+    try sr.serialize_object_value(alloc, object, i32, "health_points", self.health_points);
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
     var component: Self = .{};
 
-    component.health_points = try sr.deserialize_value(i32, alloc, object.get("health_points"));
+    component.health_points = try sr.deserialize_object_value(alloc, &object, i32, "health_points") orelse component.health_points;
 
     return component;
 }
@@ -44,7 +44,7 @@ pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key:
 
         _ = eng.Imui.widgets.label.create(imui, "health points: ");
         var float_health_points: f32 = @floatFromInt(component.health_points);
-        const hp_slider = eng.Imui.widgets.number_slider.create(imui, &float_health_points, .{ .scale = 1.0, }, key ++ .{@src()});
+        const hp_slider = eng.Imui.widgets.number_slider.create(imui, &float_health_points, .{ .scale = 1.0 }, key ++ .{@src()});
         if (hp_slider.data_changed) {
             component.health_points = @intFromFloat(float_health_points);
         }

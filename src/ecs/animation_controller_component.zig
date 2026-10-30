@@ -24,15 +24,15 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
     _ = entity;
-    try object.put("anim_controller", try sr.serialize_value(eng.animation_controller.AnimController, alloc, self.anim_controller));
+    try sr.serialize_object_value(alloc, object, eng.animation_controller.AnimController, "anim_controller", self.anim_controller);
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
     _ = entity;
-    const anim_controller = try sr.deserialize_value(eng.animation_controller.AnimController, alloc, object.get("anim_controller"));
+    const anim_controller = try sr.deserialize_object_value(alloc, &object, eng.animation_controller.AnimController, "anim_controller") orelse try eng.animation_controller.AnimController.init();
     errdefer anim_controller.deinit();
 
-    return Self {
+    return Self{
         .anim_controller = anim_controller,
     };
 }
