@@ -69,15 +69,18 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
-    const selection_view = try gfx.ImageView.init(.{ .image = selection_image, .view_type = .ImageView2D, });
+    const selection_view = try gfx.ImageView.init(.{
+        .image = selection_image,
+        .view_type = .ImageView2D,
+    });
     errdefer selection_view.deinit();
 
     // compute image
     const compute_image = try gfx.Image.init(.{
         .match_swapchain_extent = true,
         .format = .R32_Uint,
-        .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
-        .access_flags = .{ .GpuWrite = true, },
+        .usage_flags = .{ .StorageResource = true, .ShaderResource = true },
+        .access_flags = .{ .GpuWrite = true },
         .dst_layout = .ShaderReadOnlyOptimal,
     }, null);
     errdefer compute_image.deinit();
@@ -89,8 +92,8 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     const sample_image = try gfx.Image.init(.{
         .match_swapchain_extent = true,
         .format = .R32_Uint,
-        .usage_flags = .{ .TransferDst = true, .ShaderResource = true, },
-        .access_flags = .{ .GpuWrite = true, },
+        .usage_flags = .{ .TransferDst = true, .ShaderResource = true },
+        .access_flags = .{ .GpuWrite = true },
         .dst_layout = .ShaderReadOnlyOptimal,
     }, null);
     errdefer sample_image.deinit();
@@ -101,13 +104,13 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     // compute descriptors
     const compute_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
@@ -126,16 +129,16 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
 
     try (try compute_descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .StorageImage = compute_image_view }, },
-            .{ .binding = 1, .data = .{ .ImageView = sample_image_view }, },
+            .{ .binding = 0, .data = .{ .StorageImage = compute_image_view } },
+            .{ .binding = 1, .data = .{ .ImageView = sample_image_view } },
         },
     });
 
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
@@ -145,7 +148,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
 
     const render_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 1,
-        .strategy = .{ .Layout = render_descriptor_layout, },
+        .strategy = .{ .Layout = render_descriptor_layout },
     });
     errdefer render_descriptor_pool.deinit();
 
@@ -154,13 +157,13 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
 
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .ImageView = compute_image_view }, },
+            .{ .binding = 0, .data = .{ .ImageView = compute_image_view } },
         },
     });
 
     // render render pass
-    const attachments = &[_]gfx.AttachmentInfo {
-        gfx.AttachmentInfo {
+    const attachments = &[_]gfx.AttachmentInfo{
+        gfx.AttachmentInfo{
             .name = "colour",
             .format = gfx.GfxState.ldr_format,
             .initial_layout = .ColorAttachmentOptimal,
@@ -172,18 +175,18 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     const render_pass = try gfx.RenderPass.init(.{
         .attachments = attachments,
         .subpasses = &.{
-            gfx.SubpassInfo {
-                .attachments = &.{ "colour" },
+            gfx.SubpassInfo{
+                .attachments = &.{"colour"},
             },
         },
         .dependencies = &.{
-            gfx.SubpassDependencyInfo {
+            gfx.SubpassDependencyInfo{
                 .src_subpass = null,
                 .dst_subpass = 0,
                 .src_access_mask = .{},
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
-                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
+                .dst_stage_mask = .{ .color_attachment_output = true },
             },
         },
     });
@@ -211,7 +214,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
     var render_shader_file_watcher = try FileWatcher.init(alloc, render_path_resolved, 1000);
     errdefer render_shader_file_watcher.deinit();
 
-    var self = Self {
+    var self = Self{
         .compute_image = compute_image,
         .compute_view = compute_image_view,
 
@@ -220,7 +223,7 @@ pub fn init(alloc: std.mem.Allocator, selection_image: gfx.Image.Ref) !Self {
 
         .selection_image = selection_image,
         .selection_view = selection_view,
-        
+
         .compute_descriptor_layout = compute_descriptor_layout,
         .compute_descriptor_pool = compute_descriptor_pool,
         .compute_descriptor_set = compute_descriptor_set,
@@ -262,8 +265,7 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
         .shader_entry_points = &.{
             "cs_main",
         },
-        .preprocessor_macros = &.{
-        },
+        .preprocessor_macros = &.{},
     });
     defer alloc.free(density_spirv);
 
@@ -281,12 +283,12 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
             self.compute_descriptor_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
+            gfx.PushConstantLayoutInfo{
                 .shader_stages = .{ .Compute = true },
                 .offset = 0,
                 .size = @sizeOf(ComputePushConstant),
-            }
-        }
+            },
+        },
     });
     errdefer density_pipeline.deinit();
 
@@ -313,8 +315,7 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
             "vs_main",
             "ps_main",
         },
-        .preprocessor_macros = &.{
-        }
+        .preprocessor_macros = &.{},
     });
     defer alloc.free(shader_spirv);
 
@@ -341,8 +342,8 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
         },
         .depth_test = null,
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.PushConstantLayoutInfo{
+                .shader_stages = .{ .Pixel = true },
                 .offset = 0,
                 .size = @sizeOf(RenderPushConstant),
             },
@@ -380,107 +381,115 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, selected_id: u32) !void {
     }
 
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .color_attachment_output = true, },
-        .dst_stage = .{ .transfer = true, },
+        .src_stage = .{ .color_attachment_output = true },
+        .dst_stage = .{ .transfer = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.selection_image,
-                .src_access_mask = .{ .color_attachment_write = true, },
-                .dst_access_mask = .{ .transfer_read = true, },
+                .src_access_mask = .{ .color_attachment_write = true },
+                .dst_access_mask = .{ .transfer_read = true },
                 .old_layout = .ColorAttachmentOptimal,
                 .new_layout = .TransferSrcOptimal,
             },
-        }
+        },
     });
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .fragment_shader = true, },
-        .dst_stage = .{ .transfer = true, },
+        .src_stage = .{ .fragment_shader = true },
+        .dst_stage = .{ .transfer = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.sample_image,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .transfer_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .transfer_write = true },
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .TransferDstOptimal,
             },
-        }
+        },
     });
 
     cmd.cmd_copy_image_to_image(.{
         .src_image = self.selection_image,
         .dst_image = self.sample_image,
         .copy_regions = &.{
-            gfx.CommandBuffer.ImageCopyRegionInfo {
-                .src_subresource = .{ .aspect_mask = .{ .colour = true, } },
-                .dst_subresource = .{ .aspect_mask = .{ .colour = true, } },
+            gfx.CommandBuffer.ImageCopyRegionInfo{
+                .src_subresource = .{ .aspect_mask = .{ .colour = true } },
+                .dst_subresource = .{ .aspect_mask = .{ .colour = true } },
                 .extent = .{ eng.get().gfx.swapchain_size()[0], eng.get().gfx.swapchain_size()[1], 1 },
             },
-        }
+        },
     });
 
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .transfer = true, },
-        .dst_stage = .{ .color_attachment_output = true, },
+        .src_stage = .{ .transfer = true },
+        .dst_stage = .{ .color_attachment_output = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.selection_image,
-                .src_access_mask = .{ .transfer_read = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
+                .src_access_mask = .{ .transfer_read = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
                 .old_layout = .TransferSrcOptimal,
                 .new_layout = .ColorAttachmentOptimal,
             },
-        }
+        },
     });
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .transfer = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .transfer = true },
+        .dst_stage = .{ .compute_shader = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.sample_image,
-                .src_access_mask = .{ .transfer_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .transfer_write = true },
+                .dst_access_mask = .{ .shader_read = true },
                 .old_layout = .TransferDstOptimal,
                 .new_layout = .ShaderReadOnlyOptimal,
             },
-        }
+        },
     });
-    
+
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .fragment_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .fragment_shader = true },
+        .dst_stage = .{ .compute_shader = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.compute_image,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
             },
-        }
+        },
     });
 
-    const compute_push_constants = ComputePushConstant {
+    const compute_push_constants = ComputePushConstant{
         .selected_id = selected_id,
         .outline_px_width = 2,
     };
 
     cmd.cmd_bind_compute_pipeline(self.compute_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.compute_descriptor_set } });
-    cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true, } });
-    cmd.cmd_dispatch(.{ .group_count_x = (eng.get().gfx.swapchain_size()[0] + 7) / 8, .group_count_y = (eng.get().gfx.swapchain_size()[1] + 7) / 8, .group_count_z = 1, });
+    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{self.compute_descriptor_set} });
+    cmd.cmd_push_constants(.{
+        .data = std.mem.asBytes(&compute_push_constants),
+        .offset = 0,
+        .shader_stages = .{ .Compute = true },
+    });
+    cmd.cmd_dispatch(.{
+        .group_count_x = (eng.get().gfx.swapchain_size()[0] + 7) / 8,
+        .group_count_y = (eng.get().gfx.swapchain_size()[1] + 7) / 8,
+        .group_count_z = 1,
+    });
 
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .fragment_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .fragment_shader = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.compute_image,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
             },
-        }
+        },
     });
 
     {
@@ -491,11 +500,21 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, selected_id: u32) !void {
         });
         defer cmd.cmd_end_render_pass();
 
-        const render_push_constants = RenderPushConstant {};
+        const render_push_constants = RenderPushConstant{};
 
         cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
-        cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.render_descriptor_set, } });
-        cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&render_push_constants), .offset = 0, .shader_stages = .{ .Pixel = true, } });
-        cmd.cmd_draw(.{ .vertex_count = 6, });
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{
+                self.render_descriptor_set,
+            },
+        });
+        cmd.cmd_push_constants(.{
+            .data = std.mem.asBytes(&render_push_constants),
+            .offset = 0,
+            .shader_stages = .{ .Pixel = true },
+        });
+        cmd.cmd_draw(.{
+            .vertex_count = 6,
+        });
     }
 }

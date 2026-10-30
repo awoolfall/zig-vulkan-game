@@ -38,8 +38,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn init() !Self {
-    return Self {
-        .camera = eng.Camera {
+    return Self{
+        .camera = eng.Camera{
             .field_of_view_y = eng.Camera.horizontal_to_vertical_fov(std.math.degreesToRadians(90.0), eng.get().gfx.swapchain_aspect()),
             .near_field = 0.3,
             .far_field = 10000.0,
@@ -50,9 +50,9 @@ pub fn init() !Self {
             .orbit_distance = 5.0,
         },
         .animation_graph = try AnimationGraph.init(eng.get().general_allocator, &.{
-            AnimationGraph.Node {
+            AnimationGraph.Node{
                 .next = &.{},
-                .node = .{ .Basic = .{ .animation = undefined, } }
+                .node = .{ .Basic = .{ .animation = undefined } },
             },
         }),
         .animation_control_data = .{
@@ -92,28 +92,28 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
 
         _ = eng.Imui.widgets.label.create(imui, "Display Model:");
         const model_drop_zone = eng.Imui.widgets.file_drop_zone.create(imui, .{@src()});
-        model_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize { .kind = .Pixels, .value = 25.0, };
+        model_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize{ .kind = .Pixels, .value = 25.0 };
         if (model_drop_zone.data_changed) blk: {
             std.debug.assert(eng.get().input.get_dropped_files().len != 0);
             const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
             defer eng.get().frame_allocator.free(model_uri);
 
             self.model = eng.get().asset_manager.get_asset_id(model_uri) catch |err| {
-                std.log.warn("Failed to get model asset: {s}: {}", .{model_uri, err});
+                std.log.warn("Failed to get model asset: {s}: {}", .{ model_uri, err });
                 break :blk;
             };
         }
 
         _ = eng.Imui.widgets.label.create(imui, "Animation Source:");
         var anim_drop_zone = eng.Imui.widgets.file_drop_zone.create(imui, .{@src()});
-        anim_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize { .kind = .Pixels, .value = 25.0, };
+        anim_drop_zone.id.get().semantic_size[1] = eng.Imui.SemanticSize{ .kind = .Pixels, .value = 25.0 };
         if (anim_drop_zone.data_changed) blk: {
             std.debug.assert(eng.get().input.get_dropped_files().len != 0);
             const model_uri = try eng.util.uri.construct_uri_from_path(eng.get().frame_allocator, eng.get().input.get_dropped_files()[0]);
             defer eng.get().frame_allocator.free(model_uri);
 
             self.animation_model = eng.get().asset_manager.get_asset_id(model_uri) catch |err| {
-                std.log.warn("Failed to get model asset: {s}: {}", .{model_uri, err});
+                std.log.warn("Failed to get model asset: {s}: {}", .{ model_uri, err });
                 break :blk;
             };
         }
@@ -147,21 +147,20 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         if (animation_combobox.data_changed) {
             const cb_data, _ = try animation_combobox.id.get_widget_data(eng.Imui.widgets.combobox.ComboBoxState, imui);
             const animation_model_metadata: eng.assets.AssetManager.AssetMetadata = eng.get().asset_manager.asset_metadata.get(self.animation_model.?.unique_id) orelse return error.NoMetadata;
-            const animation_uri = try std.fmt.allocPrint(eng.get().frame_allocator, "{s}/animations/{s}", .{animation_model_metadata.uri, cb_data.options.items[cb_data.selected_index.?]});
+            const animation_uri = try std.fmt.allocPrint(eng.get().frame_allocator, "{s}/animations/{s}", .{ animation_model_metadata.uri, cb_data.options.items[cb_data.selected_index.?] });
             self.animation = try eng.get().asset_manager.get_asset_id(animation_uri);
             self.animation_graph.nodes.items[0].node.Basic.animation = self.animation.?;
         }
 
         const add_physics_shape = eng.Imui.widgets.badge.create(imui, "add physics shape", .{@src()});
-        if (add_physics_shape.clicked) {
-        }
+        if (add_physics_shape.clicked) {}
     }
 
     {
         const bottom_bar = imui.push_layout(.Y, .{@src()});
         defer imui.pop_layout();
-        bottom_bar.get().semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
-        bottom_bar.get().semantic_size[1] = .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = false, };
+        bottom_bar.get().semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
+        bottom_bar.get().semantic_size[1] = .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = false };
         bottom_bar.get().pivot = .{ 0.5, 1.0 };
         bottom_bar.get().anchor = .{ 0.5, 1.0 };
         bottom_bar.get().flags.render = true;
@@ -175,7 +174,7 @@ pub fn update_and_render(self: *Self, standard_renderer: *StandardRenderer) !voi
         };
         _ = animation_duration_ticks;
         var progress = @mod(self.animation_control_data.active_time / animation_duration_s, 1.0);
-        const progress_slider = eng.Imui.widgets.slider.create(imui, &progress , .{
+        const progress_slider = eng.Imui.widgets.slider.create(imui, &progress, .{
             .min = 0.0,
             .max = 1.0,
             //.step = 1.0 / @as(f32, @floatFromInt(animation_duration_ticks)),

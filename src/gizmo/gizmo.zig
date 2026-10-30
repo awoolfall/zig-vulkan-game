@@ -108,7 +108,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     var selection_textures = try st.SelectionTextures(u32).init();
     errdefer selection_textures.deinit();
-    
+
     // Shaders
     const shader_resolved_path = try eng.util.uri.resolve_file_uri(alloc, "src:/gizmo/gizmo.slang");
     defer alloc.free(shader_resolved_path);
@@ -136,33 +136,43 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     const vertex_input = try gf.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+            .{
+                .binding = 0,
+                .stride = 12,
+                .input_rate = .Vertex,
+            },
         },
         .attributes = &.{
-            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            .{
+                .name = "POS",
+                .location = 0,
+                .binding = 0,
+                .offset = 0,
+                .format = .F32x3,
+            },
         },
     });
     defer vertex_input.deinit();
 
     // Gfx objects
-    const attachments = &[_]gf.AttachmentInfo {
-        gf.AttachmentInfo {
+    const attachments = &[_]gf.AttachmentInfo{
+        gf.AttachmentInfo{
             .name = "colour",
             .format = gf.GfxState.ldr_format,
             .blend_type = .Simple,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
         },
-        gf.AttachmentInfo {
+        gf.AttachmentInfo{
             .name = "selection",
             .format = gf.ImageFormat.R32_Uint,
             .blend_type = .None,
-            .clear_value = gf.ClearValue { .u32x4 = [4]u32{0, 0, 0, 0} },
+            .clear_value = gf.ClearValue{ .u32x4 = [4]u32{ 0, 0, 0, 0 } },
             .load_op = .Clear,
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
         },
-        gf.AttachmentInfo {
+        gf.AttachmentInfo{
             .name = "depth",
             .format = gf.GfxState.depth_format,
             .blend_type = .None,
@@ -170,44 +180,54 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .final_layout = .DepthStencilAttachmentOptimal,
             .load_op = .Clear,
             .stencil_load_op = .Clear,
-            .clear_value = gf.ClearValue { .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
+            .clear_value = gf.ClearValue{ .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
         },
     };
 
-    const render_pass = try gf.RenderPass.init(.{
-        .attachments = attachments,
-        .subpasses = &[_]gf.SubpassInfo {
-            gf.SubpassInfo {
-                .attachments = &.{ "colour" },
-                .depth_attachment = "depth",
+    const render_pass = try gf.RenderPass.init(.{ .attachments = attachments, .subpasses = &[_]gf.SubpassInfo{
+        gf.SubpassInfo{
+            .attachments = &.{"colour"},
+            .depth_attachment = "depth",
+        },
+        gf.SubpassInfo{
+            .attachments = &.{"selection"},
+            .depth_attachment = "depth",
+        },
+    }, .dependencies = &[_]gf.SubpassDependencyInfo{
+        gf.SubpassDependencyInfo{
+            .src_subpass = null,
+            .dst_subpass = 0,
+            .src_stage_mask = .{
+                .color_attachment_output = true,
             },
-            gf.SubpassInfo {
-                .attachments = &.{ "selection" },
-                .depth_attachment = "depth",
+            .src_access_mask = .{},
+            .dst_stage_mask = .{
+                .color_attachment_output = true,
+            },
+            .dst_access_mask = .{
+                .color_attachment_write = true,
             },
         },
-        .dependencies = &[_]gf.SubpassDependencyInfo {
-            gf.SubpassDependencyInfo {
-                .src_subpass = null,
-                .dst_subpass = 0,
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .src_access_mask = .{},
-                .dst_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
+        gf.SubpassDependencyInfo{
+            .src_subpass = 0,
+            .dst_subpass = 1,
+            .src_stage_mask = .{
+                .color_attachment_output = true,
             },
-            gf.SubpassDependencyInfo {
-                .src_subpass = 0,
-                .dst_subpass = 1,
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .src_access_mask = .{ .color_attachment_write = true, },
-                .dst_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
+            .src_access_mask = .{
+                .color_attachment_write = true,
             },
-        }
-    });
+            .dst_stage_mask = .{
+                .color_attachment_output = true,
+            },
+            .dst_access_mask = .{
+                .color_attachment_write = true,
+            },
+        },
+    } });
     errdefer render_pass.deinit();
 
-    var pipeline_info = gf.GraphicsPipelineInfo {
+    var pipeline_info = gf.GraphicsPipelineInfo{
         .render_pass = render_pass,
         .subpass_index = 0,
         .vertex_shader = .{
@@ -215,18 +235,20 @@ pub fn init(alloc: std.mem.Allocator) !Self {
             .entry_point = "vs_main",
         },
         .vertex_input = &vertex_input,
-        .pixel_shader = .{
-            .module = &shader_module,
-            .entry_point = "ps_colour_main"
-        },
+        .pixel_shader = .{ .module = &shader_module, .entry_point = "ps_colour_main" },
         // TODO change vertex and pixel shaders to go through asset system. That way we can add
         // pipelines to automatically re-generate when shaders change. Will need to add a system
         // to pull assets from the source code directories. Probably will need to create asset packs
         // by defining assets in a file.
-        .depth_test = .{ .write = true, },
-        .push_constants = &[_]gf.PushConstantLayoutInfo {
-            gf.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .depth_test = .{
+            .write = true,
+        },
+        .push_constants = &[_]gf.PushConstantLayoutInfo{
+            gf.PushConstantLayoutInfo{
+                .shader_stages = .{
+                    .Vertex = true,
+                    .Pixel = true,
+                },
                 .offset = 0,
                 .size = @sizeOf(PushConstants),
             },
@@ -250,13 +272,15 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     const id_pipeline = try gf.GraphicsPipeline.init(id_pipeline_info);
     errdefer id_pipeline.deinit();
 
-    id_pipeline_info.depth_test = .{ .write = false, };
+    id_pipeline_info.depth_test = .{
+        .write = false,
+    };
     const id_pipeline_dont_write_depth = try gf.GraphicsPipeline.init(id_pipeline_info);
     errdefer id_pipeline_dont_write_depth.deinit();
 
     const framebuffer = try gf.FrameBuffer.init(.{
         .render_pass = render_pass,
-        .attachments = &[_]gf.FrameBufferAttachmentInfo {
+        .attachments = &[_]gf.FrameBufferAttachmentInfo{
             .SwapchainLDR,
             .{ .View = selection_textures.view },
             .SwapchainDepth,
@@ -264,7 +288,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     });
     errdefer framebuffer.deinit();
 
-    return Self {
+    return Self{
         .visual_torus = visual_torus,
         .visual_cylinder = visual_cylinder,
         .visual_sphere = visual_sphere,
@@ -277,11 +301,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
         .render_pass = render_pass,
 
-        .pipelines = Pipelines {
+        .pipelines = Pipelines{
             .standard = pipeline,
             .dont_write_depth = pipeline_dont_write_depth,
         },
-        .id_pipelines = Pipelines {
+        .id_pipelines = Pipelines{
             .standard = id_pipeline,
             .dont_write_depth = id_pipeline_dont_write_depth,
         },
@@ -296,14 +320,18 @@ fn init_torus(line_width: f32) !RenderBuffers {
 
     const torus_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(torus_shape.positions),
-        .{ .VertexBuffer = true, },
+        .{
+            .VertexBuffer = true,
+        },
         .{},
     );
     errdefer torus_vertex_buffer.deinit();
 
     const torus_index_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(torus_shape.indices),
-        .{ .IndexBuffer = true, },
+        .{
+            .IndexBuffer = true,
+        },
         .{},
     );
     errdefer torus_index_buffer.deinit();
@@ -322,14 +350,18 @@ fn init_cylinder(line_width: f32) !RenderBuffers {
 
     const cylinder_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(cylinder_shape.positions),
-        .{ .VertexBuffer = true, },
+        .{
+            .VertexBuffer = true,
+        },
         .{},
     );
     errdefer cylinder_vertex_buffer.deinit();
 
     const cylinder_index_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(cylinder_shape.indices),
-        .{ .IndexBuffer = true, },
+        .{
+            .IndexBuffer = true,
+        },
         .{},
     );
     errdefer cylinder_index_buffer.deinit();
@@ -348,14 +380,18 @@ fn init_sphere(line_width: f32) !RenderBuffers {
 
     const sphere_vertex_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(sphere_shape.positions),
-        .{ .VertexBuffer = true, },
+        .{
+            .VertexBuffer = true,
+        },
         .{},
     );
     errdefer sphere_vertex_buffer.deinit();
 
     const sphere_index_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(sphere_shape.indices),
-        .{ .IndexBuffer = true, },
+        .{
+            .IndexBuffer = true,
+        },
         .{},
     );
     errdefer sphere_index_buffer.deinit();
@@ -377,14 +413,24 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !void {
         "vs_main",
         .{
             .bindings = &.{
-                .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+                .{
+                    .binding = 0,
+                    .stride = 12,
+                    .input_rate = .Vertex,
+                },
             },
             .attributes = &.{
-                .{ .name = "POS", .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+                .{
+                    .name = "POS",
+                    .location = 0,
+                    .binding = 0,
+                    .offset = 0,
+                    .format = .F32x3,
+                },
             },
         },
         .{},
-    ); 
+    );
     errdefer new_vertex_shader.deinit();
 
     const new_pixel_shader = try gf.PixelShader.init_file(
@@ -408,7 +454,10 @@ fn compile_shaders(self: *Self, alloc: std.mem.Allocator) !void {
     self.id_pixel_shader = new_id_pixel_shader;
 }
 
-const CoordSpace = enum { local, world, };
+const CoordSpace = enum {
+    local,
+    world,
+};
 
 const GizmoControl = enum(u32) {
     None = 0,
@@ -447,11 +496,8 @@ fn sub_rotation(control: GizmoControl, base_rot: *const zm.Mat, base_translation
         .TranslateY, .RotateY => zm.rotationX(-std.math.pi * 0.5),
         .TranslateZ, .RotateZ, .None => zm.identity(),
     };
-    
-    return zm.mul(
-        zm.mul(subrot, base_rot.*), 
-        base_translation.*
-    );
+
+    return zm.mul(zm.mul(subrot, base_rot.*), base_translation.*);
 }
 
 const Ray = struct {
@@ -493,56 +539,56 @@ pub fn closest_points_between_rays(ray1: Ray, ray2: Ray) ClosestPointsResult {
     // Ensure direction vectors are normalized
     const dir1 = zm.normalize3(ray1.direction);
     const dir2 = zm.normalize3(ray2.direction);
-    
+
     // Calculate values needed for the solution
     const a = zm.dot3(dir1, dir1)[0]; // Should be 1.0 if normalized
     const b = zm.dot3(dir1, dir2)[0];
     const c = zm.dot3(dir2, dir2)[0]; // Should be 1.0 if normalized
-    
+
     // Vector connecting the two ray origins
     const r = ray1.origin - ray2.origin;
-    
+
     const d = zm.dot3(dir1, r)[0];
     const e = zm.dot3(dir2, r)[0];
-    
+
     // Calculate denominator for the solution
     const denominator = a * c - b * b;
-    
+
     // If denominator is close to 0, rays are nearly parallel
     if (@abs(denominator) < 0.0001) {
         // For parallel rays, we'll use a different approach
         // Project ray2's origin onto ray1 to find closest point on ray1
         const t1 = d / a;
         const point_on_ray1 = ray1.origin + (dir1 * zm.f32x4s(t1));
-        
+
         // For the second point, project ray1's point onto ray2's direction
         const point_to_origin2 = point_on_ray1 - ray2.origin;
         const t2 = zm.dot3(point_to_origin2, dir2)[0];
         const point_on_ray2 = ray2.origin + (dir2 * zm.f32x4s(t2));
-        
+
         // Calculate the distance between these points
         const diff = point_on_ray1 - point_on_ray2;
         const distance = zm.length3(diff)[0];
-        
+
         return ClosestPointsResult{
             .point_on_ray1 = point_on_ray1,
             .point_on_ray2 = point_on_ray2,
             .distance = distance,
         };
     }
-    
+
     // Calculate the parameters t1 and t2 that give the closest points
     const t1 = (b * e - c * d) / denominator;
     const t2 = (a * e - b * d) / denominator;
-    
+
     // Calculate the closest points on each ray
     const point_on_ray1 = (ray1.origin + (dir1 * zm.f32x4s(t1)));
     const point_on_ray2 = (ray2.origin + (dir2 * zm.f32x4s(t2)));
-    
+
     // Calculate the distance between these points
     const diff = point_on_ray1 - point_on_ray2;
     const distance = zm.length3(diff)[0];
-    
+
     return ClosestPointsResult{
         .point_on_ray1 = point_on_ray1,
         .point_on_ray2 = point_on_ray2,
@@ -556,7 +602,6 @@ const Plane = struct {
     up: zm.F32x4,
 };
 
-
 const RayPlaneIntersectionResult = struct {
     world_position: zm.F32x4,
     plane_coords: zm.F32x4, // x,y are coordinates in plane space, z,w unused
@@ -568,7 +613,7 @@ pub fn ray_plane_intersection(ray: Ray, plane: Plane) RayPlaneIntersectionResult
     // 1. Calculate if the ray and plane intersect
     const normal = zm.normalize3(plane.normal);
     const denominator = zm.dot3(normal, ray.direction)[0];
-    
+
     // If denominator is close to 0, ray is parallel to the plane
     if (@abs(denominator) < 0.0001) {
         return RayPlaneIntersectionResult{
@@ -577,43 +622,43 @@ pub fn ray_plane_intersection(ray: Ray, plane: Plane) RayPlaneIntersectionResult
             .hit = false,
         };
     }
-    
+
     // 2. Calculate distance from ray origin to the intersection point
     const p0_to_origin = (ray.origin - plane.point);
     const t = -zm.dot3(normal, p0_to_origin)[0] / denominator;
-    
+
     // If t is negative, the intersection is behind the ray origin
     if (t < 0) {
-        return RayPlaneIntersectionResult {
+        return RayPlaneIntersectionResult{
             .world_position = zm.f32x4(0, 0, 0, 0),
             .plane_coords = zm.f32x4(0, 0, 0, 0),
             .hit = false,
         };
     }
-    
+
     // 3. Calculate the world position of the intersection
     const scaled_direction = (ray.direction * zm.f32x4s(t));
     const world_position = (ray.origin + scaled_direction);
-    
+
     // 4. Calculate the plane's coordinate system
     // Normalize the up vector
     const up = zm.normalize3(plane.up);
-    
+
     // Calculate the right vector (perpendicular to both normal and up)
     const right = zm.normalize3(zm.cross3(up, normal));
-    
+
     // Recalculate up to ensure orthogonality (normal, right, and up form an orthogonal basis)
     const corrected_up = zm.normalize3(zm.cross3(normal, right));
-    
+
     // 5. Calculate the plane coordinates
     // Vector from plane origin point to intersection
     const vector_to_intersection = (world_position - plane.point);
-    
+
     // Project this vector onto the plane basis vectors
     const x_coord = zm.dot3(vector_to_intersection, right)[0];
     const y_coord = zm.dot3(vector_to_intersection, corrected_up)[0];
-    
-    return RayPlaneIntersectionResult {
+
+    return RayPlaneIntersectionResult{
         .world_position = world_position,
         .plane_coords = zm.f32x4(x_coord, y_coord, 0, 0),
         .hit = true,
@@ -638,7 +683,7 @@ fn scale_with_cursor(self: *const Self, transform: *Transform, inv_perspective: 
     }).point_on_ray2;
 
     const mouse_delta = eng.get().input.get_mouse_delta();
-    const cursor_pos_last_frame = [2]i32 {
+    const cursor_pos_last_frame = [2]i32{
         cursor_position[0] - @as(i32, @intFromFloat(mouse_delta[0])),
         cursor_position[1] - @as(i32, @intFromFloat(mouse_delta[1])),
     };
@@ -659,7 +704,7 @@ inline fn non_orthogonalized_plane_up_direction(normal: zm.F32x4) zm.F32x4 {
 }
 
 fn rotate_with_cursor(self: *Self, transform: *Transform, cursor_ray: Ray, rotation_normal: zm.F32x4) void {
-    const plane = Plane {
+    const plane = Plane{
         .point = transform.position,
         .normal = rotation_normal,
         .up = non_orthogonalized_plane_up_direction(rotation_normal),
@@ -701,7 +746,7 @@ pub fn update(self: *Self, transform: *Transform) bool {
                 .RotateX, .RotateY, .RotateZ => {
                     const cursor_ray = ray_out_point_on_screen_px(cursor_position, inv_perspective, inv_view);
                     const local_direction = self.selected_control.?.direction(transform, coord_space);
-                    const plane = Plane {
+                    const plane = Plane{
                         .point = transform.position,
                         .normal = local_direction,
                         .up = non_orthogonalized_plane_up_direction(local_direction),
@@ -741,7 +786,7 @@ pub fn update(self: *Self, transform: *Transform) bool {
                 },
                 .RotateX, .RotateY, .RotateZ => {
                     self.rotate_with_cursor(transform, cursor_ray, s.direction(transform, coord_space));
-                }
+                },
             }
         }
     }
@@ -762,8 +807,12 @@ pub fn render_cmd(
     });
     defer cmd.cmd_end_render_pass();
 
-    cmd.cmd_set_viewports(.{ .viewports = &.{ .full_screen_viewport(), } });
-    cmd.cmd_set_scissors(.{ .scissors = &.{ .full_screen_pixels(), } });
+    cmd.cmd_set_viewports(.{ .viewports = &.{
+        .full_screen_viewport(),
+    } });
+    cmd.cmd_set_scissors(.{ .scissors = &.{
+        .full_screen_pixels(),
+    } });
 
     self.render_objects_cmd(cmd, transform, camera, .Visual);
 
@@ -772,13 +821,7 @@ pub fn render_cmd(
     self.render_objects_cmd(cmd, transform, camera, .Id);
 }
 
-pub fn render_objects_cmd(
-    self: *Self,
-    cmd: *gf.CommandBuffer,
-    transform: *const Transform,
-    camera: *const eng.Camera,
-    ty: enum { Visual, Id }
-) void {
+pub fn render_objects_cmd(self: *Self, cmd: *gf.CommandBuffer, transform: *const Transform, camera: *const eng.Camera, ty: enum { Visual, Id }) void {
     const pipelines = switch (ty) {
         .Visual => &self.pipelines,
         .Id => &self.id_pipelines,
@@ -787,12 +830,9 @@ pub fn render_objects_cmd(
     self.rendered_view_matrix = camera.transform.generate_view_matrix();
     self.rendered_perspective_matrix = camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect());
 
-    const vp = zm.mul(
-        self.rendered_view_matrix,
-        self.rendered_perspective_matrix
-    );
+    const vp = zm.mul(self.rendered_view_matrix, self.rendered_perspective_matrix);
 
-    var push_constant_data = PushConstants {
+    var push_constant_data = PushConstants{
         .id = 0,
         .colour = zm.f32x4s(0.0),
         .mvp = vp,
@@ -815,12 +855,15 @@ pub fn render_objects_cmd(
         },
     }
 
-    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
-        gf.VertexBufferInput {
+    cmd.cmd_bind_vertex_buffers(.{
+        .buffers = &.{gf.VertexBufferInput{
             .buffer = torus_vertex_bufer,
-        }
-    }, });
-    cmd.cmd_bind_index_buffer(.{ .buffer = torus_index_buffer, .index_format = .U32, });
+        }},
+    });
+    cmd.cmd_bind_index_buffer(.{
+        .buffer = torus_index_buffer,
+        .index_format = .U32,
+    });
 
     const base_rot = if (get_coord_space() == .local) zm.matFromQuat(transform.rotation) else zm.identity();
     const distance = 10.0;
@@ -835,70 +878,89 @@ pub fn render_objects_cmd(
     // render white torus
     cmd.cmd_bind_graphics_pipeline(pipelines.dont_write_depth);
 
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = WHITE,
         .id = @intFromEnum(GizmoControl.None),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(torus_index_count),
+    });
 
     // render red torus
     cmd.cmd_bind_graphics_pipeline(pipelines.standard);
 
     model_matrix = sub_rotation(GizmoControl.RotateX, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = RED,
         .id = @intFromEnum(GizmoControl.RotateX),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(torus_index_count),
+    });
 
     // render green torus
     model_matrix = sub_rotation(GizmoControl.RotateY, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = GREEN,
         .id = @intFromEnum(GizmoControl.RotateY),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(torus_index_count),
+    });
 
     // render blue torus
     model_matrix = sub_rotation(GizmoControl.RotateZ, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = BLUE,
         .id = @intFromEnum(GizmoControl.RotateZ),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(torus_index_count), });
-
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(torus_index_count),
+    });
 
     // set culinder vertex and index buffers
     var cylinder_vertex_buffer: gf.Buffer.Ref = undefined;
@@ -917,61 +979,78 @@ pub fn render_objects_cmd(
         },
     }
 
-    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
-        gf.VertexBufferInput {
+    cmd.cmd_bind_vertex_buffers(.{
+        .buffers = &.{gf.VertexBufferInput{
             .buffer = cylinder_vertex_buffer,
-        }
-    }, });
-    cmd.cmd_bind_index_buffer(.{ .buffer = cylinder_index_buffer, .index_format = .U32, });
+        }},
+    });
+    cmd.cmd_bind_index_buffer(.{
+        .buffer = cylinder_index_buffer,
+        .index_format = .U32,
+    });
 
     // render red cylinder
     model_matrix = sub_rotation(GizmoControl.TranslateX, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = RED,
         .id = @intFromEnum(GizmoControl.TranslateX),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(cylinder_index_count),
+    });
 
     // render green cylinder
     model_matrix = sub_rotation(GizmoControl.TranslateY, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = GREEN,
         .id = @intFromEnum(GizmoControl.TranslateY),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(cylinder_index_count),
+    });
 
     // render blue cylinder
     model_matrix = sub_rotation(GizmoControl.TranslateZ, &base_rot, &base_tra);
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = BLUE,
         .id = @intFromEnum(GizmoControl.TranslateZ),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(cylinder_index_count), });
-
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(cylinder_index_count),
+    });
 
     // set sphere vertex and index buffers
     var sphere_vertex_buffer: gf.Buffer.Ref = undefined;
@@ -990,27 +1069,34 @@ pub fn render_objects_cmd(
         },
     }
 
-    cmd.cmd_bind_vertex_buffers(.{ .buffers = &.{
-        gf.VertexBufferInput {
+    cmd.cmd_bind_vertex_buffers(.{
+        .buffers = &.{gf.VertexBufferInput{
             .buffer = sphere_vertex_buffer,
-        }
-    }, });
-    cmd.cmd_bind_index_buffer(.{ .buffer = sphere_index_buffer, .index_format = .U32, });
+        }},
+    });
+    cmd.cmd_bind_index_buffer(.{
+        .buffer = sphere_index_buffer,
+        .index_format = .U32,
+    });
 
     // render white sphere
     model_matrix = base_tra;
-    push_constant_data = PushConstants {
+    push_constant_data = PushConstants{
         .mvp = zm.mul(model_matrix, vp),
         .colour = WHITE,
         .id = @intFromEnum(GizmoControl.None),
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{
+            .Vertex = true,
+            .Pixel = true,
+        },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
 
-    cmd.cmd_draw_indexed(.{ .index_count = @intCast(sphere_index_count), });
+    cmd.cmd_draw_indexed(.{
+        .index_count = @intCast(sphere_index_count),
+    });
 }
-

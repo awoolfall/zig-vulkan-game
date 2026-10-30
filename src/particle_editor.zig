@@ -22,7 +22,6 @@ const ParticleSettingsContainer = struct {
         new_settings.settings = try self.settings.clone(alloc);
         return new_settings;
     }
-
 };
 
 pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void {
@@ -35,7 +34,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     }
     defer imui.pop_layout();
 
-    const running_settings_container, const running_settings_state = 
+    const running_settings_container, const running_settings_state =
         imui.get_widget_data(ParticleSettingsContainer, panel_layout) catch unreachable;
     const running_settings = &running_settings_container.settings;
     if (running_settings_state == .Init) {
@@ -55,7 +54,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
 
     const content_layout = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(content_layout)) |content_layout_widget| {
-        content_layout_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+        content_layout_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
         content_layout_widget.children_gap = 5;
     }
     defer imui.pop_layout();
@@ -63,7 +62,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     {
         const left_layout = imui.push_layout(.Y, key ++ .{@src()});
         if (imui.get_widget(left_layout)) |w| {
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false, };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false };
             w.children_gap = 5;
         }
         defer imui.pop_layout();
@@ -224,7 +223,7 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
     {
         const right_layout = imui.push_layout(.Y, key ++ .{@src()});
         if (imui.get_widget(right_layout)) |w| {
-            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false, };
+            w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.5, .shrinkable = false };
             w.children_gap = 5;
         }
         defer imui.pop_layout();
@@ -234,22 +233,22 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         if (colour_keyframes_collapsible_open.*) {
             for (running_settings.colour.items, 0..) |*c, i| {
                 {
-                    push_row_item_layout("key time: ", key ++ .{i, @src()});
+                    push_row_item_layout("key time: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const t = Imui.widgets.number_slider.create(imui, &c.key_time, .{}, key ++ .{i, @src()});
+                    const t = Imui.widgets.number_slider.create(imui, &c.key_time, .{}, key ++ .{ i, @src() });
                     if (t.data_changed) {
                         c.key_time = std.math.clamp(c.key_time, 0.0, 1.0);
                     }
                 }
                 {
-                    push_row_item_layout("colour: ", key ++ .{i, @src()});
+                    push_row_item_layout("colour: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const s0 = Imui.widgets.number_slider.create(imui, &c.value[0], .{}, key ++ .{i, @src()});
-                    const s1 = Imui.widgets.number_slider.create(imui, &c.value[1], .{}, key ++ .{i, @src()});
-                    const s2 = Imui.widgets.number_slider.create(imui, &c.value[2], .{}, key ++ .{i, @src()});
-                    const s3 = Imui.widgets.number_slider.create(imui, &c.value[3], .{}, key ++ .{i, @src()});
+                    const s0 = Imui.widgets.number_slider.create(imui, &c.value[0], .{}, key ++ .{ i, @src() });
+                    const s1 = Imui.widgets.number_slider.create(imui, &c.value[1], .{}, key ++ .{ i, @src() });
+                    const s2 = Imui.widgets.number_slider.create(imui, &c.value[2], .{}, key ++ .{ i, @src() });
+                    const s3 = Imui.widgets.number_slider.create(imui, &c.value[3], .{}, key ++ .{ i, @src() });
 
                     if (s0.data_changed or s1.data_changed or s2.data_changed or s3.data_changed) {
                         c.value = zm.max(c.value, zm.f32x4s(0.0));
@@ -257,10 +256,10 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
                     }
                 }
                 {
-                    push_row_item_layout("into easing: ", key ++ .{i, @src()});
+                    push_row_item_layout("into easing: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const easing_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{i, @src()});
+                    const easing_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{ i, @src() });
                     const easing_combobox_i_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, easing_combobox_i.id) catch unreachable;
                     if (easing_combobox_i.init) {
                         easing_combobox_i_data.can_be_default = false;
@@ -303,31 +302,31 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         if (scale_collapsible_open.*) {
             for (running_settings.scale.items, 0..) |*k, i| {
                 {
-                    push_row_item_layout("key time: ", key ++ .{i, @src()});
+                    push_row_item_layout("key time: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const t = Imui.widgets.number_slider.create(imui, &k.key_time, .{}, key ++ .{i, @src()});
+                    const t = Imui.widgets.number_slider.create(imui, &k.key_time, .{}, key ++ .{ i, @src() });
                     if (t.data_changed) {
                         k.key_time = std.math.clamp(k.key_time, 0.0, 1.0);
                     }
                 }
                 {
-                    push_row_item_layout("colour: ", key ++ .{i, @src()});
+                    push_row_item_layout("colour: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const s0 = Imui.widgets.number_slider.create(imui, &k.value[0], .{}, key ++ .{i, @src()});
-                    const s1 = Imui.widgets.number_slider.create(imui, &k.value[1], .{}, key ++ .{i, @src()});
-                    const s2 = Imui.widgets.number_slider.create(imui, &k.value[2], .{}, key ++ .{i, @src()});
+                    const s0 = Imui.widgets.number_slider.create(imui, &k.value[0], .{}, key ++ .{ i, @src() });
+                    const s1 = Imui.widgets.number_slider.create(imui, &k.value[1], .{}, key ++ .{ i, @src() });
+                    const s2 = Imui.widgets.number_slider.create(imui, &k.value[2], .{}, key ++ .{ i, @src() });
 
                     if (s0.data_changed or s1.data_changed or s2.data_changed) {
                         k.value = zm.max(k.value, zm.f32x4s(0.0));
                     }
                 }
                 {
-                    push_row_item_layout("into easing: ", key ++ .{i, @src()});
+                    push_row_item_layout("into easing: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const easing_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{i, @src()});
+                    const easing_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{ i, @src() });
                     const easing_combobox_i_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, easing_combobox_i.id) catch unreachable;
                     if (easing_combobox_i.init) {
                         easing_combobox_i_data.can_be_default = false;
@@ -370,10 +369,10 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
         if (forces_collapsible_open.*) {
             for (running_settings.forces.items, 0..) |*f, i| {
                 {
-                    push_row_item_layout("force: ", key ++ .{i, @src()});
+                    push_row_item_layout("force: ", key ++ .{ i, @src() });
                     defer imui.pop_layout();
 
-                    const force_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{i, @src()});
+                    const force_combobox_i = Imui.widgets.combobox.create(imui, key ++ .{ i, @src() });
                     const force_combobox_i_data, _ = imui.get_widget_data(Imui.widgets.combobox.ComboBoxState, force_combobox_i.id) catch unreachable;
                     if (force_combobox_i.init) {
                         force_combobox_i_data.can_be_default = false;
@@ -399,55 +398,55 @@ pub fn particle_editor(entity: *eng.entity.EntitySuperStruct, key: anytype) void
                 }
                 switch (f.*) {
                     .Constant => |*v| {
-                        push_row_item_layout("force direction: ", key ++ .{i, @src()});
+                        push_row_item_layout("force direction: ", key ++ .{ i, @src() });
                         defer imui.pop_layout();
 
-                        _ = Imui.widgets.number_slider.create(imui, &v[0], .{}, key ++ .{i, @src()});
-                        _ = Imui.widgets.number_slider.create(imui, &v[1], .{}, key ++ .{i, @src()});
-                        _ = Imui.widgets.number_slider.create(imui, &v[2], .{}, key ++ .{i, @src()});
+                        _ = Imui.widgets.number_slider.create(imui, &v[0], .{}, key ++ .{ i, @src() });
+                        _ = Imui.widgets.number_slider.create(imui, &v[1], .{}, key ++ .{ i, @src() });
+                        _ = Imui.widgets.number_slider.create(imui, &v[2], .{}, key ++ .{ i, @src() });
                     },
                     .ConstantRand => |*v| {
-                        push_row_item_layout("strength: ", key ++ .{i, @src()});
+                        push_row_item_layout("strength: ", key ++ .{ i, @src() });
                         defer imui.pop_layout();
 
-                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{i, @src()});
+                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{ i, @src() });
                     },
                     .Curl => |*v| {
-                        push_row_item_layout("strength: ", key ++ .{i, @src()});
+                        push_row_item_layout("strength: ", key ++ .{ i, @src() });
                         defer imui.pop_layout();
 
-                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{i, @src()});
+                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{ i, @src() });
                     },
                     .Drag => |*v| {
-                        push_row_item_layout("strength: ", key ++ .{i, @src()});
+                        push_row_item_layout("strength: ", key ++ .{ i, @src() });
                         defer imui.pop_layout();
 
-                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{i, @src()});
+                        _ = Imui.widgets.number_slider.create(imui, v, .{}, key ++ .{ i, @src() });
                     },
                     .Vortex => |*v| {
                         {
-                            push_row_item_layout("axis: ", key ++ .{i, @src()});
+                            push_row_item_layout("axis: ", key ++ .{ i, @src() });
                             defer imui.pop_layout();
 
-                            _ = Imui.widgets.number_slider.create(imui, &v.axis[0], .{}, key ++ .{i, @src()});
-                            _ = Imui.widgets.number_slider.create(imui, &v.axis[1], .{}, key ++ .{i, @src()});
-                            _ = Imui.widgets.number_slider.create(imui, &v.axis[2], .{}, key ++ .{i, @src()});
+                            _ = Imui.widgets.number_slider.create(imui, &v.axis[0], .{}, key ++ .{ i, @src() });
+                            _ = Imui.widgets.number_slider.create(imui, &v.axis[1], .{}, key ++ .{ i, @src() });
+                            _ = Imui.widgets.number_slider.create(imui, &v.axis[2], .{}, key ++ .{ i, @src() });
                         }
                         {
-                            push_row_item_layout("force: ", key ++ .{i, @src()});
+                            push_row_item_layout("force: ", key ++ .{ i, @src() });
                             defer imui.pop_layout();
 
-                            _ = Imui.widgets.number_slider.create(imui, &v.force, .{}, key ++ .{i, @src()});
+                            _ = Imui.widgets.number_slider.create(imui, &v.force, .{}, key ++ .{ i, @src() });
                         }
                         {
-                            push_row_item_layout("origin pull: ", key ++ .{i, @src()});
+                            push_row_item_layout("origin pull: ", key ++ .{ i, @src() });
                             defer imui.pop_layout();
 
-                            _ = Imui.widgets.number_slider.create(imui, &v.origin_pull, .{}, key ++ .{i, @src()});
+                            _ = Imui.widgets.number_slider.create(imui, &v.origin_pull, .{}, key ++ .{ i, @src() });
                         }
                     },
                 }
-                const rem_button = Imui.widgets.badge.create(imui, "remove force", key ++ .{i, @src()});
+                const rem_button = Imui.widgets.badge.create(imui, "remove force", key ++ .{ i, @src() });
                 if (rem_button.clicked) {
                     _ = running_settings.forces.orderedRemove(i);
                 }
@@ -480,32 +479,27 @@ fn push_row_item_layout(text: []const u8, key: anytype) void {
     const imui = &eng.get().imui;
     const xl = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(xl)) |xl_widget| {
-        xl_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true, };
+        xl_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
         xl_widget.children_gap = 4;
     }
 
     const shape_label = Imui.widgets.label.create(imui, text);
     if (imui.get_widget(shape_label.id)) |shape_label_widget| {
-        shape_label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.3, .shrinkable = false, };
+        shape_label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.3, .shrinkable = false };
     }
 }
 
-fn labeled_number_slider(
-    text: []const u8, 
-    value: *f32, 
-    settings: eng.Imui.Imui.NumberSliderSettings,
-    key: anytype
-) void {
+fn labeled_number_slider(text: []const u8, value: *f32, settings: eng.Imui.Imui.NumberSliderSettings, key: anytype) void {
     const ll = eng.get().imui.push_layout(.X, key ++ .{@src()});
     if (eng.get().imui.get_widget(ll)) |ll_widget| {
-        ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+        ll_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
         ll_widget.children_gap = 4;
     }
     defer eng.get().imui.pop_layout();
 
     const label = eng.get().imui.label(text);
     if (eng.get().imui.get_widget(label.id)) |label_widget| {
-        label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable = false, };
+        label_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 0.25, .shrinkable = false };
     }
     _ = eng.get().imui.number_slider(value, settings, key ++ .{@src()});
 }

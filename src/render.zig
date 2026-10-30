@@ -55,7 +55,7 @@ const InstanceStruct = extern struct {
     bone_start_idx: u32 = 0,
 };
 
-pub const LightType = enum (u32) {
+pub const LightType = enum(u32) {
     None = 0,
     Sun = 1,
     Directional = 2,
@@ -84,21 +84,38 @@ pub const Light = extern struct {
         try object.put("delta_penumbra", try sr.serialize_value(f32, alloc, std.math.radiansToDegrees(self.delta_penumbra)));
         try object.put("light_type", try sr.serialize_value(LightType, alloc, self.light_type));
 
-        return std.json.Value { .object = object };
+        return std.json.Value{ .object = object };
     }
 
     fn deserialize(value: std.json.Value) !Light {
-        const object = switch (value) { .object => |obj| obj, else => return error.InvalidType };
+        const object = switch (value) {
+            .object => |obj| obj,
+            else => return error.InvalidType,
+        };
 
         var light = Light{};
 
-        if (object.get("position")) |v| blk: { light.position = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
-        if (object.get("direction")) |v| blk: { light.direction = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
-        if (object.get("colour")) |v| blk: { light.colour = sr.deserialize_value(zm.F32x4, v) catch break :blk; }
-        if (object.get("intensity")) |v| blk: { light.intensity = sr.deserialize_value(f32, v) catch break :blk; }
-        if (object.get("umbra")) |v| blk: { light.umbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk); }
-        if (object.get("delta_penumbra")) |v| blk: { light.delta_penumbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk); }
-        if (object.get("light_type")) |v| blk: { light.light_type = sr.deserialize_value(LightType, v) catch break :blk; }
+        if (object.get("position")) |v| blk: {
+            light.position = sr.deserialize_value(zm.F32x4, v) catch break :blk;
+        }
+        if (object.get("direction")) |v| blk: {
+            light.direction = sr.deserialize_value(zm.F32x4, v) catch break :blk;
+        }
+        if (object.get("colour")) |v| blk: {
+            light.colour = sr.deserialize_value(zm.F32x4, v) catch break :blk;
+        }
+        if (object.get("intensity")) |v| blk: {
+            light.intensity = sr.deserialize_value(f32, v) catch break :blk;
+        }
+        if (object.get("umbra")) |v| blk: {
+            light.umbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk);
+        }
+        if (object.get("delta_penumbra")) |v| blk: {
+            light.delta_penumbra = std.math.degreesToRadians(sr.deserialize_value(f32, v) catch break :blk);
+        }
+        if (object.get("light_type")) |v| blk: {
+            light.light_type = sr.deserialize_value(LightType, v) catch break :blk;
+        }
 
         return light;
     }
@@ -186,7 +203,6 @@ lights: std.ArrayList(Light),
 
 selection_textures: SelectionTextures.SelectionTextures(u32),
 
-
 pub fn deinit(self: *Self) void {
     const general_alloc = eng.get().general_allocator;
 
@@ -195,11 +211,17 @@ pub fn deinit(self: *Self) void {
     self.shader_watcher.deinit();
 
     self.camera_data_buffer.deinit();
-    for (self.instance_buffers.items) |b| { b.deinit(); }
+    for (self.instance_buffers.items) |b| {
+        b.deinit();
+    }
     self.instance_buffers.deinit(general_alloc);
-    for (self.lights_buffers.items) |b| { b.deinit(); }
+    for (self.lights_buffers.items) |b| {
+        b.deinit();
+    }
     self.lights_buffers.deinit(general_alloc);
-    for (self.bone_buffers.items) |b| { b.deinit(); }
+    for (self.bone_buffers.items) |b| {
+        b.deinit();
+    }
     self.bone_buffers.deinit(general_alloc);
 
     self.camera_data_descriptor_pool.deinit();
@@ -248,12 +270,12 @@ pub fn init() !Self {
     std.log.info("shader path: '{s}'", .{full_shader_path});
     var shader_watcher = try eng.assets.FileWatcher.init(eng.get().general_allocator, full_shader_path, 500);
     errdefer shader_watcher.deinit();
-    
+
     const camera_data_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 0,
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .binding_type = .UniformBuffer,
             },
         },
@@ -262,26 +284,26 @@ pub fn init() !Self {
 
     const camera_data_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 1,
-        .strategy = .{ .Layout = camera_data_descriptor_layout, },
+        .strategy = .{ .Layout = camera_data_descriptor_layout },
     });
     errdefer camera_data_descriptor_pool.deinit();
 
     const camera_data_descriptor_set = try (camera_data_descriptor_pool.get() catch unreachable).allocate_set(
-        .{ .layout = camera_data_descriptor_layout, },
+        .{ .layout = camera_data_descriptor_layout },
     );
     errdefer camera_data_descriptor_set.deinit();
 
     const camera_data_buffer = blk: {
         const buffer = try gfx.Buffer.init(
             @sizeOf(CameraStruct),
-            .{ .ConstantBuffer = true, },
-            .{ .CpuWrite = true, },
+            .{ .ConstantBuffer = true },
+            .{ .CpuWrite = true },
         );
         errdefer buffer.deinit();
 
         try (camera_data_descriptor_set.get() catch unreachable).update(.{
             .writes = &.{
-                gfx.DescriptorSetUpdateWriteInfo {
+                gfx.DescriptorSetUpdateWriteInfo{
                     .binding = 0,
                     .data = .{ .UniformBuffer = .{
                         .buffer = buffer,
@@ -290,7 +312,7 @@ pub fn init() !Self {
             },
         });
 
-        break :blk BufferData {
+        break :blk BufferData{
             .buffer = buffer,
             .descriptor_set = camera_data_descriptor_set,
         };
@@ -298,9 +320,9 @@ pub fn init() !Self {
 
     const instance_data_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 0,
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .binding_type = .UniformBuffer,
             },
         },
@@ -309,15 +331,15 @@ pub fn init() !Self {
 
     const instance_data_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 512,
-        .strategy = .{ .Layout = instance_data_layout, },
+        .strategy = .{ .Layout = instance_data_layout },
     });
     errdefer instance_data_descriptor_pool.deinit();
 
     const lights_data_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 0,
-                .shader_stages = .{ .Pixel = true, },
+                .shader_stages = .{ .Pixel = true },
                 .binding_type = .UniformBuffer,
             },
         },
@@ -326,21 +348,21 @@ pub fn init() !Self {
 
     const lights_data_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 512,
-        .strategy = .{ .Layout = lights_data_layout, },
+        .strategy = .{ .Layout = lights_data_layout },
     });
     errdefer lights_data_descriptor_pool.deinit();
 
     const textures_data_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
             // diffuse
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 0,
-                .shader_stages = .{ .Pixel = true, },
+                .shader_stages = .{ .Pixel = true },
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 1,
-                .shader_stages = .{ .Pixel = true, },
+                .shader_stages = .{ .Pixel = true },
                 .binding_type = .Sampler,
             },
             // TODO pbr
@@ -351,7 +373,7 @@ pub fn init() !Self {
 
     const textures_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 512,
-        .strategy = .{ .Layout = textures_data_layout, },
+        .strategy = .{ .Layout = textures_data_layout },
     });
     errdefer textures_descriptor_pool.deinit();
 
@@ -362,22 +384,22 @@ pub fn init() !Self {
 
     try (default_textures_set.get() catch unreachable).update(.{
         .writes = &.{
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
-                .data = .{ .ImageView = gfx.GfxState.get().default.diffuse_view, },
+                .data = .{ .ImageView = gfx.GfxState.get().default.diffuse_view },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 1,
-                .data = .{ .Sampler = gfx.GfxState.get().default.sampler, },
+                .data = .{ .Sampler = gfx.GfxState.get().default.sampler },
             },
         },
     });
 
     const bones_data_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
+            gfx.DescriptorBindingInfo{
                 .binding = 0,
-                .shader_stages = .{ .Vertex = true, },
+                .shader_stages = .{ .Vertex = true },
                 .binding_type = .UniformBuffer,
             },
         },
@@ -386,60 +408,60 @@ pub fn init() !Self {
 
     const bones_data_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 512,
-        .strategy = .{ .Layout = bones_data_layout, },
+        .strategy = .{ .Layout = bones_data_layout },
     });
     errdefer bones_data_descriptor_pool.deinit();
 
-    const attachments = &[_]gfx.AttachmentInfo {
-        gfx.AttachmentInfo {
+    const attachments = &[_]gfx.AttachmentInfo{
+        gfx.AttachmentInfo{
             .name = "colour_opaque",
             .format = gfx.GfxState.hdr_format,
             .load_op = .Clear,
-            .clear_value = gfx.ClearValue{ .f32x4 = zm.srgbToRgb(zm.f32x4(133.0/255.0, 193.0/255.0, 233.0/255.0, 1.0)) },
+            .clear_value = gfx.ClearValue{ .f32x4 = zm.srgbToRgb(zm.f32x4(133.0 / 255.0, 193.0 / 255.0, 233.0 / 255.0, 1.0)) },
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
         },
-        gfx.AttachmentInfo {
+        gfx.AttachmentInfo{
             .name = "colour_blend",
             .format = gfx.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .Simple,
         },
-        gfx.AttachmentInfo {
+        gfx.AttachmentInfo{
             .name = "entity_clear",
             .format = gfx.ImageFormat.R32_Uint,
             .load_op = .Clear,
-            .clear_value = gfx.ClearValue { .u32x4 = [1]u32 {std.math.maxInt(u32)} ** 4 },
+            .clear_value = gfx.ClearValue{ .u32x4 = [1]u32{std.math.maxInt(u32)} ** 4 },
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
         },
-        gfx.AttachmentInfo {
+        gfx.AttachmentInfo{
             .name = "entity",
             .format = gfx.ImageFormat.R32_Uint,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
         },
-        gfx.AttachmentInfo {
+        gfx.AttachmentInfo{
             .name = "depth",
             .format = gfx.GfxState.depth_format,
             .load_op = .Clear,
             .stencil_load_op = .Clear,
             .initial_layout = .Undefined,
             .final_layout = .DepthStencilAttachmentOptimal,
-            .clear_value = gfx.ClearValue { .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
+            .clear_value = gfx.ClearValue{ .depth_stencil = .{ .depth = 0.0, .stencil = 0 } },
         },
     };
 
     const render_pass = try gfx.RenderPass.init(.{
         .attachments = attachments,
-        .subpasses = &[_]gfx.SubpassInfo {
+        .subpasses = &[_]gfx.SubpassInfo{
             // opaque
             .{
-                .attachments = &.{ 
+                .attachments = &.{
                     "colour_opaque",
                     "entity_clear",
                 },
@@ -455,21 +477,21 @@ pub fn init() !Self {
             },
         },
         .dependencies = &.{
-            gfx.SubpassDependencyInfo {
+            gfx.SubpassDependencyInfo{
                 .src_subpass = null,
                 .dst_subpass = 0,
-                .src_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
                 .src_access_mask = .{},
-                .dst_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
+                .dst_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
             },
-            gfx.SubpassDependencyInfo {
+            gfx.SubpassDependencyInfo{
                 .src_subpass = 0,
                 .dst_subpass = 1,
-                .src_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
                 .src_access_mask = .{},
-                .dst_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
+                .dst_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
             },
         },
     });
@@ -489,7 +511,7 @@ pub fn init() !Self {
 
     const graphics_pipelines = try create_graphics_pipelines(.{
         .render_pass = render_pass,
-        
+
         .camera_data_descriptor_layout = camera_data_descriptor_layout,
         .instance_data_layout = instance_data_layout,
         .lights_data_layout = lights_data_layout,
@@ -498,8 +520,7 @@ pub fn init() !Self {
     });
     errdefer graphics_pipelines.deinit();
 
-
-    return Self {
+    return Self{
         .shader_watcher = shader_watcher,
 
         .camera_data_layout = camera_data_descriptor_layout,
@@ -552,36 +573,36 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
 
     const skeletal_vertex_input = try gfx.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+            .{ .binding = 0, .stride = 88, .input_rate = .Vertex },
         },
         .attributes = &.{
-            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-            .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-            .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0, .format = .F32x3 },
+            .{ .name = "NORMAL", .location = 1, .binding = 0, .offset = 12, .format = .F32x3 },
+            .{ .name = "TANGENT", .location = 2, .binding = 0, .offset = 24, .format = .F32x3 },
             //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-            .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
-            .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
-            .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
+            .{ .name = "TEXCOORD0", .location = 4, .binding = 0, .offset = 48, .format = .F32x2 },
+            .{ .name = "BONE_IDS", .location = 5, .binding = 0, .offset = 56, .format = .I32x4 },
+            .{ .name = "BONE_WEIGHTS", .location = 6, .binding = 0, .offset = 72, .format = .F32x4 },
         },
     });
     defer skeletal_vertex_input.deinit();
 
     const static_vertex_input = try gfx.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 88, .input_rate = .Vertex, },
+            .{ .binding = 0, .stride = 88, .input_rate = .Vertex },
         },
         .attributes = &.{
-            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
-            .{ .name = "NORMAL",        .location = 1, .binding = 0, .offset = 12, .format = .F32x3, },
-            .{ .name = "TANGENT",       .location = 2, .binding = 0, .offset = 24, .format = .F32x3, },
+            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0, .format = .F32x3 },
+            .{ .name = "NORMAL", .location = 1, .binding = 0, .offset = 12, .format = .F32x3 },
+            .{ .name = "TANGENT", .location = 2, .binding = 0, .offset = 24, .format = .F32x3 },
             //.{ .name = "BITANGENT",     .location = 3, .binding = 0, .offset = 36, .format = .F32x3, },
-            .{ .name = "TEXCOORD0",     .location = 4, .binding = 0, .offset = 48, .format = .F32x2, },
+            .{ .name = "TEXCOORD0", .location = 4, .binding = 0, .offset = 48, .format = .F32x2 },
             // .{ .name = "BONE_IDS",      .location = 5, .binding = 0, .offset = 56, .format = .I32x4, },
             // .{ .name = "BONE_WEIGHTS",  .location = 6, .binding = 0, .offset = 72, .format = .F32x4, },
         },
     });
     defer static_vertex_input.deinit();
-    
+
     const resolved_shader_path = try eng.util.uri.resolve_file_uri(alloc, "src:/shader.slang");
     defer alloc.free(resolved_shader_path);
 
@@ -593,30 +614,36 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
 
     _ = try shader_file.readAll(slang_code);
 
-    const skeletal_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
-        .shader_data = slang_code,
-        .preprocessor_macros = &.{
-            .{ "SKELETAL_RENDERING", "1" },
-            .{ "RENDER_ENTITY_ID_BUFFER", "1" },
-            .{ "BONE_BUFFER_SIZE", std.fmt.comptimePrint("{}", .{Self.MAX_BONES_PER_BUFFER}) },
+    const skeletal_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(
+        alloc,
+        .{
+            .shader_data = slang_code,
+            .preprocessor_macros = &.{
+                .{ "SKELETAL_RENDERING", "1" },
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+                .{ "BONE_BUFFER_SIZE", std.fmt.comptimePrint("{}", .{Self.MAX_BONES_PER_BUFFER}) },
+            },
+            .shader_entry_points = &.{
+                "vs_main",
+                "ps_main",
+            },
         },
-        .shader_entry_points = &.{
-            "vs_main",
-            "ps_main",
-        }
-    });
+    );
     defer alloc.free(skeletal_spirv);
-    
-    const static_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(alloc, .{
-        .shader_data = slang_code,
-        .preprocessor_macros = &.{
-            .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+
+    const static_spirv = try gfx.GfxState.get().shader_manager.generate_spirv(
+        alloc,
+        .{
+            .shader_data = slang_code,
+            .preprocessor_macros = &.{
+                .{ "RENDER_ENTITY_ID_BUFFER", "1" },
+            },
+            .shader_entry_points = &.{
+                "vs_main",
+                "ps_main",
+            },
         },
-        .shader_entry_points = &.{
-            "vs_main",
-            "ps_main",
-        }
-    });
+    );
     defer alloc.free(static_spirv);
 
     const skeletal_shader_module = try gfx.ShaderModule.init(.{
@@ -628,10 +655,9 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
         .spirv_data = static_spirv,
     });
     defer static_shader_module.deinit();
-    
 
     // static pipelines
-    const solid_pipeline_info = gfx.GraphicsPipelineInfo {
+    const solid_pipeline_info = gfx.GraphicsPipelineInfo{
         .vertex_shader = .{
             .module = &static_shader_module,
             .entry_point = "vs_main",
@@ -650,19 +676,19 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
             info.textures_data_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gfx.PushConstantLayoutInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .size = @sizeOf(PushConstants),
                 .offset = 0,
             },
         },
-        .depth_test = .{ .write = true, },
+        .depth_test = .{ .write = true },
         .render_pass = info.render_pass,
         .subpass_index = 0,
     };
 
     var transparent_pipeline_info = solid_pipeline_info;
-    transparent_pipeline_info.depth_test = .{ .write = false, };
+    transparent_pipeline_info.depth_test = .{ .write = false };
     transparent_pipeline_info.subpass_index = 1;
 
     var static_solid_pipeline_info = solid_pipeline_info;
@@ -692,7 +718,6 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
 
     const static_transparent_pipeline = try gfx.GraphicsPipeline.init(static_transparent_pipeline_info);
     errdefer static_transparent_pipeline.deinit();
-
 
     // skeletal pipelines
     const skeletal_descriptor_layouts: []const gfx.DescriptorLayout.Ref = &.{
@@ -734,8 +759,7 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
     const skeletal_transparent_pipeline = try gfx.GraphicsPipeline.init(skeletal_transparent_pipeline_info);
     errdefer skeletal_transparent_pipeline.deinit();
 
-
-    return GraphicsPipelines {
+    return GraphicsPipelines{
         .skeletal = .{
             .solid = skeletal_solid_pipeline,
             .transparent = skeletal_transparent_pipeline,
@@ -743,7 +767,7 @@ fn create_graphics_pipelines(info: CreateGraphicsPipelinesInfo) !GraphicsPipelin
         .static = .{
             .solid = static_solid_pipeline,
             .transparent = static_transparent_pipeline,
-        }
+        },
     };
 }
 
@@ -755,11 +779,11 @@ pub fn push_animated(self: *Self, sro: AnimatedRenderObject) !void {
     self.skeletal_render_objects.append(eng.get().general_allocator, sro) catch unreachable;
 }
 
-pub fn push_bones(self: *Self, bones: []const zm.Mat) !struct { start_idx: usize, end_idx: usize, } {
+pub fn push_bones(self: *Self, bones: []const zm.Mat) !struct { start_idx: usize, end_idx: usize } {
     const start_idx = self.render_bones.items.len;
     self.render_bones.appendSlice(eng.get().general_allocator, bones) catch unreachable;
     const end_idx = self.render_bones.items.len - 1;
-    return .{ .start_idx = start_idx, .end_idx = end_idx, };
+    return .{ .start_idx = start_idx, .end_idx = end_idx };
 }
 
 pub const ModelRenderObject = struct {
@@ -776,14 +800,14 @@ pub const ModelRenderObject = struct {
 pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
     const model: *eng.assets.ModelAsset.BaseType = try eng.get().asset_manager.get_asset(eng.assets.ModelAsset, ro.model);
 
-    var animation_bones = [1]zm.Mat { zm.identity() } ** eng.Model.MAX_BONES;
+    var animation_bones = [1]zm.Mat{zm.identity()} ** eng.Model.MAX_BONES;
 
     const bone_info = if (ro.animation_data) |anim_data| blk: {
         anim_data.animation_graph.calculate_bone_transforms(eng.get().general_allocator, model, anim_data.control_data, animation_bones[0..]);
 
         const bone_index_info = self.push_bones(animation_bones[0..]) catch unreachable;
 
-        break :blk AnimatedRenderObject.BoneInfo {
+        break :blk AnimatedRenderObject.BoneInfo{
             .bone_offset = bone_index_info.start_idx,
             .bone_count = bone_index_info.end_idx - bone_index_info.start_idx,
         };
@@ -820,24 +844,26 @@ pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
             for (mesh_set.primitives_slice()) |prim_index| {
                 const mesh_prim = &model.meshes[prim_index];
 
-                var material = eng.Model.MaterialTemplate {};
+                var material = eng.Model.MaterialTemplate{};
                 if (mesh_prim.material_template) |m_idx| {
                     material = model.materials[m_idx];
                 }
 
-                const indices_info = blk: { if (mesh_prim.has_indices()) {
-                    break :blk RenderObject.IndexInfo {
-                        .buffer_info = .{ 
-                            .buffer = model.indices_buffer,
-                            .offset = @intCast(mesh_prim.indices_offset),
-                        },
-                        .index_count = mesh_prim.index_count,
-                    };
-                } else {
-                    break :blk null;
-                } };
+                const indices_info = blk: {
+                    if (mesh_prim.has_indices()) {
+                        break :blk RenderObject.IndexInfo{
+                            .buffer_info = .{
+                                .buffer = model.indices_buffer,
+                                .offset = @intCast(mesh_prim.indices_offset),
+                            },
+                            .index_count = mesh_prim.index_count,
+                        };
+                    } else {
+                        break :blk null;
+                    }
+                };
 
-                var render_object = RenderObject {
+                var render_object = RenderObject{
                     .entity_id = ro.entity_id,
                     .transform = node_model_matrix,
                     .vertex_buffers = undefined,
@@ -846,7 +872,10 @@ pub fn push_model(self: *Self, ro: ModelRenderObject) !void {
                     .index_buffer = indices_info,
                     .material = material,
                 };
-                render_object.vertex_buffers[0] = .{ .buffer = model.vertices_buffer, .offset = mesh_prim.vertices_offset, };
+                render_object.vertex_buffers[0] = .{
+                    .buffer = model.vertices_buffer,
+                    .offset = mesh_prim.vertices_offset,
+                };
                 render_object.vertex_buffers_count = 1;
 
                 if (bone_info) |bi| {
@@ -880,7 +909,7 @@ pub fn update_camera_data_buffer(self: *Self, camera: *const eng.Camera) void {
         std.log.warn("Unable to get camera data buffer: {}", .{err});
         return;
     };
-    const mapped_buffer = buffer.map(.{ .write = .EveryFrame, }) catch unreachable;
+    const mapped_buffer = buffer.map(.{ .write = .EveryFrame }) catch unreachable;
     defer mapped_buffer.unmap();
 
     mapped_buffer.data(CameraStruct).* = .{
@@ -896,8 +925,8 @@ fn append_new_instance_buffer(
 ) !void {
     const buffer = try gfx.Buffer.init(
         @sizeOf(InstanceStruct) * Self.MAX_OBJECTS_PER_INSTANCE_BUFFER,
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer buffer.deinit();
 
@@ -908,16 +937,16 @@ fn append_new_instance_buffer(
 
     try (descriptor_set.get() catch unreachable).update(.{
         .writes = &.{
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .UniformBuffer = .{
                     .buffer = buffer,
                 } },
             },
-            },
-        });
+        },
+    });
 
-    const buffer_data = BufferData {
+    const buffer_data = BufferData{
         .buffer = buffer,
         .descriptor_set = descriptor_set,
     };
@@ -930,8 +959,8 @@ fn append_new_lights_buffer(
 ) !void {
     const buffer = try gfx.Buffer.init(
         @sizeOf(LightsStruct) * Self.MAX_OBJECTS_PER_LIGHTS_BUFFER,
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer buffer.deinit();
 
@@ -942,16 +971,16 @@ fn append_new_lights_buffer(
 
     try (descriptor_set.get() catch unreachable).update(.{
         .writes = &.{
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .UniformBuffer = .{
                     .buffer = buffer,
                 } },
             },
-            },
-        });
+        },
+    });
 
-    const buffer_data = BufferData {
+    const buffer_data = BufferData{
         .buffer = buffer,
         .descriptor_set = descriptor_set,
     };
@@ -964,8 +993,8 @@ fn append_new_bones_buffer(
 ) !void {
     const buffer = try gfx.Buffer.init(
         @sizeOf(zm.Mat) * Self.MAX_BONES_PER_BUFFER,
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer buffer.deinit();
 
@@ -976,16 +1005,16 @@ fn append_new_bones_buffer(
 
     try (descriptor_set.get() catch unreachable).update(.{
         .writes = &.{
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .UniformBuffer = .{
                     .buffer = buffer,
                 } },
             },
-            },
-        });
+        },
+    });
 
-    const buffer_data = BufferData {
+    const buffer_data = BufferData{
         .buffer = buffer,
         .descriptor_set = descriptor_set,
     };
@@ -1005,10 +1034,10 @@ pub fn render_cmd(
 
     if (self.shader_watcher.was_modified_since_last_check()) blk: {
         std.log.info("Recreating graphics pipelines for standard renderer", .{});
-        
+
         const new_graphics_pipelines = create_graphics_pipelines(.{
             .render_pass = self.render_pass,
-            
+
             .camera_data_descriptor_layout = self.camera_data_layout,
             .instance_data_layout = self.instance_data_layout,
             .lights_data_layout = self.lights_data_layout,
@@ -1031,33 +1060,36 @@ pub fn render_cmd(
     defer cmd.cmd_end_render_pass();
 
     cmd.cmd_set_viewports(.{
-        .viewports = &.{ .full_screen_viewport(), },
+        .viewports = &.{.full_screen_viewport()},
     });
     cmd.cmd_set_scissors(.{
-        .scissors = &.{ .full_screen_pixels(), },
+        .scissors = &.{.full_screen_pixels()},
     });
 
     cmd.cmd_bind_graphics_pipeline(self.graphics_pipelines.static.solid);
 
     self.update_camera_data_buffer(data.camera);
-    cmd.cmd_bind_descriptor_sets(.{
-        .first_binding = 0,
-        .descriptor_sets = &.{
-            self.camera_data_buffer.descriptor_set,
-        }
-    });
+    cmd.cmd_bind_descriptor_sets(.{ .first_binding = 0, .descriptor_sets = &.{
+        self.camera_data_buffer.descriptor_set,
+    } });
 
     var current_instance_buffer_index: isize = -1;
     var mapped_instance_data: gfx.Buffer.MappedBuffer = undefined;
-    defer if (current_instance_buffer_index >= 0) { mapped_instance_data.unmap(); };
+    defer if (current_instance_buffer_index >= 0) {
+        mapped_instance_data.unmap();
+    };
 
     var current_lights_buffer_index: isize = -1;
     var mapped_lights_data: gfx.Buffer.MappedBuffer = undefined;
-    defer if (current_lights_buffer_index >= 0) { mapped_lights_data.unmap(); };
+    defer if (current_lights_buffer_index >= 0) {
+        mapped_lights_data.unmap();
+    };
 
     var current_bones_buffer_index: isize = -1;
     var mapped_bones_data: gfx.Buffer.MappedBuffer = undefined;
-    defer if (current_bones_buffer_index >= 0) { mapped_bones_data.unmap(); };
+    defer if (current_bones_buffer_index >= 0) {
+        mapped_bones_data.unmap();
+    };
 
     var idx: usize = 0;
 
@@ -1073,13 +1105,11 @@ pub fn render_cmd(
                 mapped_instance_data.unmap();
             }
             const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
-            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 1,
-                .descriptor_sets = &.{
-                    self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
-                },
+                .descriptor_sets = &.{self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set},
             });
         }
 
@@ -1094,19 +1124,17 @@ pub fn render_cmd(
                 mapped_lights_data.unmap();
             }
             const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
-            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 2,
-                .descriptor_sets = &.{
-                    self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
-                },
+                .descriptor_sets = &.{self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set},
             });
         }
 
         // Set instance data
         const entity_id = if (ro.entity_id) |e| e else 0;
-        mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct {
+        mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct{
             .model_matrix = ro.transform,
             .inverse_model_matrix = zm.inverse(ro.transform),
             .entity_id = entity_id,
@@ -1143,36 +1171,32 @@ pub fn render_cmd(
             if (texture_data_set.* == null) {
                 const textures_data_pool = self.textures_data_descriptor_pool.get() catch unreachable;
 
-                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout, });
+                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout });
             }
 
             const set = texture_data_set.*.?.get() catch unreachable;
 
             try set.update(.{
                 .writes = &.{
-                    gfx.DescriptorSetUpdateWriteInfo {
+                    gfx.DescriptorSetUpdateWriteInfo{
                         .binding = 0,
-                        .data = .{ .ImageView = diffuse_map.map, },
+                        .data = .{ .ImageView = diffuse_map.map },
                     },
-                    gfx.DescriptorSetUpdateWriteInfo {
+                    gfx.DescriptorSetUpdateWriteInfo{
                         .binding = 1,
-                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler, },
+                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler },
                     },
                 },
             });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 3,
-                .descriptor_sets = &.{
-                    texture_data_set.*.?
-                }
+                .descriptor_sets = &.{texture_data_set.*.?},
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 3,
-                .descriptor_sets = &.{
-                    self.default_textures_set
-                }
+                .descriptor_sets = &.{self.default_textures_set},
             });
         }
 
@@ -1181,7 +1205,7 @@ pub fn render_cmd(
             .buffers = ro.vertex_buffers_slice(),
         });
 
-        const push_constants = PushConstants {
+        const push_constants = PushConstants{
             .instance_index = @intCast(idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER),
             .lights_index = 0,
             .bone_start_index = 0,
@@ -1190,7 +1214,7 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .shader_stages = .{ .Vertex = true, .Pixel = true },
         });
 
         if (ro.index_buffer) |ib| {
@@ -1222,9 +1246,9 @@ pub fn render_cmd(
         .first_binding = 0,
         .descriptor_sets = &.{
             self.camera_data_buffer.descriptor_set,
-        }
+        },
     });
-    
+
     var start_bone_idx: isize = -Self.MAX_BONES_PER_BUFFER;
 
     for (self.skeletal_render_objects.items) |sro| {
@@ -1241,19 +1265,17 @@ pub fn render_cmd(
                 mapped_instance_data.unmap();
             }
             const new_instance_buffer = self.instance_buffers.items[@intCast(current_instance_buffer_index)].buffer.get() catch unreachable;
-            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame, });
+            mapped_instance_data = try new_instance_buffer.map(.{ .write = .EveryFrame });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 1,
-                .descriptor_sets = &.{
-                    self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set
-                },
+                .descriptor_sets = &.{self.instance_buffers.items[@intCast(current_instance_buffer_index)].descriptor_set},
             });
         }
 
         // Set instance data
         const entity_id = if (ro.entity_id) |e| e else 0;
-        mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct {
+        mapped_instance_data.data_array(InstanceStruct, Self.MAX_OBJECTS_PER_INSTANCE_BUFFER)[idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER] = InstanceStruct{
             .model_matrix = ro.transform,
             .inverse_model_matrix = zm.inverse(ro.transform),
             .entity_id = entity_id,
@@ -1274,13 +1296,11 @@ pub fn render_cmd(
                 mapped_lights_data.unmap();
             }
             const new_lights_buffer = self.lights_buffers.items[@intCast(current_lights_buffer_index)].buffer.get() catch unreachable;
-            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame, });
+            mapped_lights_data = try new_lights_buffer.map(.{ .write = .EveryFrame });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 2,
-                .descriptor_sets = &.{
-                    self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set
-                },
+                .descriptor_sets = &.{self.lights_buffers.items[@intCast(current_lights_buffer_index)].descriptor_set},
             });
         }
 
@@ -1311,39 +1331,35 @@ pub fn render_cmd(
             if (texture_data_set.* == null) {
                 const textures_data_pool = self.textures_data_descriptor_pool.get() catch unreachable;
 
-                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout, });
+                texture_data_set.* = try textures_data_pool.allocate_set(.{ .layout = self.textures_data_layout });
             }
 
             const set = texture_data_set.*.?.get() catch unreachable;
 
             try set.update(.{
                 .writes = &.{
-                    gfx.DescriptorSetUpdateWriteInfo {
+                    gfx.DescriptorSetUpdateWriteInfo{
                         .binding = 0,
-                        .data = .{ .ImageView = diffuse_map.map, },
+                        .data = .{ .ImageView = diffuse_map.map },
                     },
-                    gfx.DescriptorSetUpdateWriteInfo {
+                    gfx.DescriptorSetUpdateWriteInfo{
                         .binding = 1,
-                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler, },
+                        .data = .{ .Sampler = diffuse_map.sampler orelse gfx.GfxState.get().default.sampler },
                     },
                 },
             });
 
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 3,
-                .descriptor_sets = &.{
-                    texture_data_set.*.?
-                }
+                .descriptor_sets = &.{texture_data_set.*.?},
             });
         } else {
             cmd.cmd_bind_descriptor_sets(.{
                 .first_binding = 3,
-                .descriptor_sets = &.{
-                    self.default_textures_set
-                }
+                .descriptor_sets = &.{self.default_textures_set},
             });
         }
-        
+
         // bones
         // if bones are not within the uploaded bone set, then move the window
         if ((@as(isize, @intCast(sro.bone_info.bone_offset + sro.bone_info.bone_count)) - start_bone_idx) > Self.MAX_BONES_PER_BUFFER) {
@@ -1357,12 +1373,12 @@ pub fn render_cmd(
                 mapped_bones_data.unmap();
             }
             const new_bones_buffer = self.bone_buffers.items[@intCast(current_bones_buffer_index)].buffer.get() catch unreachable;
-            mapped_bones_data = try new_bones_buffer.map(.{ .write = .EveryFrame, });
+            mapped_bones_data = try new_bones_buffer.map(.{ .write = .EveryFrame });
 
             const copy_amount: usize = @min(self.render_bones.items.len - sro.bone_info.bone_offset, Self.MAX_BONES_PER_BUFFER);
             @memcpy(
-                mapped_bones_data.data_array(zm.Mat, Self.MAX_BONES_PER_BUFFER)[0..copy_amount], 
-                self.render_bones.items[sro.bone_info.bone_offset..(sro.bone_info.bone_offset + copy_amount)]
+                mapped_bones_data.data_array(zm.Mat, Self.MAX_BONES_PER_BUFFER)[0..copy_amount],
+                self.render_bones.items[sro.bone_info.bone_offset..(sro.bone_info.bone_offset + copy_amount)],
             );
 
             start_bone_idx = @intCast(sro.bone_info.bone_offset);
@@ -1371,7 +1387,7 @@ pub fn render_cmd(
                 .first_binding = 4,
                 .descriptor_sets = &.{
                     self.bone_buffers.items[@intCast(current_bones_buffer_index)].descriptor_set,
-                }
+                },
             });
         }
 
@@ -1380,7 +1396,7 @@ pub fn render_cmd(
             .buffers = ro.vertex_buffers_slice(),
         });
 
-        const push_constants = PushConstants {
+        const push_constants = PushConstants{
             .instance_index = @intCast(idx % Self.MAX_OBJECTS_PER_INSTANCE_BUFFER),
             .lights_index = 0,
             .bone_start_index = @intCast(sro.bone_info.bone_offset - @as(usize, @intCast(start_bone_idx))),
@@ -1389,7 +1405,7 @@ pub fn render_cmd(
         cmd.cmd_push_constants(.{
             .offset = 0,
             .data = std.mem.asBytes(&push_constants),
-            .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            .shader_stages = .{ .Vertex = true, .Pixel = true },
         });
 
         if (ro.index_buffer) |ib| {
@@ -1416,11 +1432,19 @@ pub fn render_cmd(
 }
 
 fn lights_sort_func(pos: zm.F32x4, a: Light, b: Light) bool {
-    if (a.light_type == .None) { return false; }
-    if (b.light_type == .None) { return true; }
-    if (a.light_type == .Sun) { return true; }
-    if (b.light_type == .Sun) { return false; }
-    
+    if (a.light_type == .None) {
+        return false;
+    }
+    if (b.light_type == .None) {
+        return true;
+    }
+    if (a.light_type == .Sun) {
+        return true;
+    }
+    if (b.light_type == .Sun) {
+        return false;
+    }
+
     const a_dist = zm.length3(a.position - pos)[0] - a.intensity;
     const b_dist = zm.length3(b.position - pos)[0] - b.intensity;
     return a_dist < b_dist;
@@ -1436,7 +1460,7 @@ fn update_lights_buffer(self: *Self, transform: *const zm.Mat) void {
     self.sort_lights(entity_position);
 
     { // Update lights buffer
-        const mapped_buffer = self.lights_buffer.map(.{ .write = true, }) catch unreachable;
+        const mapped_buffer = self.lights_buffer.map(.{ .write = true }) catch unreachable;
         defer mapped_buffer.unmap();
 
         var i: usize = 0;

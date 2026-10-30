@@ -21,14 +21,14 @@ const CLIPMAP_QUAD_COUNT = 127;
 
 const PushConstantData = extern struct {
     view_projection_matrix: zm.Mat,
-    camera_pos: zm.F32x4, 
+    camera_pos: zm.F32x4,
 
-    origin: [3]f32,           // origin of the heightmap mesh
+    origin: [3]f32, // origin of the heightmap mesh
 
-    terrain_grid_length: f32,   // vertices along each edge of grid square
+    terrain_grid_length: f32, // vertices along each edge of grid square
 
-    terrain_length_scale: f32,  // length of the heightmap in meters * length scale of the heightmap
-    terrain_height_scale: f32,  // difference between minimum and maximum height of the heightmap * height scale of the heightmap
+    terrain_length_scale: f32, // length of the heightmap in meters * length scale of the heightmap
+    terrain_height_scale: f32, // difference between minimum and maximum height of the heightmap * height scale of the heightmap
 
     clipmap_data: ClipmapMesh.ClipmapPushConstant,
 };
@@ -102,18 +102,18 @@ pub fn init() !Self {
 
     const images_descriptor_layout = try gf.DescriptorLayout.init(.{
         .bindings = &.{
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .binding = 2,
                 .binding_type = .Sampler,
             },
@@ -123,7 +123,9 @@ pub fn init() !Self {
 
     const images_descriptor_pool = try gf.DescriptorPool.init(.{
         .max_sets = 128,
-        .strategy = .{ .Layout = images_descriptor_layout, },
+        .strategy = .{
+            .Layout = images_descriptor_layout,
+        },
     });
     errdefer images_descriptor_pool.deinit();
 
@@ -132,25 +134,25 @@ pub fn init() !Self {
 
     const lights_buffer = try gf.Buffer.init(
         @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer lights_buffer.deinit();
 
     const lights_descriptor_layout = try gf.DescriptorLayout.init(.{
         .bindings = &.{
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 0,
                 .binding_type = .UniformBuffer,
-            }
+            },
         },
     });
     errdefer lights_descriptor_layout.deinit();
 
     const lights_descriptor_pool = try gf.DescriptorPool.init(.{
         .max_sets = 1,
-        .strategy = .{ .Layout = lights_descriptor_layout, },
+        .strategy = .{ .Layout = lights_descriptor_layout },
     });
     errdefer lights_descriptor_pool.deinit();
 
@@ -161,7 +163,7 @@ pub fn init() !Self {
 
     try (try lights_descritptor_set.get()).update(.{
         .writes = &.{
-            gf.DescriptorSetUpdateWriteInfo {
+            gf.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .UniformBuffer = .{
                     .buffer = lights_buffer,
@@ -170,48 +172,48 @@ pub fn init() !Self {
         },
     });
 
-    const attachments = &[_]gf.AttachmentInfo {
-        gf.AttachmentInfo {
+    const attachments = &[_]gf.AttachmentInfo{
+        gf.AttachmentInfo{
             .name = "colour",
             .format = gf.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
         },
-        gf.AttachmentInfo {
+        gf.AttachmentInfo{
             .name = "depth",
             .format = gf.GfxState.depth_format,
             .initial_layout = .DepthStencilAttachmentOptimal,
             .final_layout = .DepthStencilAttachmentOptimal,
             .blend_type = .None,
         },
-        gf.AttachmentInfo {
+        gf.AttachmentInfo{
             .name = "selection",
             .format = st.SelectionTextures([2]f32).TextureFormat,
             .initial_layout = .Undefined,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .None,
             .load_op = .Clear,
-            .clear_value = gf.ClearValue { .f32x4 = zm.f32x4s(-1.0) },
+            .clear_value = gf.ClearValue{ .f32x4 = zm.f32x4s(-1.0) },
         },
     };
 
     const render_pass = try gf.RenderPass.init(.{
         .attachments = attachments,
         .subpasses = &.{
-            gf.SubpassInfo {
+            gf.SubpassInfo{
                 .attachments = &.{ "colour", "selection" },
                 .depth_attachment = "depth",
             },
         },
         .dependencies = &.{
-            gf.SubpassDependencyInfo {
+            gf.SubpassDependencyInfo{
                 .src_subpass = null,
                 .dst_subpass = 0,
                 .src_access_mask = .{},
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
-                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
+                .dst_stage_mask = .{ .color_attachment_output = true },
             },
         },
     });
@@ -222,7 +224,7 @@ pub fn init() !Self {
         .attachments = &.{
             .SwapchainHDR,
             .SwapchainDepth,
-            .{ .View = selection_textures.view, },
+            .{ .View = selection_textures.view },
         },
     });
     errdefer framebuffer.deinit();
@@ -243,7 +245,7 @@ pub fn init() !Self {
     var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
     errdefer shader_file_watcher.deinit();
 
-    var self = Self {
+    var self = Self{
         .clipmap_mesh = clipmap_mesh,
 
         .selection_textures = selection_textures,
@@ -290,8 +292,8 @@ fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
             "ps_main",
         },
         .preprocessor_macros = &.{
-            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{ CLIPMAP_QUAD_COUNT }) },
-        }
+            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{CLIPMAP_QUAD_COUNT}) },
+        },
     });
     defer alloc.free(shader_spirv);
 
@@ -300,10 +302,10 @@ fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
 
     const vertex_input = try gf.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+            .{ .binding = 0, .stride = 12, .input_rate = .Vertex },
         },
         .attributes = &.{
-            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0, .format = .F32x3 },
         },
     });
     defer vertex_input.deinit();
@@ -320,10 +322,10 @@ fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
             .module = &shader_module,
             .entry_point = "ps_main",
         },
-        .depth_test = .{ .write = true, },
+        .depth_test = .{ .write = true },
         .push_constants = &.{
-            gf.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gf.PushConstantLayoutInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .offset = 0,
                 .size = @sizeOf(PushConstantData),
             },
@@ -343,10 +345,10 @@ fn create_pipeline(self: *Self) !gf.GraphicsPipeline.Ref {
 
 /// Render the terrain using the camera buffer
 pub fn render(
-    self: *Self, 
+    self: *Self,
     cmd: *gf.CommandBuffer,
     camera: *const Camera,
-    terrain: *const Terrain, 
+    terrain: *const Terrain,
     transform: Transform,
     standard_renderer: *StandardRenderer,
 ) void {
@@ -376,8 +378,8 @@ pub fn render(
 
     cmd.cmd_bind_graphics_pipeline(self.pipeline);
 
-    cmd.cmd_set_viewports(.{ .viewports = &.{ .full_screen_viewport() } });
-    cmd.cmd_set_scissors(.{ .scissors = &.{ .full_screen_pixels() } });
+    cmd.cmd_set_viewports(.{ .viewports = &.{.full_screen_viewport()} });
+    cmd.cmd_set_scissors(.{ .scissors = &.{.full_screen_pixels()} });
 
     // Create new descriptor set if necessary
     if (self.images_descriptor_sets.items.len <= self.current_terrain_index) {
@@ -385,11 +387,11 @@ pub fn render(
             std.log.warn("Unable to get terrain system images descriptor pool: {}", .{err});
             return;
         };
-        const new_set = pool.allocate_set(.{ .layout = self.images_descriptor_layout, }) catch |err| {
+        const new_set = pool.allocate_set(.{ .layout = self.images_descriptor_layout }) catch |err| {
             std.log.warn("Unable to create new terrain system images descriptor set: {}", .{err});
             return;
         };
-        self.images_descriptor_sets.append(eng.get().general_allocator, .{ .set = new_set, }) catch |err| {
+        self.images_descriptor_sets.append(eng.get().general_allocator, .{ .set = new_set }) catch |err| {
             std.log.warn("Unable to append new terrain system images descriptor set to list: {}", .{err});
             new_set.deinit();
             return;
@@ -406,42 +408,31 @@ pub fn render(
 
         images_set.update(.{
             .writes = &.{
-                gf.DescriptorSetUpdateWriteInfo {
-                    .binding = 0,
-                    .data = .{ .ImageView = terrain.heightmap_texture_view, },
-                },
-                gf.DescriptorSetUpdateWriteInfo {
-                    .binding = 1,
-                    .data = .{ .ImageView = terrain.albedo_texture_view, },
-                },
-                gf.DescriptorSetUpdateWriteInfo {
-                    .binding = 2,
-                    .data = .{ .Sampler = self.sampler, },
-                },
+                gf.DescriptorSetUpdateWriteInfo{ .binding = 0, .data = .{ .ImageView = terrain.heightmap_texture_view } },
+                gf.DescriptorSetUpdateWriteInfo{ .binding = 1, .data = .{ .ImageView = terrain.albedo_texture_view } },
+                gf.DescriptorSetUpdateWriteInfo{ .binding = 2, .data = .{ .Sampler = self.sampler } },
             },
         }) catch |err| {
-            std.log.warn("Unable to update terrain system image set {}: {}", .{self.current_terrain_index, err});
+            std.log.warn("Unable to update terrain system image set {}: {}", .{ self.current_terrain_index, err });
         };
 
         self.images_descriptor_sets.items[self.current_terrain_index].image_view = terrain.heightmap_texture_view;
-        std.log.info("Updated terrain texture",.{});
+        std.log.info("Updated terrain texture", .{});
     }
 
     blk: {
         const lights_buffer = self.lights_buffer.get() catch break :blk;
-        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk;
+        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame }) catch break :blk;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(StandardRenderer.LightsStruct, 16 * 16);
-        standard_renderer.sort_lights(
-            camera.transform.position
-        );
+        standard_renderer.sort_lights(camera.transform.position);
         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
         @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
         // for (0..16) |i| {
         //     for (0..16) |j| {
         //         standard_renderer.sort_lights(
-        //             transform.position + (grid_origin_at_camera_pos + 
+        //             transform.position + (grid_origin_at_camera_pos +
         //             zm.f32x4(@as(f32, @floatFromInt(i)) - 8.0, 0.0, @as(f32, @floatFromInt(j)) - 8.0, 0.0)) * zm.f32x4s(grid_size)
         //         );
         //         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
@@ -457,10 +448,10 @@ pub fn render(
         },
     });
 
-    var push_constant_data = PushConstantData {
+    var push_constant_data = PushConstantData{
         .view_projection_matrix = zm.mul(
             camera.transform.generate_view_matrix(),
-            camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect())
+            camera.generate_perspective_matrix(gf.GfxState.get().swapchain_aspect()),
         ),
         .camera_pos = camera.transform.position,
 
@@ -469,13 +460,13 @@ pub fn render(
         .terrain_length_scale = terrain.map_length_m * terrain.map_length_scale,
         .terrain_height_scale = (terrain.map_maximum_height - terrain.map_minimum_height) * terrain.map_height_scale,
 
-        .terrain_grid_length = 2048,// @as(f32, @floatFromInt(HeightFieldModelSize)),
+        .terrain_grid_length = 2048, // @as(f32, @floatFromInt(HeightFieldModelSize)),
 
         .clipmap_data = undefined,
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{ .Vertex = true, .Pixel = true },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
@@ -483,8 +474,8 @@ pub fn render(
     self.clipmap_mesh.render_clipmap_geometry(
         cmd,
         6,
-        .{ .Vertex = true, .Pixel = true, },
+        .{ .Vertex = true, .Pixel = true },
         @offsetOf(PushConstantData, "clipmap_data"),
-        push_constant_data.camera_pos
+        push_constant_data.camera_pos,
     );
 }

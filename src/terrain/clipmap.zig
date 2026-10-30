@@ -6,13 +6,13 @@ const zm = eng.zmath;
 const Self = @This();
 
 const GeometryTranslationRotation = extern struct {
-    translation: [2]f32 = .{0.0, 0.0},
+    translation: [2]f32 = .{ 0.0, 0.0 },
     rotations_90: u8 = 0,
 };
 
 pub const ClipmapPushConstant = extern struct {
     translation: [2]f32,
-    data: packed struct (u32) {
+    data: packed struct(u32) {
         rotations_90: u8,
         level: u8,
         _pad: u16 = 0,
@@ -103,21 +103,21 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         }
     }
 
-    for (0..(m-1)) |i| {
-        for (0..(m-1)) |j| {
+    for (0..(m - 1)) |i| {
+        for (0..(m - 1)) |j| {
             for (0..6) |vti| {
-                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_a[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast((i * m) + j);
                 try indices_list.append(alloc, base_index + (quad_verts[0] * m) + quad_verts[1]);
             }
         }
     }
-    
+
     const mxm_indices_base = 0;
-    const mxm_indices_count = (m-1) * (m-1) * 6;
+    const mxm_indices_count = (m - 1) * (m - 1) * 6;
 
     const fix_up_indices_base = 0;
-    const fix_up_indices_count = (m-1) * fix_up_edge_length * 6;
+    const fix_up_indices_count = (m - 1) * fix_up_edge_length * 6;
 
     const fix_up_r_indices_base: u32 = @intCast(indices_list.items.len);
 
@@ -128,17 +128,17 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         }
     }
 
-    for (0..(m-1)) |i| {
-        for (0..(m-1)) |j| {
+    for (0..(m - 1)) |i| {
+        for (0..(m - 1)) |j| {
             for (0..6) |vti| {
-                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_b[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast((i * m) + j);
                 try indices_list.append(alloc, base_index + (quad_verts[0] * m) + quad_verts[1]);
             }
         }
     }
 
-    const fix_up_r_indices_count = (m-1) * fix_up_edge_length * 6;
+    const fix_up_r_indices_count = (m - 1) * fix_up_edge_length * 6;
 
     // interior trim
     const interior_trim_indices_base, const interior_trim_indices_count = blk: {
@@ -149,26 +149,26 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
 
-        for (0..(((m-1) * 2) + fix_up_edge_length + 1)) |i| {
+        for (0..(((m - 1) * 2) + fix_up_edge_length + 1)) |i| {
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
             for (0..6) |vti| {
-                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_a[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
                 try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
             }
         }
-        
+
         // interior trim (right)
         interior_trim_base_vertex = vertices_list.items.len;
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
-        
-        for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
+
+        for (0..(((m - 1) * 2) + fix_up_edge_length)) |i| {
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i + 2), 0.0)));
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i + 2), 0.0)));
             for (0..6) |vti| {
-                const quad_verts = quad_verts_a[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_a[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
                 try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
             }
@@ -188,26 +188,26 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 0.0, 0.0)));
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
 
-        for (0..(((m-1) * 2) + fix_up_edge_length + 1)) |i| {
+        for (0..(((m - 1) * 2) + fix_up_edge_length + 1)) |i| {
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 0.0, 0.0)));
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(@floatFromInt(i), 0.0, 1.0, 0.0)));
             for (0..6) |vti| {
-                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_b[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
                 try indices_list.append(alloc, base_index + quad_verts[1] + (2 * quad_verts[0]));
             }
         }
-        
+
         // interior trim (right)
         interior_trim_base_vertex = vertices_list.items.len;
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, 1.0, 0.0)));
         try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, 1.0, 0.0)));
-        
-        for (0..(((m-1) * 2) + fix_up_edge_length)) |i| {
+
+        for (0..(((m - 1) * 2) + fix_up_edge_length)) |i| {
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(0.0, 0.0, @floatFromInt(i + 2), 0.0)));
             try vertices_list.append(alloc, zm.vecToArr3(zm.f32x4(1.0, 0.0, @floatFromInt(i + 2), 0.0)));
             for (0..6) |vti| {
-                const quad_verts = quad_verts_b[vti];// (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
+                const quad_verts = quad_verts_b[vti]; // (if (((i % 2) == 0) != ((j % 2) == 0)) quad_verts_a else quad_verts_b)[vti];
                 const base_index: u32 = @intCast(interior_trim_base_vertex + (2 * i));
                 try indices_list.append(alloc, base_index + quad_verts[0] + (2 * quad_verts[1]));
             }
@@ -291,71 +291,71 @@ pub fn init(alloc: std.mem.Allocator, side_length: u32) !Self {
     var mxm_quad_model_matrices_list = std.ArrayList(GeometryTranslationRotation).initBuffer(mxm_quad_model_matrices);
 
     // 1, 2, 3, 4
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{-side_length_quads_f32 / 2.0, -side_length_quads_f32 / 2.0}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(-side_length_quads_f32 / 2.0) + m_f32_m1, -side_length_quads_f32 / 2.0}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - m_f32_m1, -side_length_quads_f32 / 2.0}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), -side_length_quads_f32 / 2.0}});
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ -side_length_quads_f32 / 2.0, -side_length_quads_f32 / 2.0 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (-side_length_quads_f32 / 2.0) + m_f32_m1, -side_length_quads_f32 / 2.0 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - m_f32_m1, -side_length_quads_f32 / 2.0 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), -side_length_quads_f32 / 2.0 } });
 
     // 5, 6
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{-side_length_quads_f32 / 2.0, (-side_length_quads_f32 / 2.0) + m_f32_m1}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - m_f32_m1, (-side_length_quads_f32 / 2.0) + m_f32_m1}});
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ -side_length_quads_f32 / 2.0, (-side_length_quads_f32 / 2.0) + m_f32_m1 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - m_f32_m1, (-side_length_quads_f32 / 2.0) + m_f32_m1 } });
 
     // 7, 8
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{-side_length_quads_f32 / 2.0, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0)}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - m_f32_m1, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0)}});
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ -side_length_quads_f32 / 2.0, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0) } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - m_f32_m1, (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0) } });
 
     // 9, 10, 11, 12
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{-side_length_quads_f32 / 2.0, (side_length_quads_f32 / 2.0) - m_f32_m1}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(-side_length_quads_f32 / 2.0) + m_f32_m1, (side_length_quads_f32 / 2.0) - m_f32_m1}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - m_f32_m1, (side_length_quads_f32 / 2.0) - m_f32_m1}});
-    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{(side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), (side_length_quads_f32 / 2.0) - m_f32_m1}});
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ -side_length_quads_f32 / 2.0, (side_length_quads_f32 / 2.0) - m_f32_m1 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (-side_length_quads_f32 / 2.0) + m_f32_m1, (side_length_quads_f32 / 2.0) - m_f32_m1 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - m_f32_m1, (side_length_quads_f32 / 2.0) - m_f32_m1 } });
+    try mxm_quad_model_matrices_list.appendBounded(.{ .translation = .{ (side_length_quads_f32 / 2.0) - (m_f32_m1 * 2.0), (side_length_quads_f32 / 2.0) - m_f32_m1 } });
 
     // fixup locations
     const fixup_model_matrices = try alloc.alloc(GeometryTranslationRotation, 4);
     errdefer alloc.free(fixup_model_matrices);
     var fixup_model_matrices_list = std.ArrayList(GeometryTranslationRotation).initBuffer(fixup_model_matrices);
 
-    const fixup_translation = [2]f32 {-1.0, -side_length_quads_f32 / 2.0};
+    const fixup_translation = [2]f32{ -1.0, -side_length_quads_f32 / 2.0 };
 
     // first two are normal, last two are reversed
-    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 0, });
-    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 2, });
-    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 1, });
-    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 3, });
+    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 0 });
+    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 2 });
+    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 1 });
+    try fixup_model_matrices_list.appendBounded(.{ .translation = fixup_translation, .rotations_90 = 3 });
 
     // middle locations
     const middle_model_matrices = try alloc.alloc(GeometryTranslationRotation, 4);
     errdefer alloc.free(middle_model_matrices);
     var middle_model_matrices_list = std.ArrayList(GeometryTranslationRotation).initBuffer(middle_model_matrices);
 
-    try middle_model_matrices_list.appendBounded(.{ .translation = .{ -m_f32_m1, -m_f32_m1} });
-    try middle_model_matrices_list.appendBounded(.{ .translation = .{ 0.0, -m_f32_m1} });
-    try middle_model_matrices_list.appendBounded(.{ .translation = .{ -m_f32_m1, 0.0} });
-    try middle_model_matrices_list.appendBounded(.{ .translation = .{ 0.0, 0.0} });
+    try middle_model_matrices_list.appendBounded(.{ .translation = .{ -m_f32_m1, -m_f32_m1 } });
+    try middle_model_matrices_list.appendBounded(.{ .translation = .{ 0.0, -m_f32_m1 } });
+    try middle_model_matrices_list.appendBounded(.{ .translation = .{ -m_f32_m1, 0.0 } });
+    try middle_model_matrices_list.appendBounded(.{ .translation = .{ 0.0, 0.0 } });
 
     // trim locations
-    const trim_location_nz_nx = GeometryTranslationRotation { .translation = .{-@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m))}, .rotations_90 = 0, };
-    const trim_location_pz_nx = GeometryTranslationRotation { .translation = .{-@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m))}, .rotations_90 = 1, };
-    const trim_location_pz_px = GeometryTranslationRotation { .translation = .{-@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m))}, .rotations_90 = 2, };
-    const trim_location_nz_px = GeometryTranslationRotation { .translation = .{-@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m))}, .rotations_90 = 3, };
+    const trim_location_nz_nx = GeometryTranslationRotation{ .translation = .{ -@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m)) }, .rotations_90 = 0 };
+    const trim_location_pz_nx = GeometryTranslationRotation{ .translation = .{ -@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m)) }, .rotations_90 = 1 };
+    const trim_location_pz_px = GeometryTranslationRotation{ .translation = .{ -@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m)) }, .rotations_90 = 2 };
+    const trim_location_nz_px = GeometryTranslationRotation{ .translation = .{ -@as(f32, @floatFromInt(m)), -@as(f32, @floatFromInt(m)) }, .rotations_90 = 3 };
 
     const vertices_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(vertices_list.items),
-        .{ .VertexBuffer = true, },
-        .{}
+        .{ .VertexBuffer = true },
+        .{},
     );
     errdefer vertices_buffer.deinit();
 
     const indices_buffer = try gf.Buffer.init_with_data(
         std.mem.sliceAsBytes(indices_list.items),
-        .{ .IndexBuffer = true, },
-        .{}
+        .{ .IndexBuffer = true },
+        .{},
     );
     errdefer indices_buffer.deinit();
 
-    return Self {
+    return Self{
         .alloc = alloc,
-        
+
         .vertices_buffer = vertices_buffer,
         .indices_buffer = indices_buffer,
 
@@ -402,7 +402,7 @@ pub fn render_clipmap_geometry(
 ) void {
     cmd.cmd_bind_vertex_buffers(.{
         .buffers = &.{
-            .{ .buffer = self.vertices_buffer, },
+            .{ .buffer = self.vertices_buffer },
         },
     });
     cmd.cmd_bind_index_buffer(.{
@@ -410,8 +410,8 @@ pub fn render_clipmap_geometry(
         .index_format = .U32,
     });
 
-    var push_constant_data = ClipmapPushConstant {
-        .translation = .{0.0, 0.0},
+    var push_constant_data = ClipmapPushConstant{
+        .translation = .{ 0.0, 0.0 },
         .data = .{
             .rotations_90 = 0,
             .level = 0,
@@ -438,7 +438,7 @@ pub fn render_clipmap_geometry(
         // draw trim (pz px)
         push_constant_data.translation = self.interior_trim_locations.pz_px.translation;
         push_constant_data.data.rotations_90 = self.interior_trim_locations.pz_px.rotations_90;
-        
+
         cmd.cmd_push_constants(.{
             .shader_stages = push_constant_shader_stages,
             .offset = clipmap_push_constant_offset,
@@ -453,7 +453,7 @@ pub fn render_clipmap_geometry(
         // draw trim (nz nx) (skipping first and last quad since that is drawn in pz px)
         push_constant_data.translation = self.interior_trim_locations.nz_nx.translation;
         push_constant_data.data.rotations_90 = self.interior_trim_locations.nz_nx.rotations_90;
-        
+
         cmd.cmd_push_constants(.{
             .shader_stages = push_constant_shader_stages,
             .offset = clipmap_push_constant_offset,
@@ -521,18 +521,23 @@ pub fn render_clipmap_geometry(
         // draw inner trim
         const quant_level_scale_l0 = std.math.pow(f32, 2.0, @as(f32, @floatFromInt(level)) + 0.0);
         const quantised_camera_position_l0 = (zm.floor(camera_position / zm.f32x4s(quant_level_scale_l0)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l0);
-        
+
         const quant_level_scale_l1 = std.math.pow(f32, 2.0, @as(f32, @floatFromInt(level)) + 1.0);
         const quantised_camera_position_l1 = (zm.floor(camera_position / zm.f32x4s(quant_level_scale_l1)) + zm.f32x4s(0.5)) * zm.f32x4s(quant_level_scale_l1);
 
         const quantised_camera_larger = quantised_camera_position_l0 > quantised_camera_position_l1;
 
-        const trim_model_matrix, const trim_reversed = 
-            if (quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.interior_trim_locations.nz_nx, false }
-            else if (quantised_camera_larger[0] and !quantised_camera_larger[2]) .{ self.interior_trim_locations.nz_px, true }
-            else if (!quantised_camera_larger[0] and quantised_camera_larger[2]) .{ self.interior_trim_locations.pz_nx, true }
-            else .{ self.interior_trim_locations.pz_px, false };
-            
+        const trim_model_matrix, const trim_reversed =
+            if (quantised_camera_larger[0] and quantised_camera_larger[2]) blk: {
+                break :blk .{ self.interior_trim_locations.nz_nx, false };
+            } else if (quantised_camera_larger[0] and !quantised_camera_larger[2]) blk: {
+                break :blk .{ self.interior_trim_locations.nz_px, true };
+            } else if (!quantised_camera_larger[0] and quantised_camera_larger[2]) blk: {
+                break :blk .{ self.interior_trim_locations.pz_nx, true };
+            } else blk: {
+                break :blk .{ self.interior_trim_locations.pz_px, false };
+            };
+
         push_constant_data.translation = trim_model_matrix.translation;
         push_constant_data.data.rotations_90 = trim_model_matrix.rotations_90;
         push_constant_data.data.level = level_u8;

@@ -49,12 +49,12 @@ const RenderPushConstantData = extern struct {
 };
 
 const ShallowSpot = extern struct {
-    point_0: [2]f32 = .{0.0, 0.0},
-    point_1: [2]f32 = .{0.0, 0.0},
+    point_0: [2]f32 = .{ 0.0, 0.0 },
+    point_1: [2]f32 = .{ 0.0, 0.0 },
     inner_distance: f32 = 0.0,
     outer_distance: f32 = 0.0,
 
-    _pad: [2]f32 = .{0.0, 0.0},
+    _pad: [2]f32 = .{ 0.0, 0.0 },
 };
 
 pub const OceanSettings = struct {
@@ -211,7 +211,7 @@ pub fn deinit(self: *Self) void {
     }
     self.jacobian_descriptor_pool.deinit();
     self.jacobian_descriptor_layout.deinit();
-        
+
     self.render_descriptor_set.deinit();
     self.render_descriptor_pool.deinit();
     self.render_descriptor_layout.deinit();
@@ -234,7 +234,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     defer __tracy_zone.End();
 
     const alloc = eng.get().general_allocator;
-    
+
     var arena_alloc = std.heap.ArenaAllocator.init(eng.get().frame_allocator);
     defer arena_alloc.deinit();
 
@@ -253,10 +253,10 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
             .width = N,
             .height = N,
             .dst_layout = .ShaderReadOnlyOptimal,
-            .usage_flags = .{ .ShaderResource = true, },
+            .usage_flags = .{ .ShaderResource = true },
             .access_flags = .{},
         },
-        std.mem.sliceAsBytes(random_buffer[0..])
+        std.mem.sliceAsBytes(random_buffer[0..]),
     );
     errdefer gaussian_random_image.deinit();
 
@@ -274,16 +274,18 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
             .height = N,
             .array_length = NUM_OCEAN_SPECTRUM_LODS,
             .dst_layout = .ShaderReadOnlyOptimal,
-            .usage_flags = .{ .ShaderResource = true, .StorageResource = true, },
-            .access_flags = .{ .GpuWrite = true, },
+            .usage_flags = .{ .ShaderResource = true, .StorageResource = true },
+            .access_flags = .{ .GpuWrite = true },
         },
-        null
+        null,
     );
     errdefer h0_tilde_image.deinit();
 
     var h0_tilde_image_views = try std.ArrayList(gfx.ImageView.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
     defer h0_tilde_image_views.deinit(arena);
-    errdefer for (h0_tilde_image_views.items) |view| { view.deinit(); };
+    errdefer for (h0_tilde_image_views.items) |view| {
+        view.deinit();
+    };
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         const view = try gfx.ImageView.init(.{
@@ -302,13 +304,13 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     // h0 descritpors
     const h0_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .StorageImage,
             },
@@ -324,7 +326,9 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     var h0_tilde_image_sets = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
     defer h0_tilde_image_sets.deinit(arena);
-    errdefer for (h0_tilde_image_sets.items) |item| { item.deinit(); };
+    errdefer for (h0_tilde_image_sets.items) |item| {
+        item.deinit();
+    };
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         const h0_descriptor_set = try (try h0_descriptor_pool.get()).allocate_set(.{ .layout = h0_descriptor_layout });
@@ -332,8 +336,8 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
         try (try h0_descriptor_set.get()).update(.{
             .writes = &.{
-                .{ .binding = 0, .data = .{ .ImageView = gaussian_random_image_view }, },
-                .{ .binding = 1, .data = .{ .StorageImage = h0_tilde_image_views.items[layer] }, },
+                .{ .binding = 0, .data = .{ .ImageView = gaussian_random_image_view } },
+                .{ .binding = 1, .data = .{ .StorageImage = h0_tilde_image_views.items[layer] } },
             },
         });
 
@@ -366,12 +370,12 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
             h0_descriptor_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
+            gfx.PushConstantLayoutInfo{
                 .shader_stages = .{ .Compute = true },
                 .offset = 0,
                 .size = @sizeOf(H0PushConstantData),
-            }
-        }
+            },
+        },
     });
     errdefer h0_pipeline.deinit();
 
@@ -379,44 +383,56 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     const displacement_image, var displacement_views = try init_fft_rw_image_and_view(N, arena);
     errdefer displacement_image.deinit();
     errdefer displacement_views.deinit(arena);
-    errdefer for (displacement_views.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (displacement_views.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
 
     const slope_jacobian_image, var slope_jacobian_views = try init_fft_rw_image_and_view(N, arena);
     errdefer slope_jacobian_image.deinit();
     errdefer slope_jacobian_views.deinit(arena);
-    errdefer for (slope_jacobian_views.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (slope_jacobian_views.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
 
     // fft processing images
     const fft_processing_sj_image, var fft_processing_sj_views = try init_fft_rw_image_and_view(N, arena);
     errdefer fft_processing_sj_image.deinit();
     errdefer fft_processing_sj_views.deinit(arena);
-    errdefer for (fft_processing_sj_views.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (fft_processing_sj_views.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
 
     const fft_processing_d_image, var fft_processing_d_views = try init_fft_rw_image_and_view(N, arena);
     errdefer fft_processing_d_image.deinit();
     errdefer fft_processing_d_views.deinit(arena);
-    errdefer for (fft_processing_d_views.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (fft_processing_d_views.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
 
     // fft compute descriptors
     const fft_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 2,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 3,
                 .binding_type = .StorageImage,
             },
@@ -424,11 +440,17 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     });
     errdefer fft_descriptor_layout.deinit();
 
-    const fft_descriptor_pool = try gfx.DescriptorPool.init(.{ .strategy = .{ .Layout = fft_descriptor_layout }, .max_sets = 4 * NUM_OCEAN_SPECTRUM_LODS, });
+    const fft_descriptor_pool = try gfx.DescriptorPool.init(.{
+        .strategy = .{ .Layout = fft_descriptor_layout },
+        .max_sets = 4 * NUM_OCEAN_SPECTRUM_LODS,
+    });
     errdefer fft_descriptor_pool.deinit();
 
     var fft_descriptor_sets_slope_jacobian_list = try std.ArrayList([2]gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
-    errdefer for (fft_descriptor_sets_slope_jacobian_list.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (fft_descriptor_sets_slope_jacobian_list.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
     defer fft_descriptor_sets_slope_jacobian_list.deinit(arena);
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
@@ -462,7 +484,10 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     }
 
     var fft_descriptor_sets_displacement_list = try std.ArrayList([2]gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
-    errdefer for (fft_descriptor_sets_displacement_list.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (fft_descriptor_sets_displacement_list.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
     defer fft_descriptor_sets_displacement_list.deinit(arena);
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
@@ -559,28 +584,28 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     // spectrum descriptors
     const spectrum_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 2,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 3,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 4,
                 .binding_type = .StorageImage,
             },
@@ -596,7 +621,9 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     var spectrum_descriptor_sets_list = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
     defer spectrum_descriptor_sets_list.deinit(arena);
-    errdefer for (spectrum_descriptor_sets_list.items) |item| { item.deinit(); };
+    errdefer for (spectrum_descriptor_sets_list.items) |item| {
+        item.deinit();
+    };
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         const spectrum_descriptor_set = try (try spectrum_descriptor_pool.get()).allocate_set(.{ .layout = spectrum_descriptor_layout });
@@ -604,14 +631,14 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
         try (try spectrum_descriptor_set.get()).update(.{
             .writes = &.{
-                .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_views.items[layer] }, },
-                .{ .binding = 1, .data = .{ .StorageImage = displacement_views.items[layer][0] }, },
-                .{ .binding = 2, .data = .{ .StorageImage = displacement_views.items[layer][1] }, },
-                .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] }, },
-                .{ .binding = 4, .data = .{ .StorageImage = slope_jacobian_views.items[layer][1] }, },
+                .{ .binding = 0, .data = .{ .ImageView = h0_tilde_image_views.items[layer] } },
+                .{ .binding = 1, .data = .{ .StorageImage = displacement_views.items[layer][0] } },
+                .{ .binding = 2, .data = .{ .StorageImage = displacement_views.items[layer][1] } },
+                .{ .binding = 3, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] } },
+                .{ .binding = 4, .data = .{ .StorageImage = slope_jacobian_views.items[layer][1] } },
             },
         });
-        
+
         try spectrum_descriptor_sets_list.append(arena, spectrum_descriptor_set);
     }
 
@@ -641,25 +668,25 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
             spectrum_descriptor_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
+            gfx.PushConstantLayoutInfo{
                 .shader_stages = .{ .Compute = true },
                 .offset = 0,
                 .size = @sizeOf(SpectrumPushConstantData),
-            }
-        }
+            },
+        },
     });
     errdefer spectrum_pipeline.deinit();
 
     // jacobian descritpors
     const jacobian_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .StorageImage,
             },
@@ -675,7 +702,9 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     var jacobian_descriptor_sets_list = try std.ArrayList(gfx.DescriptorSet.Ref).initCapacity(arena, NUM_OCEAN_SPECTRUM_LODS);
     defer jacobian_descriptor_sets_list.deinit(arena);
-    errdefer for (jacobian_descriptor_sets_list.items) |item| { item.deinit(); };
+    errdefer for (jacobian_descriptor_sets_list.items) |item| {
+        item.deinit();
+    };
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
         const jacobian_descriptor_set = try (try jacobian_descriptor_pool.get()).allocate_set(.{ .layout = jacobian_descriptor_layout });
@@ -683,8 +712,8 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
         try (try jacobian_descriptor_set.get()).update(.{
             .writes = &.{
-                .{ .binding = 0, .data = .{ .ImageView = displacement_views.items[layer][0] }, },
-                .{ .binding = 1, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] }, },
+                .{ .binding = 0, .data = .{ .ImageView = displacement_views.items[layer][0] } },
+                .{ .binding = 1, .data = .{ .StorageImage = slope_jacobian_views.items[layer][0] } },
             },
         });
 
@@ -717,12 +746,12 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
             jacobian_descriptor_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
+            gfx.PushConstantLayoutInfo{
                 .shader_stages = .{ .Compute = true },
                 .offset = 0,
                 .size = @sizeOf(JacobianPushConstantData),
-            }
-        }
+            },
+        },
     });
     errdefer jacobian_pipeline.deinit();
 
@@ -736,15 +765,15 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     const lights_buffer = try gfx.Buffer.init(
         @sizeOf(StandardRenderer.LightsStruct) * (16 * 16),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer lights_buffer.deinit();
 
     const shallow_spots_buffer = try gfx.Buffer.init(
         @sizeOf(ShallowSpot) * MAX_SHALLOW_SPOTS,
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer shallow_spots_buffer.deinit();
 
@@ -771,33 +800,33 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 0,
                 .binding_type = .UniformBuffer,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Vertex = true },
                 .binding = 1,
                 .binding_type = .UniformBuffer,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Vertex = true },
                 .binding = 2,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 3,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .binding = 4,
                 .binding_type = .Sampler,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 5,
                 .binding_type = .ImageView,
             },
@@ -807,7 +836,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     const render_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 1,
-        .strategy = .{ .Layout = render_descriptor_layout, },
+        .strategy = .{ .Layout = render_descriptor_layout },
     });
     errdefer render_descriptor_pool.deinit();
 
@@ -816,31 +845,31 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .UniformBuffer = .{
                     .buffer = lights_buffer,
                 } },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 1,
                 .data = .{ .UniformBuffer = .{
                     .buffer = shallow_spots_buffer,
                 } },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 2,
                 .data = .{ .ImageView = render_displacement_view },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 3,
                 .data = .{ .ImageView = render_slope_jacobian_view },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 4,
                 .data = .{ .Sampler = sampler },
             },
-            gfx.DescriptorSetUpdateWriteInfo {
+            gfx.DescriptorSetUpdateWriteInfo{
                 .binding = 5,
                 .data = .{ .ImageView = sky_cubemap },
             },
@@ -851,15 +880,15 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     errdefer shallow_spots_list.deinit(eng.get().general_allocator);
 
     // render render pass
-    const attachments = &[_]gfx.AttachmentInfo {
-        gfx.AttachmentInfo {
+    const attachments = &[_]gfx.AttachmentInfo{
+        gfx.AttachmentInfo{
             .name = "colour",
             .format = gfx.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
             .final_layout = .ColorAttachmentOptimal,
             .blend_type = .Simple,
         },
-        gfx.AttachmentInfo {
+        gfx.AttachmentInfo{
             .name = "depth",
             .format = gfx.GfxState.depth_format,
             .initial_layout = .DepthStencilAttachmentOptimal,
@@ -871,19 +900,19 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     const render_pass = try gfx.RenderPass.init(.{
         .attachments = attachments,
         .subpasses = &.{
-            gfx.SubpassInfo {
-                .attachments = &.{ "colour" },
+            gfx.SubpassInfo{
+                .attachments = &.{"colour"},
                 .depth_attachment = "depth",
             },
         },
         .dependencies = &.{
-            gfx.SubpassDependencyInfo {
+            gfx.SubpassDependencyInfo{
                 .src_subpass = null,
                 .dst_subpass = 0,
                 .src_access_mask = .{},
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
-                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
+                .dst_stage_mask = .{ .color_attachment_output = true },
             },
         },
     });
@@ -905,9 +934,9 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     var shader_file_watcher = try FileWatcher.init(alloc, path_resolved, 1000);
     errdefer shader_file_watcher.deinit();
 
-    var self = Self {
+    var self = Self{
         .current_settings = undefined,
-        
+
         .clipmap_mesh = clipmap_mesh,
 
         .gaussian_random_image = gaussian_random_image,
@@ -918,7 +947,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
 
         .slope_jacobian_image = slope_jacobian_image,
         .slope_jacobian_views = slope_jacobian_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
-        
+
         .displacement_image = displacement_image,
         .displacement_views = displacement_views.items[0..NUM_OCEAN_SPECTRUM_LODS].*,
 
@@ -967,7 +996,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
         .render_shallow_spots_buffer = shallow_spots_buffer,
 
         .render_shallow_spots_list = shallow_spots_list,
-        
+
         .render_render_pass = render_pass,
         .render_framebuffer = framebuffer,
         .render_pipeline = undefined,
@@ -987,7 +1016,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
         var cmd = try (try pool.get()).allocate_command_buffer(.{});
         defer cmd.deinit();
 
-        try cmd.cmd_begin(.{ .one_time_submit = true, });
+        try cmd.cmd_begin(.{ .one_time_submit = true });
         self.recreate_h0_image(&cmd, settings);
         try cmd.cmd_end();
 
@@ -995,7 +1024,7 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
         defer fence.deinit();
 
         try gfx.GfxState.get().submit_command_buffer(.{
-            .command_buffers = &.{ &cmd },
+            .command_buffers = &.{&cmd},
             .fence = fence,
         });
 
@@ -1013,35 +1042,38 @@ fn init_fft_rw_image_and_view(comptime side_length: u32, alloc: std.mem.Allocato
             .height = side_length,
             .array_length = NUM_OCEAN_SPECTRUM_LODS * 2,
             .dst_layout = .ShaderReadOnlyOptimal,
-            .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
-            .access_flags = .{ .GpuWrite = true, },
+            .usage_flags = .{ .StorageResource = true, .ShaderResource = true },
+            .access_flags = .{ .GpuWrite = true },
         },
-        null
+        null,
     );
     errdefer image.deinit();
 
     var image_views_list = try std.ArrayList([2]gfx.ImageView.Ref).initCapacity(alloc, NUM_OCEAN_SPECTRUM_LODS);
     errdefer image_views_list.deinit(alloc);
-    errdefer for (image_views_list.items) |item| { item[0].deinit(); item[1].deinit(); };
+    errdefer for (image_views_list.items) |item| {
+        item[0].deinit();
+        item[1].deinit();
+    };
 
     for (0..NUM_OCEAN_SPECTRUM_LODS) |layer| {
-        const view_r = try gfx.ImageView.init(.{ 
-            .image = image, 
-            .array_layers = .{ 
+        const view_r = try gfx.ImageView.init(.{
+            .image = image,
+            .array_layers = .{
                 .base_array_layer = @intCast(layer),
                 .array_layer_count = 1,
             },
-            .view_type = .ImageView2D
+            .view_type = .ImageView2D,
         });
         errdefer view_r.deinit();
 
-        const view_i = try gfx.ImageView.init(.{ 
-            .image = image, 
-            .array_layers = .{ 
+        const view_i = try gfx.ImageView.init(.{
+            .image = image,
+            .array_layers = .{
                 .base_array_layer = @intCast(NUM_OCEAN_SPECTRUM_LODS + layer),
                 .array_layer_count = 1,
             },
-            .view_type = .ImageView2D
+            .view_type = .ImageView2D,
         });
         errdefer view_i.deinit();
 
@@ -1072,9 +1104,9 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
             "ps_main",
         },
         .preprocessor_macros = &.{
-            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{ Self.CLIPMAP_QUAD_COUNT }) },
-            .{ "NUM_OCEAN_LOD_LAYERS", std.fmt.comptimePrint("{}", .{ Self.NUM_OCEAN_SPECTRUM_LODS }) },
-        }
+            .{ "CLIPMAP_QUAD_COUNT", std.fmt.comptimePrint("{}", .{Self.CLIPMAP_QUAD_COUNT}) },
+            .{ "NUM_OCEAN_LOD_LAYERS", std.fmt.comptimePrint("{}", .{Self.NUM_OCEAN_SPECTRUM_LODS}) },
+        },
     });
     defer alloc.free(shader_spirv);
 
@@ -1083,10 +1115,10 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
 
     const vertex_input = try gfx.VertexInput.init(.{
         .bindings = &.{
-            .{ .binding = 0, .stride = 12, .input_rate = .Vertex, },
+            .{ .binding = 0, .stride = 12, .input_rate = .Vertex },
         },
         .attributes = &.{
-            .{ .name = "POS",           .location = 0, .binding = 0, .offset = 0,  .format = .F32x3, },
+            .{ .name = "POS", .location = 0, .binding = 0, .offset = 0, .format = .F32x3 },
         },
     });
     defer vertex_input.deinit();
@@ -1103,10 +1135,10 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
             .module = &shader_module,
             .entry_point = "ps_main",
         },
-        .depth_test = .{ .write = true, },
+        .depth_test = .{ .write = true },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Vertex = true, .Pixel = true, },
+            gfx.PushConstantLayoutInfo{
+                .shader_stages = .{ .Vertex = true, .Pixel = true },
                 .offset = 0,
                 .size = @sizeOf(RenderPushConstantData),
             },
@@ -1127,16 +1159,16 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSe
     // transition h0 from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.h0_tilde_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .compute_shader = true },
     });
 
     cmd.cmd_bind_compute_pipeline(self.h0_pipeline);
@@ -1147,32 +1179,36 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSe
                 self.h0_descriptor_set[layer],
             },
         });
-        const h0_push_constant_data = H0PushConstantData {
+        const h0_push_constant_data = H0PushConstantData{
             .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
             .amplitude = settings.amplitude,
             .wind = settings.wind,
         };
         cmd.cmd_push_constants(.{
             .offset = 0,
-            .shader_stages = .{ .Compute = true, },
+            .shader_stages = .{ .Compute = true },
             .data = @ptrCast(&h0_push_constant_data),
         });
-        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = COMPUTE_GROUP_COUNT,
+            .group_count_y = COMPUTE_GROUP_COUNT,
+            .group_count_z = 1,
+        });
     }
 
     // transition h0 to shader reading from compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.h0_tilde_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .compute_shader = true },
     });
 
     self.current_settings = settings;
@@ -1206,27 +1242,27 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean update images");
     defer __tracy_zone.End();
     self.time += (eng.get().time.delta_time_f32() * self.time_scale);
-    
+
     // transition spectrum images from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.displacement_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.slope_jacobian_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
         },
-        .src_stage = .{ .vertex_shader = true, .fragment_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .vertex_shader = true, .fragment_shader = true },
+        .dst_stage = .{ .compute_shader = true },
     });
 
     cmd.cmd_bind_compute_pipeline(self.spectrum_pipeline);
@@ -1237,52 +1273,56 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
                 self.spectrum_descriptor_set[layer],
             },
         });
-        const spectrum_push_constant_data = SpectrumPushConstantData {
+        const spectrum_push_constant_data = SpectrumPushConstantData{
             .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
             .time = self.time,
         };
         cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Compute = true, },
+            .shader_stages = .{ .Compute = true },
             .offset = 0,
             .data = std.mem.asBytes(&spectrum_push_constant_data),
         });
-        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = COMPUTE_GROUP_COUNT,
+            .group_count_y = COMPUTE_GROUP_COUNT,
+            .group_count_z = 1,
+        });
     }
 
     // transition images to perform first stage of FFTs on height/slope and displacement images
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.slope_jacobian_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.fft_processing_sj_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.displacement_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.fft_processing_d_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .compute_shader = true },
     });
 
     cmd.cmd_bind_compute_pipeline(self.fft_horizontal_pipeline);
@@ -1293,50 +1333,58 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
                 self.fft_descriptor_sets_hs[layer][0],
             },
         });
-        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = 1,
+            .group_count_y = @intCast(N),
+            .group_count_z = 1,
+        });
 
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.fft_descriptor_sets_d[layer][0],
             },
         });
-        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = 1,
+            .group_count_y = @intCast(N),
+            .group_count_z = 1,
+        });
     }
-    
+
     // transition images to perform second stage of FFTs on height/slope and displacement images
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.slope_jacobian_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.fft_processing_sj_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.displacement_image,
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .General,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .shader_write = true },
             },
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.fft_processing_d_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .compute_shader = true },
     });
 
     cmd.cmd_bind_compute_pipeline(self.fft_vertical_pipeline);
@@ -1347,29 +1395,37 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
                 self.fft_descriptor_sets_hs[layer][1],
             },
         });
-        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = 1,
+            .group_count_y = @intCast(N),
+            .group_count_z = 1,
+        });
 
         cmd.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
                 self.fft_descriptor_sets_d[layer][1],
             },
         });
-        cmd.cmd_dispatch(.{ .group_count_x = 1, .group_count_y = @intCast(N), .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = 1,
+            .group_count_y = @intCast(N),
+            .group_count_z = 1,
+        });
     }
 
     // transition displacement image ready for shader reading
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.displacement_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true },
     });
 
     cmd.cmd_bind_compute_pipeline(self.jacobian_pipeline);
@@ -1380,37 +1436,41 @@ pub fn update_images(self: *Self, cmd: *gfx.CommandBuffer) void {
                 self.jacobian_descriptor_set[layer],
             },
         });
-        const jacobian_push_constant_data = JacobianPushConstantData {
+        const jacobian_push_constant_data = JacobianPushConstantData{
             .map_length_m = @floatFromInt(calculate_layer_map_length(Self.MAP_LENGTH_M, layer)),
         };
         cmd.cmd_push_constants(.{
-            .shader_stages = .{ .Compute = true, },
+            .shader_stages = .{ .Compute = true },
             .offset = 0,
             .data = std.mem.asBytes(&jacobian_push_constant_data),
         });
-        cmd.cmd_dispatch(.{ .group_count_x = COMPUTE_GROUP_COUNT, .group_count_y = COMPUTE_GROUP_COUNT, .group_count_z = 1, });
+        cmd.cmd_dispatch(.{
+            .group_count_x = COMPUTE_GROUP_COUNT,
+            .group_count_y = COMPUTE_GROUP_COUNT,
+            .group_count_z = 1,
+        });
     }
 
     // finally transition slope_jacobian image ready for shader reading
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.slope_jacobian_image,
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
             },
         },
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .vertex_shader = true, .fragment_shader = true },
     });
 }
 
 pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const eng.Camera, cmd: *gfx.CommandBuffer) void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean render");
     defer __tracy_zone.End();
-    
+
     if (self.render_shader_file_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_pipeline() catch |err| {
             std.log.warn("Unable to recreate ocean render pipeline: {}", .{err});
@@ -1421,25 +1481,23 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         self.render_pipeline = new_pipeline;
         gfx.GfxState.get().flush();
     }
-    
+
     cmd.cmd_begin_render_pass(.{
         .framebuffer = self.render_framebuffer,
         .render_pass = self.render_render_pass,
         .render_area = .full_screen_pixels(),
     });
     defer cmd.cmd_end_render_pass();
-    
+
     cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
 
     (blk: {
         const lights_buffer = self.render_lights_buffer.get() catch break :blk error.UnableToGetBuffer;
-        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame }) catch break :blk error.UnableToMapBuffer;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(StandardRenderer.LightsStruct, 16 * 16);
-        standard_renderer.sort_lights(
-            camera.transform.position
-        );
+        standard_renderer.sort_lights(camera.transform.position);
         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
         @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
     }) catch |err| {
@@ -1448,13 +1506,13 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
 
     (blk: {
         const buffer = self.render_shallow_spots_buffer.get() catch break :blk error.UnableToGetBuffer;
-        const mapped_buffer = buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        const mapped_buffer = buffer.map(.{ .write = .EveryFrame }) catch break :blk error.UnableToMapBuffer;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(ShallowSpot, 4);
         @memset(data, .{});
 
-        self.sort_shallow_spots(.{ camera.transform.position[0], camera.transform.position[2]});
+        self.sort_shallow_spots(.{ camera.transform.position[0], camera.transform.position[2] });
         for (0..@min(self.render_shallow_spots_list.items.len, MAX_SHALLOW_SPOTS)) |i| {
             data[i] = self.render_shallow_spots_list.items[i];
         }
@@ -1468,7 +1526,7 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
         },
     });
 
-    var push_constant_data = RenderPushConstantData {
+    var push_constant_data = RenderPushConstantData{
         .view_projection_matrix = zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(gfx.GfxState.get().swapchain_aspect())),
         .camera_position = camera.transform.position,
 
@@ -1480,7 +1538,7 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
     };
 
     cmd.cmd_push_constants(.{
-        .shader_stages = .{ .Vertex = true, .Pixel = true, },
+        .shader_stages = .{ .Vertex = true, .Pixel = true },
         .offset = 0,
         .data = std.mem.asBytes(&push_constant_data),
     });
@@ -1488,9 +1546,9 @@ pub fn render(self: *Self, standard_renderer: *StandardRenderer, camera: *const 
     self.clipmap_mesh.render_clipmap_geometry(
         cmd,
         10,
-        .{ .Vertex = true, .Pixel = true, },
+        .{ .Vertex = true, .Pixel = true },
         @offsetOf(RenderPushConstantData, "clipmap_data"),
-        push_constant_data.camera_position
+        push_constant_data.camera_position,
     );
 
     // clear shallow spots ready for next frame

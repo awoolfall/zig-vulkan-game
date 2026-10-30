@@ -24,9 +24,9 @@ const RenderPushConstant = extern struct {
 };
 
 pub const CloudVolume = extern struct {
-    min: [3]f32 = .{0.0, 0.0, 0.0},
+    min: [3]f32 = .{ 0.0, 0.0, 0.0 },
     phase_function: u32 = 0,
-    max: [3]f32 = .{0.0, 0.0, 0.0},
+    max: [3]f32 = .{ 0.0, 0.0, 0.0 },
     __pad: f32 = 0.0,
 };
 
@@ -97,8 +97,8 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .height = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1],
         .depth = CAMERA_LIGHTING_GRID_IMAGE_SIZE[2],
         .format = .Rgba32_Float,
-        .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
-        .access_flags = .{ .GpuWrite = true, },
+        .usage_flags = .{ .StorageResource = true, .ShaderResource = true },
+        .access_flags = .{ .GpuWrite = true },
         .dst_layout = .ShaderReadOnlyOptimal,
     }, null);
     errdefer camera_lighting_grid_image.deinit();
@@ -110,24 +110,27 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     const noise_image = try generate_noise_image(128, 128, @divExact(128, 16), @divExact(128, 8), alloc);
     errdefer noise_image.deinit();
 
-    const noise_image_view = try gfx.ImageView.init(.{ .image = noise_image, .view_type = .ImageView3D, });
+    const noise_image_view = try gfx.ImageView.init(.{
+        .image = noise_image,
+        .view_type = .ImageView3D,
+    });
     errdefer noise_image_view.deinit();
 
     // compute resources
     const cloud_volumes_buffer = try gfx.Buffer.init(
         @sizeOf([MAX_CLOUD_VOLUMES]CloudVolume),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer cloud_volumes_buffer.deinit();
 
     const lights_buffer = try gfx.Buffer.init(
         @sizeOf(StandardRenderer.LightsStruct),
-        .{ .ConstantBuffer = true, },
-        .{ .CpuWrite = true, },
+        .{ .ConstantBuffer = true },
+        .{ .CpuWrite = true },
     );
     errdefer lights_buffer.deinit();
-    
+
     const sampler = try gfx.Sampler.init(.{
         .filter_min_mag = .Linear,
         .filter_mip = .Linear,
@@ -138,23 +141,23 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     // compute descriptors
     const density_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 2,
                 .binding_type = .UniformBuffer,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 3,
                 .binding_type = .UniformBuffer,
             },
@@ -173,43 +176,43 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     try (try spectrum_descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .StorageImage = camera_lighting_grid_view }, },
-            .{ .binding = 1, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
-            .{ .binding = 2, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
-            .{ .binding = 3, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer, } } },
+            .{ .binding = 0, .data = .{ .StorageImage = camera_lighting_grid_view } },
+            .{ .binding = 1, .data = .{ .ImageView = eng.get().gfx.default.depth_view } },
+            .{ .binding = 2, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer } } },
+            .{ .binding = 3, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer } } },
         },
     });
 
     // render descriptors
     const render_descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 0,
                 .binding_type = .UniformBuffer,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 1,
                 .binding_type = .UniformBuffer,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 2,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 3,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 4,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Pixel = true },
                 .binding = 5,
                 .binding_type = .Sampler,
             },
@@ -219,7 +222,9 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     const render_descriptor_pool = try gfx.DescriptorPool.init(.{
         .max_sets = 1,
-        .strategy = .{ .Layout = render_descriptor_layout, },
+        .strategy = .{
+            .Layout = render_descriptor_layout,
+        },
     });
     errdefer render_descriptor_pool.deinit();
 
@@ -228,18 +233,18 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     try (try render_descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer, } } },
-            .{ .binding = 1, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer, } } },
-            .{ .binding = 2, .data = .{ .ImageView = camera_lighting_grid_view }, },
-            .{ .binding = 3, .data = .{ .ImageView = noise_image_view }, },
-            .{ .binding = 4, .data = .{ .ImageView = eng.get().gfx.default.depth_view }, },
-            .{ .binding = 5, .data = .{ .Sampler = sampler }, },
+            .{ .binding = 0, .data = .{ .UniformBuffer = .{ .buffer = lights_buffer } } },
+            .{ .binding = 1, .data = .{ .UniformBuffer = .{ .buffer = cloud_volumes_buffer } } },
+            .{ .binding = 2, .data = .{ .ImageView = camera_lighting_grid_view } },
+            .{ .binding = 3, .data = .{ .ImageView = noise_image_view } },
+            .{ .binding = 4, .data = .{ .ImageView = eng.get().gfx.default.depth_view } },
+            .{ .binding = 5, .data = .{ .Sampler = sampler } },
         },
     });
 
     // render render pass
-    const attachments = &[_]gfx.AttachmentInfo {
-        gfx.AttachmentInfo {
+    const attachments = &[_]gfx.AttachmentInfo{
+        gfx.AttachmentInfo{
             .name = "colour",
             .format = gfx.GfxState.hdr_format,
             .initial_layout = .ColorAttachmentOptimal,
@@ -251,18 +256,18 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     const render_pass = try gfx.RenderPass.init(.{
         .attachments = attachments,
         .subpasses = &.{
-            gfx.SubpassInfo {
-                .attachments = &.{ "colour" },
+            gfx.SubpassInfo{
+                .attachments = &.{"colour"},
             },
         },
         .dependencies = &.{
-            gfx.SubpassDependencyInfo {
+            gfx.SubpassDependencyInfo{
                 .src_subpass = null,
                 .dst_subpass = 0,
                 .src_access_mask = .{},
-                .src_stage_mask = .{ .color_attachment_output = true, },
-                .dst_access_mask = .{ .color_attachment_write = true, },
-                .dst_stage_mask = .{ .color_attachment_output = true, },
+                .src_stage_mask = .{ .color_attachment_output = true },
+                .dst_access_mask = .{ .color_attachment_write = true },
+                .dst_stage_mask = .{ .color_attachment_output = true },
             },
         },
     });
@@ -293,7 +298,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var cloud_volumes_list = try std.ArrayList(CloudVolume).initCapacity(eng.get().general_allocator, 8);
     errdefer cloud_volumes_list.deinit(eng.get().general_allocator);
 
-    var self = Self {
+    var self = Self{
         .camera_lighting_grid_image = camera_lighting_grid_image,
         .camera_lighting_grid_view = camera_lighting_grid_view,
 
@@ -303,7 +308,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .cloud_volumes_buffer = cloud_volumes_buffer,
         .lights_buffer = lights_buffer,
         .render_sampler = sampler,
-        
+
         .compute_descriptor_layout = density_descriptor_layout,
         .compute_descriptor_pool = density_descriptor_pool,
         .compute_descriptor_set = spectrum_descriptor_set,
@@ -347,8 +352,7 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
         .shader_entry_points = &.{
             "cs_main",
         },
-        .preprocessor_macros = &.{
-        },
+        .preprocessor_macros = &.{},
     });
     defer alloc.free(density_spirv);
 
@@ -366,12 +370,12 @@ fn create_compute_pipeline(self: *Self) !gfx.ComputePipeline.Ref {
             self.compute_descriptor_layout,
         },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
+            gfx.PushConstantLayoutInfo{
                 .shader_stages = .{ .Compute = true },
                 .offset = 0,
                 .size = @sizeOf(CloudDensityPushConstant),
-            }
-        }
+            },
+        },
     });
     errdefer density_pipeline.deinit();
 
@@ -399,8 +403,8 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
             "ps_main",
         },
         .preprocessor_macros = &.{
-            .{ "MAX_LIGHTS", std.fmt.comptimePrint("{}", .{ 4 }) },
-        }
+            .{ "MAX_LIGHTS", std.fmt.comptimePrint("{}", .{4}) },
+        },
     });
     defer alloc.free(shader_spirv);
 
@@ -425,10 +429,10 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
             .module = &shader_module,
             .entry_point = "ps_main",
         },
-        .depth_test = null,//.{ .write = false, },
+        .depth_test = null, //.{ .write = false, },
         .push_constants = &.{
-            gfx.PushConstantLayoutInfo {
-                .shader_stages = .{ .Pixel = true, },
+            gfx.PushConstantLayoutInfo{
+                .shader_stages = .{ .Pixel = true },
                 .offset = 0,
                 .size = @sizeOf(RenderPushConstant),
             },
@@ -446,11 +450,11 @@ fn create_render_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
 }
 
 fn generate_noise_image(
-    comptime size_xy: comptime_int, 
-    comptime size_z: comptime_int, 
-    comptime large_voronoi_grid_size: comptime_int, 
+    comptime size_xy: comptime_int,
+    comptime size_z: comptime_int,
+    comptime large_voronoi_grid_size: comptime_int,
     comptime small_voronoi_grid_size: comptime_int,
-    alloc: std.mem.Allocator
+    alloc: std.mem.Allocator,
 ) !gfx.Image.Ref {
     const num_large_voronoi_grid_cells: comptime_int = @divExact(size_xy, large_voronoi_grid_size) * @divExact(size_xy, large_voronoi_grid_size) * @divExact(size_z, large_voronoi_grid_size);
     const num_small_voronoi_grid_cells: comptime_int = @divExact(size_xy, small_voronoi_grid_size) * @divExact(size_xy, small_voronoi_grid_size) * @divExact(size_z, small_voronoi_grid_size);
@@ -462,7 +466,7 @@ fn generate_noise_image(
     const voronoi_points_buffer_large = try alloc.alloc([4]f32, num_large_voronoi_grid_cells);
     defer alloc.free(voronoi_points_buffer_large);
 
-    const large_features_image_dimensions = [3]u32 { @divExact(size_xy, large_voronoi_grid_size), @divExact(size_xy, large_voronoi_grid_size), @divExact(size_z, large_voronoi_grid_size) };
+    const large_features_image_dimensions = [3]u32{ @divExact(size_xy, large_voronoi_grid_size), @divExact(size_xy, large_voronoi_grid_size), @divExact(size_z, large_voronoi_grid_size) };
     {
         const grid_texel_size = zm.f32x4s(@floatFromInt(large_voronoi_grid_size));
         for (0..large_features_image_dimensions[0]) |x| {
@@ -480,28 +484,28 @@ fn generate_noise_image(
         }
     }
 
-    const voronoi_points_large_image = try gfx.Image.init(
-        .{
-            .format = .Rgba32_Float,
-            .width = large_features_image_dimensions[0],
-            .height = large_features_image_dimensions[1],
-            .depth = large_features_image_dimensions[2],
-            .usage_flags = .{ .ShaderResource = true, },
-            .access_flags = .{},
-            .dst_layout = .ShaderReadOnlyOptimal,
-        },
-        std.mem.sliceAsBytes(voronoi_points_buffer_large)
-    );
+    const voronoi_points_large_image = try gfx.Image.init(.{
+        .format = .Rgba32_Float,
+        .width = large_features_image_dimensions[0],
+        .height = large_features_image_dimensions[1],
+        .depth = large_features_image_dimensions[2],
+        .usage_flags = .{ .ShaderResource = true },
+        .access_flags = .{},
+        .dst_layout = .ShaderReadOnlyOptimal,
+    }, std.mem.sliceAsBytes(voronoi_points_buffer_large));
     defer voronoi_points_large_image.deinit();
 
-    const voronoi_points_large_view = try gfx.ImageView.init(.{ .image = voronoi_points_large_image, .view_type = .ImageView3D, });
+    const voronoi_points_large_view = try gfx.ImageView.init(.{
+        .image = voronoi_points_large_image,
+        .view_type = .ImageView3D,
+    });
     defer voronoi_points_large_view.deinit();
 
     // Small voronoi feature points
     const voronoi_points_buffer_small = try alloc.alloc([4]f32, num_small_voronoi_grid_cells);
     defer alloc.free(voronoi_points_buffer_small);
 
-    const small_features_image_dimensions = [3]u32 { @divExact(size_xy, small_voronoi_grid_size), @divExact(size_xy, small_voronoi_grid_size), @divExact(size_z, small_voronoi_grid_size) };
+    const small_features_image_dimensions = [3]u32{ @divExact(size_xy, small_voronoi_grid_size), @divExact(size_xy, small_voronoi_grid_size), @divExact(size_z, small_voronoi_grid_size) };
     {
         const grid_texel_size = zm.f32x4s(@floatFromInt(small_voronoi_grid_size));
         for (0..small_features_image_dimensions[0]) |x| {
@@ -525,15 +529,20 @@ fn generate_noise_image(
             .width = small_features_image_dimensions[0],
             .height = small_features_image_dimensions[1],
             .depth = small_features_image_dimensions[2],
-            .usage_flags = .{ .ShaderResource = true, },
+            .usage_flags = .{
+                .ShaderResource = true,
+            },
             .access_flags = .{},
             .dst_layout = .ShaderReadOnlyOptimal,
         },
-        std.mem.sliceAsBytes(voronoi_points_buffer_small)
+        std.mem.sliceAsBytes(voronoi_points_buffer_small),
     );
     defer voronoi_points_small_image.deinit();
 
-    const voronoi_points_small_view = try gfx.ImageView.init(.{ .image = voronoi_points_small_image, .view_type = .ImageView3D, });
+    const voronoi_points_small_view = try gfx.ImageView.init(.{
+        .image = voronoi_points_small_image,
+        .view_type = .ImageView3D,
+    });
     defer voronoi_points_small_view.deinit();
 
     // worley storage image
@@ -544,31 +553,34 @@ fn generate_noise_image(
             .height = size_xy,
             .depth = size_z,
             .dst_layout = .General,
-            .usage_flags = .{ .StorageResource = true, .ShaderResource = true, },
+            .usage_flags = .{ .StorageResource = true, .ShaderResource = true },
             .access_flags = .{},
         },
-        null
+        null,
     );
     errdefer worley_storage_image.deinit();
 
-    const worley_storage_image_view = try gfx.ImageView.init(.{ .image = worley_storage_image, .view_type = .ImageView3D, });
+    const worley_storage_image_view = try gfx.ImageView.init(.{
+        .image = worley_storage_image,
+        .view_type = .ImageView3D,
+    });
     defer worley_storage_image_view.deinit();
 
     // create worley compute pipeline
     const descriptor_layout = try gfx.DescriptorLayout.init(.{
         .bindings = &.{
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .StorageImage,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .ImageView,
             },
-            gfx.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gfx.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 2,
                 .binding_type = .ImageView,
             },
@@ -587,9 +599,9 @@ fn generate_noise_image(
 
     try (try descriptor_set.get()).update(.{
         .writes = &.{
-            .{ .binding = 0, .data = .{ .StorageImage = worley_storage_image_view }, },
-            .{ .binding = 1, .data = .{ .ImageView = voronoi_points_large_view }, },
-            .{ .binding = 2, .data = .{ .ImageView = voronoi_points_small_view }, },
+            .{ .binding = 0, .data = .{ .StorageImage = worley_storage_image_view } },
+            .{ .binding = 1, .data = .{ .ImageView = voronoi_points_large_view } },
+            .{ .binding = 2, .data = .{ .ImageView = voronoi_points_small_view } },
         },
     });
 
@@ -598,8 +610,7 @@ fn generate_noise_image(
         .shader_entry_points = &.{
             "cs_main",
         },
-        .preprocessor_macros = &.{
-        },
+        .preprocessor_macros = &.{},
     });
     defer alloc.free(spirv);
 
@@ -616,21 +627,20 @@ fn generate_noise_image(
         .descriptor_set_layouts = &.{
             descriptor_layout,
         },
-        .push_constants = &.{
-        }
+        .push_constants = &.{},
     });
     defer compute_pipeline.deinit();
 
     // dispatch compute
     {
-        const pool = try gfx.CommandPool.init(.{ .queue_family = .Graphics, });
+        const pool = try gfx.CommandPool.init(.{ .queue_family = .Graphics });
         defer pool.deinit();
 
-        var cmd = try (try pool.get()).allocate_command_buffer(.{ .level = .Primary, });
+        var cmd = try (try pool.get()).allocate_command_buffer(.{ .level = .Primary });
         defer cmd.deinit();
 
         {
-            try cmd.cmd_begin(.{ .one_time_submit = true, });
+            try cmd.cmd_begin(.{ .one_time_submit = true });
 
             cmd.cmd_bind_compute_pipeline(compute_pipeline);
             cmd.cmd_bind_descriptor_sets(.{
@@ -638,16 +648,16 @@ fn generate_noise_image(
                     descriptor_set,
                 },
             });
-            cmd.cmd_dispatch(.{ .group_count_x = size_xy / 8, .group_count_y = size_xy / 8, .group_count_z = size_z / 8, });
+            cmd.cmd_dispatch(.{ .group_count_x = size_xy / 8, .group_count_y = size_xy / 8, .group_count_z = size_z / 8 });
 
             cmd.cmd_pipeline_barrier(.{
-                .src_stage = .{ .compute_shader = true, },
-                .dst_stage = .{ .fragment_shader = true, },
+                .src_stage = .{ .compute_shader = true },
+                .dst_stage = .{ .fragment_shader = true },
                 .image_barriers = &.{
-                    gfx.CommandBuffer.ImageMemoryBarrierInfo {
+                    gfx.CommandBuffer.ImageMemoryBarrierInfo{
                         .image = worley_storage_image,
-                        .src_access_mask = .{ .shader_write = true, },
-                        .dst_access_mask = .{ .shader_read = true, },
+                        .src_access_mask = .{ .shader_write = true },
+                        .dst_access_mask = .{ .shader_read = true },
                         .old_layout = .General,
                         .new_layout = .ShaderReadOnlyOptimal,
                     },
@@ -657,11 +667,11 @@ fn generate_noise_image(
             try cmd.cmd_end();
         }
 
-        var fence = try gfx.Fence.init(.{ .create_signalled = false, });
+        var fence = try gfx.Fence.init(.{ .create_signalled = false });
         defer fence.deinit();
 
         try eng.get().gfx.submit_command_buffer(.{
-            .command_buffers = &.{ &cmd, },
+            .command_buffers = &.{&cmd},
             .fence = fence,
         });
 
@@ -679,7 +689,7 @@ pub fn push_cloud_volume(self: *Self, cloud_volume: CloudVolume) void {
 
 pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, standard_renderer: *StandardRenderer) !void {
     defer self.cloud_volumes_list.clearRetainingCapacity();
-    
+
     if (self.compute_shader_file_watcher.was_modified_since_last_check()) blk: {
         const new_pipeline = self.create_compute_pipeline() catch |err| {
             std.log.err("Unable to update cloud compute shader: {}", .{err});
@@ -701,13 +711,11 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, s
 
     (blk: {
         const lights_buffer = self.lights_buffer.get() catch break :blk error.UnableToGetBuffer;
-        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        const mapped_buffer = lights_buffer.map(.{ .write = .EveryFrame }) catch break :blk error.UnableToMapBuffer;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(StandardRenderer.LightsStruct, 1);
-        standard_renderer.sort_lights(
-            camera.transform.position
-        );
+        standard_renderer.sort_lights(camera.transform.position);
         const max_lights = @min(StandardRenderer.MAX_LIGHTS, standard_renderer.lights.items.len);
         @memcpy(data[0].lights[0..max_lights], standard_renderer.lights.items[0..max_lights]);
     }) catch |err| {
@@ -716,11 +724,11 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, s
 
     (blk: {
         const volumes_buffer = self.cloud_volumes_buffer.get() catch break :blk error.UnableToGetBuffer;
-        const mapped_buffer = volumes_buffer.map(.{ .write = .EveryFrame, }) catch break :blk error.UnableToMapBuffer;
+        const mapped_buffer = volumes_buffer.map(.{ .write = .EveryFrame }) catch break :blk error.UnableToMapBuffer;
         defer mapped_buffer.unmap();
 
         const data = mapped_buffer.data_array(CloudVolume, MAX_CLOUD_VOLUMES);
-        @memset(data[0..MAX_CLOUD_VOLUMES], CloudVolume {});
+        @memset(data[0..MAX_CLOUD_VOLUMES], CloudVolume{});
         for (0..@min(self.cloud_volumes_list.items.len, MAX_CLOUD_VOLUMES)) |idx| {
             data[idx] = self.cloud_volumes_list.items[idx];
         }
@@ -732,56 +740,56 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, s
 
     //var rand = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
 
-    const compute_push_constants = CloudDensityPushConstant {
+    const compute_push_constants = CloudDensityPushConstant{
         .inv_view_projection_matrix = zm.inverse(zm.mul(camera.transform.generate_view_matrix(), camera.generate_perspective_matrix(eng.get().gfx.swapchain_aspect()))),
         .start_z = @intCast(eng.get().time.frame_number % amortize_frames),
         .offset = 0.0, //rand.random().floatNorm(f32) / 2.0, // TODO jitter per frame and blend to smooth out transitions (hopefully)
     };
 
+    cmd.cmd_pipeline_barrier(.{ .src_stage = .{ .fragment_shader = true }, .dst_stage = .{ .compute_shader = true }, .image_barriers = &.{
+        gfx.CommandBuffer.ImageMemoryBarrierInfo{
+            .image = self.camera_lighting_grid_image,
+            .src_access_mask = .{ .shader_read = true },
+            .dst_access_mask = .{ .shader_write = true },
+            .old_layout = .ShaderReadOnlyOptimal,
+            .new_layout = .General,
+        },
+    } });
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .fragment_shader = true, },
-        .dst_stage = .{ .compute_shader = true, },
+        .src_stage = .{ .late_fragment_tests = true },
+        .dst_stage = .{ .compute_shader = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                .image = self.camera_lighting_grid_image,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .shader_write = true, },
-                .old_layout = .ShaderReadOnlyOptimal,
-                .new_layout = .General,
-            },
-        }
-    });
-    cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .late_fragment_tests = true, },
-        .dst_stage = .{ .compute_shader = true, },
-        .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = eng.get().gfx.default.depth_image,
-                .src_access_mask = .{ .depth_stencil_attachment_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .depth_stencil_attachment_write = true },
+                .dst_access_mask = .{ .shader_read = true },
                 .old_layout = .DepthStencilAttachmentOptimal,
                 .new_layout = .ShaderReadOnlyOptimal,
             },
-        }
+        },
     });
 
     cmd.cmd_bind_compute_pipeline(self.compute_pipeline);
-    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.compute_descriptor_set } });
-    cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true, } });
-    cmd.cmd_dispatch(.{ .group_count_x = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0], .group_count_y = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1], .group_count_z = @divExact(CAMERA_LIGHTING_GRID_IMAGE_SIZE[2], amortize_frames), });
+    cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{self.compute_descriptor_set} });
+    cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&compute_push_constants), .offset = 0, .shader_stages = .{ .Compute = true } });
+    cmd.cmd_dispatch(.{
+        .group_count_x = CAMERA_LIGHTING_GRID_IMAGE_SIZE[0],
+        .group_count_y = CAMERA_LIGHTING_GRID_IMAGE_SIZE[1],
+        .group_count_z = @divExact(CAMERA_LIGHTING_GRID_IMAGE_SIZE[2], amortize_frames),
+    });
 
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .fragment_shader = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .fragment_shader = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = self.camera_lighting_grid_image,
-                .src_access_mask = .{ .shader_write = true, },
-                .dst_access_mask = .{ .shader_read = true, },
+                .src_access_mask = .{ .shader_write = true },
+                .dst_access_mask = .{ .shader_read = true },
                 .old_layout = .General,
                 .new_layout = .ShaderReadOnlyOptimal,
             },
-        }
+        },
     });
 
     {
@@ -792,27 +800,33 @@ pub fn render(self: *Self, cmd: *gfx.CommandBuffer, camera: *const eng.Camera, s
         });
         defer cmd.cmd_end_render_pass();
 
-        const render_push_constants = RenderPushConstant {
+        const render_push_constants = RenderPushConstant{
             .inv_view_projection_matrix = compute_push_constants.inv_view_projection_matrix,
         };
 
         cmd.cmd_bind_graphics_pipeline(self.render_pipeline);
-        cmd.cmd_bind_descriptor_sets(.{ .descriptor_sets = &.{ self.render_descriptor_set, }, });
-        cmd.cmd_push_constants(.{ .data = std.mem.asBytes(&render_push_constants), .offset = 0, .shader_stages = .{ .Pixel = true, } });
-        cmd.cmd_draw(.{ .vertex_count = 6, });
+        cmd.cmd_bind_descriptor_sets(.{
+            .descriptor_sets = &.{self.render_descriptor_set},
+        });
+        cmd.cmd_push_constants(.{
+            .data = std.mem.asBytes(&render_push_constants),
+            .offset = 0,
+            .shader_stages = .{ .Pixel = true },
+        });
+        cmd.cmd_draw(.{ .vertex_count = 6 });
     }
 
     cmd.cmd_pipeline_barrier(.{
-        .src_stage = .{ .compute_shader = true, },
-        .dst_stage = .{ .early_fragment_tests = true, },
+        .src_stage = .{ .compute_shader = true },
+        .dst_stage = .{ .early_fragment_tests = true },
         .image_barriers = &.{
-            gfx.CommandBuffer.ImageMemoryBarrierInfo {
+            gfx.CommandBuffer.ImageMemoryBarrierInfo{
                 .image = eng.get().gfx.default.depth_image,
-                .src_access_mask = .{ .shader_read = true, },
-                .dst_access_mask = .{ .depth_stencil_attachment_write = true, },
+                .src_access_mask = .{ .shader_read = true },
+                .dst_access_mask = .{ .depth_stencil_attachment_write = true },
                 .old_layout = .ShaderReadOnlyOptimal,
                 .new_layout = .DepthStencilAttachmentOptimal,
             },
-        }
+        },
     });
 }

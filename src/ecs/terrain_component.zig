@@ -33,7 +33,7 @@ pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std
     const terrain = try sr.deserialize_value(Terrain, alloc, object.get("terrain"));
     errdefer terrain.deinit();
 
-    return Self {
+    return Self{
         .terrain = terrain,
     };
 }
@@ -49,5 +49,5 @@ pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key:
 
     component.terrain.editor_ui(entity, key ++ .{@src()});
 
-    _ = eng.Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber, }, key ++ .{@src()});
+    _ = eng.Imui.widgets.line_edit.create(imui, .{ .allowed_character_set = .RealNumber }, key ++ .{@src()});
 }

@@ -33,8 +33,8 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
         pub fn init() !Self {
             const staging_buffer = try gfx.Buffer.init(
                 @sizeOf(UnderlyingType) * 1,
-                .{ .TransferDst = true, },
-                .{ .CpuRead = true, .GpuWrite = true, }
+                .{ .TransferDst = true },
+                .{ .CpuRead = true, .GpuWrite = true },
             );
             errdefer staging_buffer.deinit();
 
@@ -47,7 +47,7 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             const cmd_buffer = try (command_pool.get() catch unreachable).allocate_command_buffer(.{});
             errdefer cmd_buffer.deinit();
 
-            var self = Self {
+            var self = Self{
                 .image = undefined,
                 .view = undefined,
                 .staging_buffer = staging_buffer,
@@ -66,8 +66,8 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
                     .match_swapchain_extent = true,
                     .format = Self.TextureFormat,
 
-                    .usage_flags = .{ .RenderTarget = true, .TransferSrc = true, },
-                    .access_flags = .{ .GpuWrite = true, },
+                    .usage_flags = .{ .RenderTarget = true, .TransferSrc = true },
+                    .access_flags = .{ .GpuWrite = true },
                     .dst_layout = .ColorAttachmentOptimal,
                 },
                 null,
@@ -107,27 +107,25 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             try cmd.reset();
 
             {
-                try cmd.cmd_begin(.{ .one_time_submit = true, });
+                try cmd.cmd_begin(.{ .one_time_submit = true });
 
                 cmd.cmd_pipeline_barrier(.{
-                    .src_stage = .{ .color_attachment_output = true, },
-                    .dst_stage = .{ .transfer = true, },
-                    .image_barriers = &.{
-                        gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                            .image = self.image,
-                            .old_layout = .ColorAttachmentOptimal,
-                            .new_layout = .TransferSrcOptimal,
-                            .src_access_mask = .{ .color_attachment_write = true, },
-                            .dst_access_mask = .{ .transfer_read = true, },
-                        }
-                    },
-                    });
+                    .src_stage = .{ .color_attachment_output = true },
+                    .dst_stage = .{ .transfer = true },
+                    .image_barriers = &.{gfx.CommandBuffer.ImageMemoryBarrierInfo{
+                        .image = self.image,
+                        .old_layout = .ColorAttachmentOptimal,
+                        .new_layout = .TransferSrcOptimal,
+                        .src_access_mask = .{ .color_attachment_write = true },
+                        .dst_access_mask = .{ .transfer_read = true },
+                    }},
+                });
 
                 cmd.cmd_copy_image_to_buffer(.{
                     .image = self.image,
                     .buffer = self.staging_buffer,
-                    .copy_regions = &.{ 
-                        gfx.CommandBuffer.CopyRegionInfo {
+                    .copy_regions = &.{
+                        gfx.CommandBuffer.CopyRegionInfo{
                             .image_offset = .{ @intCast(x), @intCast(y), 0 },
                             .image_extent = .{ 1, 1, 1 },
                         },
@@ -135,18 +133,16 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
                 });
 
                 cmd.cmd_pipeline_barrier(.{
-                    .src_stage = .{ .transfer = true, },
-                    .dst_stage = .{ .color_attachment_output = true, },
-                    .image_barriers = &.{
-                        gfx.CommandBuffer.ImageMemoryBarrierInfo {
-                            .image = self.image,
-                            .old_layout = .TransferSrcOptimal,
-                            .new_layout = .ColorAttachmentOptimal,
-                            .src_access_mask = .{ .transfer_read = true, },
-                            .dst_access_mask = .{ .color_attachment_write = true, },
-                        }
-                    },
-                    });
+                    .src_stage = .{ .transfer = true },
+                    .dst_stage = .{ .color_attachment_output = true },
+                    .image_barriers = &.{gfx.CommandBuffer.ImageMemoryBarrierInfo{
+                        .image = self.image,
+                        .old_layout = .TransferSrcOptimal,
+                        .new_layout = .ColorAttachmentOptimal,
+                        .src_access_mask = .{ .transfer_read = true },
+                        .dst_access_mask = .{ .color_attachment_write = true },
+                    }},
+                });
 
                 try cmd.cmd_end();
             }
@@ -154,14 +150,14 @@ pub fn SelectionTextures(comptime UnderlyingType: type) type {
             var fence = try gfx.Fence.init(.{});
             defer fence.deinit();
 
-            try gfx.GfxState.get().submit_command_buffer(gfx.GfxState.SubmitInfo {
-                .command_buffers = &.{ cmd },
+            try gfx.GfxState.get().submit_command_buffer(gfx.GfxState.SubmitInfo{
+                .command_buffers = &.{cmd},
                 .fence = fence,
             });
 
             try fence.wait();
-            
-            const mapped_buffer = try (try self.staging_buffer.get()).map(.{ .read = true, });
+
+            const mapped_buffer = try (try self.staging_buffer.get()).map(.{ .read = true });
             defer mapped_buffer.unmap();
 
             const value: UnderlyingType = mapped_buffer.data(UnderlyingType).*;
