@@ -55,7 +55,7 @@ pub fn spawn_opponent_character(transform: eng.Transform, animation_graph: *eng.
 }
 
 pub fn opponent_behaviour_system() !void {
-    const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
+    const physics = eng.get().ecs.get_resource(eng.physics.PhysicsSystem) orelse return error.MissingResource;
 
     var player_query = eng.get().ecs.query_iterator(.{ ecs.PlayerCharacterComponent, eng.ecs.TransformComponent });
     const player_components = player_query.next() orelse return error.UnableToFindPlayerCharacter;

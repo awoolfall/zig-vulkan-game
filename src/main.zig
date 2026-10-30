@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 
 // extern "game" fn run(engine: *en.Engine) void;
 
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+var debug_allocator: std.heap.DebugAllocator(.{ .stack_trace_frames = 32 }) = .init;
 
 pub fn main() !void {
     var gpa, const is_debug = gpa: {

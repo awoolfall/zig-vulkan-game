@@ -1,0 +1,18 @@
+{
+  "name": "scene",
+  "version": 1,
+  "resources": {
+    "ab051013-4298-4841-b260-f75e4f8b80f7": {
+      "RESOURCE_NAME": "Imui"
+    },
+    "3a2446a5-f1b8-4553-9328-1b08ae81d59b": {
+      "RESOURCE_NAME": "Physics System"
+    },
+    "5f19e53f-d127-4278-a47a-b03183d81992": {
+      "RESOURCE_NAME": "Debug"
+    },
+    "ad17d1d8-6616-44ab-8bed-772a01cb5e97": {
+      "RESOURCE_NAME": "App"
+    }
+  }
+}

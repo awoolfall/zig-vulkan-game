@@ -61,8 +61,8 @@ pub fn spawn_character(
 }
 
 pub fn player_control_system() !void {
-    const imui = try eng.get().ecs.get_resource(eng.Imui);
-    const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
+    const imui = eng.get().ecs.get_resource(eng.Imui) orelse return error.MissingResource;
+    const physics = eng.get().ecs.get_resource(eng.physics.PhysicsSystem) orelse return error.MissingResource;
 
     var camera_query = eng.get().ecs.query_iterator(.{ ecs.CameraComponent, eng.ecs.TransformComponent });
     const query_components = camera_query.next() orelse return error.NoMainCamera;

@@ -1,11 +1,11 @@
 {
   "name": "main-camera",
   "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
-    "_ecs_COMPONENT_NAME": "Serialization",
+    "COMPONENT_NAME": "Serialization",
     "serialize_id": 5
   },
   "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
-    "_ecs_COMPONENT_NAME": "Transform",
+    "COMPONENT_NAME": "Transform",
     "transform": {
       "position": [
         -19.632692337036133,
@@ -28,7 +28,7 @@
     }
   },
   "8b843394-9c75-4734-8d8b-edfff98536a5": {
-    "_ecs_COMPONENT_NAME": "Camera",
+    "COMPONENT_NAME": "Camera",
     "camera_data": {
       "field_of_view_y": 1.024778962135315,
       "near_field": 0.30000001192092896,

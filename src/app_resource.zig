@@ -10,6 +10,7 @@ const Atmosphere = @import("atmosphere/atmosphere.zig");
 const EditMode = @import("edit_mode.zig");
 
 pub const RESOURCE_NAME = "App";
+pub const RESOURCE_UUID = "ad17d1d8-6616-44ab-8bed-772a01cb5e97";
 
 const Self = @This();
 
@@ -25,23 +26,12 @@ clouds: Clouds,
 atmosphere: Atmosphere,
 particles_renderer: eng.ParticleRenderer,
 
-edit_mode: EditMode,
-current_mode: enum { Edit, Play } = .Edit,
-state: ?struct {
-    arena: std.heap.ArenaAllocator,
-    entities: []const EditMode.SerializedEntity,
-} = null,
-
 command_pool: eng.gfx.CommandPool.Ref,
 command_buffers: [4]eng.gfx.CommandBuffer,
 
 uber_cmd_semaphores: []eng.gfx.Semaphore,
 
 pub fn deinit(self: *Self) void {
-    if (self.state) |state| {
-        state.arena.deinit();
-    }
-
     self.player_attack_particle_system.deinit();
 
     for (self.uber_cmd_semaphores) |s| {
@@ -55,41 +45,42 @@ pub fn deinit(self: *Self) void {
     self.clouds.deinit();
     self.atmosphere.deinit();
     self.particles_renderer.deinit();
-    self.edit_mode.deinit();
 
-    for (self.command_buffers[0..]) |c| { c.deinit(); }
+    for (self.command_buffers[0..]) |c| {
+        c.deinit();
+    }
     self.command_pool.deinit();
 
     self.character_animation_graph.deinit();
 }
 
 pub fn init() !Self {
-    var player_attack_particle_system_settings = eng.ParticleSystem.ParticleSystemSettings {
-            .max_particles = 300,
-            .alignment = .{ .VelocityAligned = 5.0 },
-            .shape = .Circle,
-            .spawn_origin = zm.f32x4(0.0, 0.0, 0.0, 0.0),
-            .spawn_offset = zm.f32x4s(0.0),
-            .spawn_radius = 1.0,
-            .spawn_rate = 0.0,
-            .spawn_rate_variance = 0.0,
-            .burst_count = 60,
-            .particle_lifetime = 1.0,
+    var player_attack_particle_system_settings = eng.ParticleSystem.ParticleSystemSettings{
+        .max_particles = 300,
+        .alignment = .{ .VelocityAligned = 5.0 },
+        .shape = .Circle,
+        .spawn_origin = zm.f32x4(0.0, 0.0, 0.0, 0.0),
+        .spawn_offset = zm.f32x4s(0.0),
+        .spawn_radius = 1.0,
+        .spawn_rate = 0.0,
+        .spawn_rate_variance = 0.0,
+        .burst_count = 60,
+        .particle_lifetime = 1.0,
     };
     defer player_attack_particle_system_settings.deinit(eng.get().general_allocator);
 
     try player_attack_particle_system_settings.scale.appendSlice(eng.get().general_allocator, &.{
-        .{ .value = zm.f32x4s(0.05), },
+        .{ .value = zm.f32x4s(0.05) },
     });
     try player_attack_particle_system_settings.colour.appendSlice(eng.get().general_allocator, &.{
-        .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0, },
+        .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 1.0)), .key_time = 0.0 },
         .{ .value = zm.srgbToRgb(zm.f32x4(0.0, 0.0, 0.0, 0.0)), .key_time = 1.0, .easing_into = .OutLinear },
         // .{ .value = zm.hsvToRgb(zm.f32x4(0.0, 1.0, 1.0, 1.0)), .key_time = 0.0, },
         // .{ .value = zm.hsvToRgb(zm.f32x4(0.5, 1.0, 1.0, 1.0)), .key_time = 0.5, },
         // .{ .value = zm.hsvToRgb(zm.f32x4(0.999, 1.0, 1.0, 1.0)), .key_time = 1.0, },
     });
     try player_attack_particle_system_settings.forces.appendSlice(eng.get().general_allocator, &.{
-        .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0, } },
+        .{ .Vortex = .{ .axis = zm.f32x4(0.0, 1.0, 0.0, 0.0), .force = 50.0, .origin_pull = 50.0 } },
         .{ .Drag = 5.0 },
     });
 
@@ -105,14 +96,14 @@ pub fn init() !Self {
     });
     errdefer command_pool.deinit();
 
-    const command_buffers: [4]eng.gfx.CommandBuffer = 
+    const command_buffers: [4]eng.gfx.CommandBuffer =
         (command_pool.get() catch unreachable).allocate_command_buffers(.{}, 4) catch unreachable;
 
     const uber_cmd_semaphores = try eng.get().general_allocator.alloc(eng.gfx.Semaphore, eng.gfx.GfxState.get().frames_in_flight());
     errdefer eng.get().general_allocator.free(uber_cmd_semaphores);
 
     var uber_cmd_semaphores_list = std.ArrayList(eng.gfx.Semaphore).initBuffer(uber_cmd_semaphores);
-    errdefer for (uber_cmd_semaphores_list.items) |s| { s.deinit(); };
+    errdefer for (uber_cmd_semaphores_list.items) |s| s.deinit();
 
     for (0..eng.gfx.GfxState.get().frames_in_flight()) |_| {
         try uber_cmd_semaphores_list.appendBounded(try eng.gfx.Semaphore.init(.{}));
@@ -136,10 +127,7 @@ pub fn init() !Self {
     var particles_renderer = try eng.ParticleRenderer.init(eng.get().general_allocator);
     errdefer particles_renderer.deinit();
 
-    var edit_mode = try EditMode.init(&standard_renderer);
-    errdefer edit_mode.deinit();
-
-    return Self {
+    return Self{
         .character_animation_graph = character_animation_graph,
 
         .player_attack_particle_system = player_attack_particle_system,
@@ -150,11 +138,21 @@ pub fn init() !Self {
         .clouds = clouds,
         .atmosphere = atmosphere,
         .particles_renderer = particles_renderer,
-        .edit_mode = edit_mode,
 
         .command_pool = command_pool,
         .command_buffers = command_buffers,
 
         .uber_cmd_semaphores = uber_cmd_semaphores,
     };
+}
+
+pub fn serialize(self: *const Self, alloc: std.mem.Allocator, map: *std.json.ObjectMap) !void {
+    _ = self;
+    _ = alloc;
+    _ = map;
+}
+
+pub fn deserialize(self: *Self, map: *const std.json.ObjectMap) !void {
+    self.character_entity = null;
+    _ = map;
 }

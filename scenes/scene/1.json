@@ -1,11 +1,11 @@
 {
   "name": "floor",
   "6fe4ecb9-a6a3-49ae-b354-d1d1f4c81462": {
-    "_ecs_COMPONENT_NAME": "Serialization",
+    "COMPONENT_NAME": "Serialization",
     "serialize_id": 1
   },
   "91759bfb-2d89-4758-934d-f46ba94ae2a7": {
-    "_ecs_COMPONENT_NAME": "Transform",
+    "COMPONENT_NAME": "Transform",
     "transform": {
       "position": [
         0.8059861660003662,
@@ -27,15 +27,11 @@
       ]
     }
   },
-  "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
-    "_ecs_COMPONENT_NAME": "Model",
-    "model": "res:\\cube.glb"
-  },
   "71e2a14f-8a22-43ee-aed4-65592fe637ea": {
-    "_ecs_COMPONENT_NAME": "Physics",
+    "COMPONENT_NAME": "Physics",
     "settings": {
       "Body": {
-        "settings": {
+        "shape": {
           "shape": {
             "Box": {
               "width": 1,
@@ -68,5 +64,9 @@
         "is_sensor": false
       }
     }
+  },
+  "0391f502-ebb5-4a64-8ed9-592bc7dabbe3": {
+    "COMPONENT_NAME": "Model",
+    "model": "res:\\cube.glb"
   }
 }

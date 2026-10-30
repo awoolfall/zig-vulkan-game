@@ -53,14 +53,20 @@ pub fn deinit(self: *Self) void {
 pub fn init(alloc: std.mem.Allocator) !Self {
     const hmt_id = try eng.get().asset_manager.get_asset_id("res:heightmap/download.r32");
     const hmt = try eng.get().asset_manager.get_asset(as.ImageAsset, hmt_id);
-    
-    const heightmap_texture_view = try gf.ImageView.init(.{ .image = hmt.*, .view_type = .ImageView2DArray, });
+
+    const heightmap_texture_view = try gf.ImageView.init(.{
+        .image = hmt.*,
+        .view_type = .ImageView2DArray,
+    });
     errdefer heightmap_texture_view.deinit();
 
     const albedo_id = try eng.get().asset_manager.get_asset_id("res:heightmap/download_colour.png");
     const albedo = try eng.get().asset_manager.get_asset(as.ImageAsset, albedo_id);
 
-    const albedo_view = try gf.ImageView.init(.{ .image = albedo.*, .view_type = .ImageView2DArray, });
+    const albedo_view = try gf.ImageView.init(.{
+        .image = albedo.*,
+        .view_type = .ImageView2DArray,
+    });
     errdefer albedo_view.deinit();
 
     const HEIGHTMAP_SAMPLES = 512;
@@ -69,7 +75,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     try compute_heightmap_samples(alloc, hmt.*, heightmap_data);
 
-    return Self {
+    return Self{
         .alloc = alloc,
 
         .heightmap_texture_view = heightmap_texture_view,
@@ -85,38 +91,49 @@ pub fn serialize(alloc: std.mem.Allocator, self: Self) !std.json.Value {
     errdefer object.deinit();
 
     // TODO serialize physics option. Or somehow use entity super struct physics for terrain physics
-    try object.put("version", try sr.serialize_value(u32, alloc, 1));
-    try object.put("heightmap_asset_id", try sr.serialize_value(?as.ImageAssetId, alloc, self.heightmap_asset_id));
-    try object.put("map_length_m", try sr.serialize_value(f32, alloc, self.map_length_m));
-    try object.put("map_length_scale", try sr.serialize_value(f32, alloc, self.map_length_scale));
-    try object.put("map_minimum_height", try sr.serialize_value(f32, alloc, self.map_minimum_height));
-    try object.put("map_maximum_height", try sr.serialize_value(f32, alloc, self.map_maximum_height));
-    try object.put("map_height_scale", try sr.serialize_value(f32, alloc, self.map_height_scale));
+    try sr.serialize_object_value(alloc, &object, u32, "version", 1);
+    try sr.serialize_object_value(alloc, &object, ?as.ImageAssetId, "heightmap_asset_id", self.heightmap_asset_id);
+    try sr.serialize_object_value(alloc, &object, f32, "map_length_m", self.map_length_m);
+    try sr.serialize_object_value(alloc, &object, f32, "map_length_scale", self.map_length_scale);
+    try sr.serialize_object_value(alloc, &object, f32, "map_minimum_height", self.map_minimum_height);
+    try sr.serialize_object_value(alloc, &object, f32, "map_maximum_height", self.map_maximum_height);
+    try sr.serialize_object_value(alloc, &object, f32, "map_height_scale", self.map_height_scale);
 
-    return std.json.Value { .object = object };
+    return std.json.Value{ .object = object };
+}
+
+fn dv(comptime T: type, alloc: std.mem.Allocator, obj: std.json.ObjectMap, name: []const u8, default_value: anytype) @TypeOf(default_value) {
+    const v = obj.get(name) orelse return default_value;
+    return sr.deserialize_value(T, alloc, v) catch return default_value;
 }
 
 pub fn deserialize(alloc: std.mem.Allocator, value: std.json.Value) !Self {
     var self = try Self.init(alloc);
     errdefer self.deinit();
 
-    const object: *const std.json.ObjectMap = switch (value) { .object => |obj| &obj, else => return error.InvalidType, };
+    const object: *const std.json.ObjectMap = switch (value) {
+        .object => |obj| &obj,
+        else => return error.InvalidType,
+    };
 
-    var version: u32 = 1;
-    if (object.get("version")) |v| blk: { version = sr.deserialize_value(u32, alloc, v) catch break :blk; }
-    
-    if (object.get("heightmap_asset_id")) |v| blk: { self.heightmap_asset_id = sr.deserialize_value(?as.ImageAssetId, alloc, v) catch break :blk; }
-    if (object.get("map_length_m")) |v| blk: { self.map_length_m = sr.deserialize_value(f32, alloc, v) catch break :blk; }
-    if (object.get("map_length_scale")) |v| blk: { self.map_length_scale = sr.deserialize_value(f32, alloc, v) catch break :blk; }
-    if (object.get("map_minimum_height")) |v| blk: { self.map_minimum_height = sr.deserialize_value(f32, alloc, v) catch break :blk; }
-    if (object.get("map_maximum_height")) |v| blk: { self.map_maximum_height = sr.deserialize_value(f32, alloc, v) catch break :blk; }
-    if (object.get("map_height_scale")) |v| blk: { self.map_height_scale = sr.deserialize_value(f32, alloc, v) catch break :blk; }
+    const version = sr.deserialize_object_value(alloc, object, u32, "version") catch 1;
+    _ = version;
+
+    self.heightmap_asset_id = sr.deserialize_object_value(alloc, object, ?as.ImageAssetId, "heightmap_asset_id") catch null;
+    self.map_length_m = sr.deserialize_object_value(alloc, object, f32, "map_length_m") catch self.map_length_m;
+    self.map_length_scale = sr.deserialize_object_value(alloc, object, f32, "map_length_scale") catch self.map_length_scale;
+    self.map_minimum_height = sr.deserialize_object_value(alloc, object, f32, "map_minimum_height") catch self.map_minimum_height;
+    self.map_maximum_height = sr.deserialize_object_value(alloc, object, f32, "map_maximum_height") catch self.map_maximum_height;
+    self.map_height_scale = sr.deserialize_object_value(alloc, object, f32, "map_height_scale") catch self.map_height_scale;
 
     return self;
 }
 
 fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, output_buffer: []f32) !void {
-    const heightmap_texture_view_non_array = try gf.ImageView.init(.{ .image = heightmap, .view_type = .ImageView2D, });
+    const heightmap_texture_view_non_array = try gf.ImageView.init(.{
+        .image = heightmap,
+        .view_type = .ImageView2D,
+    });
     defer heightmap_texture_view_non_array.deinit();
 
     const heightmap_samples = std.math.sqrt(output_buffer.len);
@@ -124,25 +141,19 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
         return error.OutputBufferDoesNotRepresentASqaure;
     }
 
-    const heightmap_samples_string = try std.fmt.allocPrint(alloc, "{}", .{ heightmap_samples });
+    const heightmap_samples_string = try std.fmt.allocPrint(alloc, "{}", .{heightmap_samples});
     defer alloc.free(heightmap_samples_string);
 
     const heightmap_data_storage_buffer = try gf.Buffer.init(
         @sizeOf(f32) * heightmap_samples * heightmap_samples,
-        .{ .StorageBuffer = true, },
-        .{ .CpuRead = true, .GpuWrite = true, },
+        .{ .StorageBuffer = true },
+        .{ .CpuRead = true, .GpuWrite = true },
     );
     defer heightmap_data_storage_buffer.deinit();
 
-    const sample_shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{
-        .shader_data = @embedFile("terrain_sample.slang"),
-        .shader_entry_points = &.{
-            "cs_sample"
-        },
-        .preprocessor_macros = &.{
-            .{ "SAMPLES_PER_AXIS", heightmap_samples_string },
-        }
-    });
+    const sample_shader_spirv = try gf.GfxState.get().shader_manager.generate_spirv(alloc, .{ .shader_data = @embedFile("terrain_sample.slang"), .shader_entry_points = &.{"cs_sample"}, .preprocessor_macros = &.{
+        .{ "SAMPLES_PER_AXIS", heightmap_samples_string },
+    } });
     defer alloc.free(sample_shader_spirv);
 
     const sample_shader = try gf.ShaderModule.init(.{
@@ -152,18 +163,18 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
 
     const sample_descriptor_layout = try gf.DescriptorLayout.init(.{
         .bindings = &.{
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 0,
                 .binding_type = .ImageView,
             },
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 1,
                 .binding_type = .Sampler,
             },
-            gf.DescriptorBindingInfo {
-                .shader_stages = .{ .Compute = true, },
+            gf.DescriptorBindingInfo{
+                .shader_stages = .{ .Compute = true },
                 .binding = 2,
                 .binding_type = .StorageBuffer,
             },
@@ -171,25 +182,32 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
     });
     defer sample_descriptor_layout.deinit();
 
-    const sample_descriptor_pool = try gf.DescriptorPool.init(.{ .strategy = .{ .Layout = sample_descriptor_layout, }, .max_sets = 1, });
+    const sample_descriptor_pool = try gf.DescriptorPool.init(.{
+        .strategy = .{
+            .Layout = sample_descriptor_layout,
+        },
+        .max_sets = 1,
+    });
     defer sample_descriptor_pool.deinit();
 
-    const sample_descriptor_set = try (try sample_descriptor_pool.get()).allocate_set(.{ .layout = sample_descriptor_layout, });
+    const sample_descriptor_set = try (try sample_descriptor_pool.get()).allocate_set(.{
+        .layout = sample_descriptor_layout,
+    });
     defer sample_descriptor_set.deinit();
 
     try (try sample_descriptor_set.get()).update(.{
         .writes = &.{
-            gf.DescriptorSetUpdateWriteInfo {
+            gf.DescriptorSetUpdateWriteInfo{
                 .binding = 0,
                 .data = .{ .ImageView = heightmap_texture_view_non_array },
             },
-            gf.DescriptorSetUpdateWriteInfo {
+            gf.DescriptorSetUpdateWriteInfo{
                 .binding = 1,
                 .data = .{ .Sampler = gf.GfxState.get().default.sampler },
             },
-            gf.DescriptorSetUpdateWriteInfo {
+            gf.DescriptorSetUpdateWriteInfo{
                 .binding = 2,
-                .data = .{ .StorageBuffer = .{ .buffer = heightmap_data_storage_buffer, } },
+                .data = .{ .StorageBuffer = .{ .buffer = heightmap_data_storage_buffer } },
             },
         },
     });
@@ -205,14 +223,16 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
     });
     defer sample_compute_pipeline.deinit();
 
-    const command_pool = try gf.CommandPool.init(.{ .queue_family = .Compute, });
+    const command_pool = try gf.CommandPool.init(.{ .queue_family = .Compute });
     defer command_pool.deinit();
 
-    var command_buffer = try (try command_pool.get()).allocate_command_buffer(.{ .level = .Primary, });
+    var command_buffer = try (try command_pool.get()).allocate_command_buffer(.{ .level = .Primary });
     defer command_buffer.deinit();
 
     {
-        try command_buffer.cmd_begin(.{ .one_time_submit = true, }); 
+        try command_buffer.cmd_begin(.{
+            .one_time_submit = true,
+        });
         command_buffer.cmd_bind_compute_pipeline(sample_compute_pipeline);
         command_buffer.cmd_bind_descriptor_sets(.{
             .descriptor_sets = &.{
@@ -235,7 +255,7 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
     try sample_fence.wait();
 
     {
-        const mapped_storage_buffer = try (try heightmap_data_storage_buffer.get()).map(.{ .read = true, });
+        const mapped_storage_buffer = try (try heightmap_data_storage_buffer.get()).map(.{ .read = true });
         defer mapped_storage_buffer.unmap();
 
         const mapped_data_array = mapped_storage_buffer.data_array(f32, heightmap_samples * heightmap_samples);
@@ -246,7 +266,7 @@ fn compute_heightmap_samples(alloc: std.mem.Allocator, heightmap: gf.Image.Ref, 
 /// Removes the physics body from the terrain if it exists
 fn remove_physics_body(self: *Self) void {
     if (self.physics_body_id) |*b| {
-        const physics = eng.get().ecs.get_resource(eng.physics.PhysicsSystem) catch return;
+        const physics = eng.get().ecs.get_resource(eng.physics.PhysicsSystem) orelse return;
         const body_interface = physics.zphysics.system.getBodyInterfaceMut();
         body_interface.removeAndDestroyBody(b.*);
         self.physics_body_id = null;
@@ -255,7 +275,7 @@ fn remove_physics_body(self: *Self) void {
 
 /// Regenerates the heightmap physics body using the internal heightmap data
 fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
-    const physics = try eng.get().ecs.get_resource(eng.physics.PhysicsSystem);
+    const physics = eng.get().ecs.get_resource(eng.physics.PhysicsSystem) orelse return error.PhysicsResourceDoesNotExist;
     const body_interface = physics.zphysics.system.getBodyInterfaceMut();
 
     // create the new physics body
@@ -265,12 +285,12 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     const heightmap_side_length_f32: f32 = @floatFromInt(heightmap_side_length);
     const scaled_shape_settings = try ph.zphy.DecoratedShapeSettings.createScaled(
-        shape_settings.asShapeSettings(), 
+        shape_settings.asShapeSettings(),
         [3]f32{
             (self.map_length_m * self.map_length_scale) / heightmap_side_length_f32,
             (self.map_maximum_height - self.map_minimum_height) * self.map_height_scale,
-            (self.map_length_m * self.map_length_scale) / heightmap_side_length_f32
-        }
+            (self.map_length_m * self.map_length_scale) / heightmap_side_length_f32,
+        },
     );
     defer scaled_shape_settings.asShapeSettings().release();
 
@@ -279,7 +299,7 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     const new_body = try body_interface.createAndAddBody(.{
         .shape = shape,
-        .position = transform.position,// + 
+        .position = transform.position, // +
         //    zm.f32x4(self.map_length_m/heightmap_side_length_f32, 0.0, self.map_length_m/heightmap_side_length_f32, 0.0) / zm.f32x4s(2.0),
         .motion_type = .static,
     }, .activate);
@@ -287,19 +307,19 @@ fn generate_heightmap_physics(self: *Self, transform: Transform) !void {
 
     // Remove body if it exists
     self.remove_physics_body();
-    
+
     // apply new physics body
     self.physics_body_id = new_body;
 }
 
 pub fn editor_ui(self: *Self, entity: eng.ecs.Entity, key: anytype) void {
-    const imui = eng.get().ecs.get_resource(Imui) catch return;
+    const imui = eng.get().ecs.get_resource(Imui) orelse return;
 
     const container = imui.push_layout(.Y, key ++ .{@src()});
     defer imui.pop_layout();
-    
+
     if (imui.get_widget(container)) |w| {
-        w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false, };
+        w.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = false };
         w.children_gap = 4;
     }
 
@@ -404,13 +424,13 @@ pub fn edit_terrain(self: *Self, terrain_renderer: *TerrainRenderer) !bool {
 
         const terrain_uv = terrain_renderer.selection_textures
             .get_value_at_position(@intCast(mouse_pos[0]), @intCast(mouse_pos[1])) catch {
-                return false;
-            };
+            return false;
+        };
         if (terrain_uv[0] < 0.0 or terrain_uv[1] < 0.0 or terrain_uv[0] > 1.0 or terrain_uv[1] > 1.0) {
             return false;
         }
         const terrain_uv_v = zm.loadArr2(terrain_uv);
-    
+
         const heightmap_modify_center = terrain_uv_v * zm.f32x4s(heightfield_size_f32);
 
         const max_modify_distance_cells: f32 = (self.modify_radius / self.map_length_m) * 1.5;
@@ -439,8 +459,8 @@ pub fn edit_terrain(self: *Self, terrain_renderer: *TerrainRenderer) !bool {
                 }
             },
             .Flatten => {
-                const center_cell_idx: usize = 
-                    @as(usize, @intFromFloat(@round(heightmap_modify_center[0]))) + 
+                const center_cell_idx: usize =
+                    @as(usize, @intFromFloat(@round(heightmap_modify_center[0]))) +
                     @as(usize, @intFromFloat(@round(heightmap_modify_center[1]))) * HeightFieldSize;
                 const center_cell_value = self.heightmap[center_cell_idx];
                 for (@intCast(min_x)..@intCast(max_x)) |x| {
