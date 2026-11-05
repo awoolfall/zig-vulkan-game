@@ -12,7 +12,7 @@ const pe = @import("particle_editor.zig");
 const StandardRenderer = @import("render.zig");
 const Terrain = @import("terrain/terrain.zig");
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
-const Ocean = @import("ocean/ocean.zig");
+const Ocean = @import("ocean/ocean_renderer.zig");
 
 const zm = eng.zmath;
 const sr = eng.serialize;

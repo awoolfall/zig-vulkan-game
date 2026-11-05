@@ -6,10 +6,12 @@ const Imui = eng.Imui;
 const KeyCode = eng.input.KeyCode;
 
 const app_ecs = @import("ecs.zig");
-const AppResource = @import("app_resource.zig");
 const EditMode = @import("edit_mode.zig");
 const player = @import("player.zig");
 const opponent = @import("opponent.zig");
+
+const AppResource = @import("app_resource.zig");
+const OceanResource = @import("ocean/ocean_resource.zig");
 
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
@@ -35,12 +37,15 @@ pub export fn app_init() i32 {
 }
 
 fn init() !void {
+    eng.get().time.set_target_frame_rate(120.0);
+
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app init");
     defer __tracy_zone.End();
 
     // register app resources
     inline for (.{
         AppResource,
+        OceanResource,
     }) |T| {
         try eng.get().ecs.register_resource(T);
     }
@@ -57,6 +62,7 @@ fn init() !void {
 
     // create app resources
     try eng.get().ecs.create_resource(AppResource);
+    try eng.get().ecs.create_resource(OceanResource);
 }
 
 pub export fn app_update() i32 {
@@ -215,9 +221,10 @@ fn render() !void {
     const imui = eng.get().ecs.get_resource(eng.Imui) orelse return error.NoImui;
 
     var fps_buf: [128]u8 = [_]u8{0} ** 128;
-    const fps_text = std.fmt.bufPrint(fps_buf[0..], "fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
+    const fps_text = std.fmt.bufPrint(fps_buf[0..], "actual fps: {d:0.1}\nbusy fps: {d:0.1}\nframe time: {d:2.3}ms\nwait time: {d:2.3}ms\nwait %: {d:0.0}", .{
         eng.get().time.get_fps(),
-        (1.0 / eng.get().time.get_fps()) * std.time.ms_per_s,
+        1.0 / (eng.get().time.last_frame_time_s - eng.get().time.last_frame_wait_time_s),
+        (eng.get().time.last_frame_time_s - eng.get().time.last_frame_wait_time_s) * std.time.ms_per_s,
         eng.get().time.last_frame_wait_time_s * std.time.ms_per_s,
         (eng.get().time.last_frame_wait_time_s / eng.get().time.last_frame_time_s) * 100.0,
     }) catch unreachable;
@@ -320,8 +327,11 @@ fn render() !void {
             });
         }
 
-        self.ocean.update_images(cmd);
-        self.ocean.render(&self.standard_renderer, render_camera, cmd);
+        if (eng.get().ecs.get_resource(OceanResource)) |ocean_resource| {
+            self.ocean.recreate_h0_image(cmd, ocean_resource.ocean_settings);
+            self.ocean.update_images(cmd);
+            self.ocean.render(&self.standard_renderer, render_camera, cmd);
+        }
 
         self.particles_renderer.push_particle_system(&self.player_attack_particle_system) catch |err| {
             std.log.warn("Unable to push particle system '{s}' for rendering: {}", .{ "player attack", err });

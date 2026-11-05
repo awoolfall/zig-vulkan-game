@@ -60,9 +60,14 @@ const ShallowSpot = extern struct {
 pub const OceanSettings = struct {
     amplitude: f32,
     wind: [2]f32,
+
+    pub inline fn eql(self: OceanSettings, rhs: OceanSettings) bool {
+        return self.amplitude == rhs.amplitude and
+            std.mem.eql(f32, &self.wind, &rhs.wind);
+    }
 };
 
-current_settings: OceanSettings,
+current_settings: OceanSettings = .{ .amplitude = 0.06, .wind = .{ 4.0, 0.0 } },
 
 clipmap_mesh: ClipmapMesh,
 
@@ -229,7 +234,7 @@ pub fn deinit(self: *Self) void {
     self.render_shader_file_watcher.deinit();
 }
 
-pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
+pub fn init(sky_cubemap: gfx.ImageView.Ref) !Self {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "ocean init");
     defer __tracy_zone.End();
 
@@ -935,8 +940,6 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
     errdefer shader_file_watcher.deinit();
 
     var self = Self{
-        .current_settings = undefined,
-
         .clipmap_mesh = clipmap_mesh,
 
         .gaussian_random_image = gaussian_random_image,
@@ -1017,7 +1020,12 @@ pub fn init(settings: OceanSettings, sky_cubemap: gfx.ImageView.Ref) !Self {
         defer cmd.deinit();
 
         try cmd.cmd_begin(.{ .one_time_submit = true });
+
+        // modify current settings stored in self so we can force recreate_h0_image
+        const settings = self.current_settings;
+        self.current_settings.amplitude -= 1.0;
         self.recreate_h0_image(&cmd, settings);
+
         try cmd.cmd_end();
 
         var fence = try gfx.Fence.init(.{});
@@ -1156,6 +1164,13 @@ fn create_pipeline(self: *Self) !gfx.GraphicsPipeline.Ref {
 }
 
 pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSettings) void {
+    // skip if the new settings are the same as the old settings
+    if (self.current_settings.eql(settings)) {
+        return;
+    }
+
+    self.current_settings = settings;
+
     // transition h0 from shader reading to compute destination
     cmd.cmd_pipeline_barrier(.{
         .image_barriers = &.{
@@ -1210,8 +1225,6 @@ pub fn recreate_h0_image(self: *Self, cmd: *gfx.CommandBuffer, settings: OceanSe
         .src_stage = .{ .compute_shader = true },
         .dst_stage = .{ .compute_shader = true },
     });
-
-    self.current_settings = settings;
 }
 
 pub fn push_shallow_spot(self: *Self, shallow_spot: ShallowSpot) void {

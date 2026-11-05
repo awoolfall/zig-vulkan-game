@@ -4,7 +4,7 @@ const zm = eng.zmath;
 
 const StandardRenderer = @import("render.zig");
 const TerrainRenderer = @import("terrain/terrain_renderer.zig");
-const Ocean = @import("ocean/ocean.zig");
+const OceanRenderer = @import("ocean/ocean_renderer.zig");
 const Clouds = @import("clouds/clouds.zig");
 const Atmosphere = @import("atmosphere/atmosphere.zig");
 const EditMode = @import("edit_mode.zig");
@@ -21,7 +21,7 @@ player_attack_particle_system: eng.ParticleSystem,
 
 standard_renderer: StandardRenderer,
 terrain_renderer: TerrainRenderer,
-ocean: Ocean,
+ocean: OceanRenderer,
 clouds: Clouds,
 atmosphere: Atmosphere,
 particles_renderer: eng.ParticleRenderer,
@@ -118,7 +118,7 @@ pub fn init() !Self {
     var atmosphere = try Atmosphere.init(.{});
     errdefer atmosphere.deinit();
 
-    var ocean = try Ocean.init(.{ .amplitude = 0.06, .wind = .{ 4.0, 0.0 } }, atmosphere.cubemap_sampler_view);
+    var ocean = try OceanRenderer.init(atmosphere.cubemap_sampler_view);
     errdefer ocean.deinit();
 
     var clouds = try Clouds.init(eng.get().general_allocator);
