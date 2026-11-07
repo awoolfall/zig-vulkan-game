@@ -1,3 +1,0 @@
-[submodule "libs/engine"]
-	path = libs/engine
-	url = https://github.com/awoolfall/zig-dx11.git
