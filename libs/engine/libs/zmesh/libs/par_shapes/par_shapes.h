@@ -394,8 +394,8 @@ par_shapes_mesh* par_shapes_create_torus(int slices, int stacks, float radius)
     if (slices < 3 || stacks < 3) {
         return 0;
     }
-    assert(radius <= 1.0 && "Use smaller radius to avoid self-intersection.");
-    assert(radius >= 0.1 && "Use larger radius to avoid self-intersection.");
+    //assert(radius <= 1.0 && "Use smaller radius to avoid self-intersection.");
+    //assert(radius >= 0.1 && "Use larger radius to avoid self-intersection.");
     void* userdata = (void*) &radius;
     return par_shapes_create_parametric(par_shapes__torus, slices,
         stacks, userdata);

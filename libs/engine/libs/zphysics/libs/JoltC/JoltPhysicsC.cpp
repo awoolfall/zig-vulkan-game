@@ -1273,6 +1273,72 @@ JPC_NarrowPhaseQuery_CastRay(const JPC_NarrowPhaseQuery *in_query,
             *static_cast<const JPH::BodyFilter *>(in_body_filter) : body_filter);
 }
 //--------------------------------------------------------------------------------------------------
+class CollideShapeCollector : public JPH::CollideShapeCollector {
+public:
+    CollideShapeCollector(JPH::CollideShapeCollector* collector): m_collector(collector) {}
+    virtual ~CollideShapeCollector() {}
+
+    virtual void Reset() override {
+        assert(m_collector != nullptr);
+        m_collector->Reset();
+    }
+    virtual void OnBody(const JPH::Body &inBody) override {
+        assert(m_collector != nullptr);
+        m_collector->OnBody(inBody);
+    }
+    virtual void SetUserData(uint64_t inUserData) override {
+        assert(m_collector != nullptr);
+        m_collector->SetUserData(inUserData);
+    }
+    virtual void AddHit(const JPH::CollideShapeResult &inResult) override {
+        assert(m_collector != nullptr);
+        m_collector->AddHit(inResult);
+    }
+
+    JPH::CollideShapeCollector* m_collector;
+};
+
+JPC_API void
+JPC_NarrowPhaseQuery_CollideShape(const JPC_NarrowPhaseQuery *in_query,
+                            const JPC_Shape *in_shape,
+                            const float in_shape_scale[3],
+                            const JPC_Real in_center_of_mass_transform[16],
+                            const JPC_Real in_base_offset[3],
+                            void *io_collector,
+                            const void *in_broad_phase_layer_filter,
+                            const void *in_object_layer_filter,
+                            const void *in_body_filter,
+                            const void *in_shape_filter)
+{
+    assert(in_query && in_shape && io_collector);
+
+    CollideShapeCollector collector(reinterpret_cast<JPH::CollideShapeCollector*>(io_collector));
+
+    const JPH::CollideShapeSettings settings{};
+    const JPH::BroadPhaseLayerFilter broad_phase_layer_filter{};
+    const JPH::ObjectLayerFilter object_layer_filter{};
+    const JPH::BodyFilter body_filter{};
+    const JPH::ShapeFilter shape_filter{};
+
+    auto query = reinterpret_cast<const JPH::NarrowPhaseQuery *>(in_query);
+    query->CollideShape(
+        toJph(in_shape),
+        loadVec3(in_shape_scale),
+        loadMat44(in_center_of_mass_transform),
+        settings,
+        loadRVec3(in_base_offset),
+        collector,
+        in_broad_phase_layer_filter ?
+            *static_cast<const JPH::BroadPhaseLayerFilter *>(in_broad_phase_layer_filter) :
+            broad_phase_layer_filter,
+        in_object_layer_filter ?
+            *static_cast<const JPH::ObjectLayerFilter *>(in_object_layer_filter) : object_layer_filter,
+        in_body_filter ?
+            *static_cast<const JPH::BodyFilter *>(in_body_filter) : body_filter,
+        in_shape_filter ?
+            *static_cast<const JPH::ShapeFilter *>(in_shape_filter) : shape_filter);
+}
+//--------------------------------------------------------------------------------------------------
 //
 // JPC_ShapeSettings
 //
@@ -3343,6 +3409,12 @@ JPC_Character_RemoveFromPhysicsSystem(JPC_Character *in_character, bool in_lock_
     toJph(in_character)->RemoveFromPhysicsSystem(in_lock_bodies);
 }
 //--------------------------------------------------------------------------------------------------
+JPC_API JPC_BodyID
+JPC_Character_GetBodyID(const JPC_Character *in_character)
+{
+    return toJpc(toJph(in_character)->GetBodyID());
+}
+//--------------------------------------------------------------------------------------------------
 JPC_API void
 JPC_Character_GetPosition(const JPC_Character *in_character, JPC_Real out_position[3])
 {
@@ -3365,6 +3437,18 @@ JPC_API void
 JPC_Character_SetLinearVelocity(JPC_Character *in_character, const float in_linear_velocity[3])
 {
     toJph(in_character)->SetLinearVelocity(loadVec3(in_linear_velocity));
+}
+//--------------------------------------------------------------------------------------------------
+JPC_API void
+JPC_Character_PostSimulation(JPC_Character *in_character, float inMaxSeperationDistance, bool inLockBodies)
+{
+    toJph(in_character)->PostSimulation(inMaxSeperationDistance, inLockBodies);
+}
+//--------------------------------------------------------------------------------------------------
+JPC_API bool
+JPC_Character_IsSupported(JPC_Character *in_character)
+{
+    return toJph(in_character)->IsSupported();
 }
 //--------------------------------------------------------------------------------------------------
 //
@@ -3487,6 +3571,20 @@ JPC_API void
 JPC_CharacterVirtual_GetGroundVelocity(const JPC_CharacterVirtual *in_character, float out_ground_velocity[3])
 {
     storeVec3(out_ground_velocity, toJph(in_character)->GetGroundVelocity());
+}
+//--------------------------------------------------------------------------------------------------
+JPC_API void
+JPC_CharacterVirtual_GetGroundNormal(const JPC_CharacterVirtual *in_character, float out_ground_normal[3])
+{
+    storeVec3(out_ground_normal, toJph(in_character)->GetGroundNormal());
+}
+//--------------------------------------------------------------------------------------------------
+JPC_API bool
+JPC_CharacterVirtual_GetGroundBodyID(const JPC_CharacterVirtual *in_character, JPC_BodyID *body_id)
+{
+    auto ground_id = toJph(in_character)->GetGroundBodyID();
+    *body_id = toJpc(ground_id);
+    return !ground_id.IsInvalid();
 }
 //--------------------------------------------------------------------------------------------------
 JPC_API void

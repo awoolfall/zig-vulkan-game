@@ -911,6 +911,34 @@ typedef struct JPC_PhysicsStepListenerContext
     JPC_PhysicsSystem *physics_system;
 } JPC_PhysicsStepListenerContext;
 
+typedef struct JPC_CollideShapeCollectorVTable
+{
+    _JPC_VTABLE_HEADER;
+
+    // Required, *cannot* be NULL.
+    void
+    (*Reset)(void *in_self);
+
+    // Required, *cannot* be NULL.
+    void
+    (*OnBody)(void *in_self,
+            const JPC_Body *in_body);
+    
+    // Required, *cannot* be NULL.
+    void
+    (*OnBodyEnd)(void *in_self);
+
+    // Required, *cannot* be NULL.
+    void
+    (*SetUserData)(void *in_self,
+            const uint64_t *in_user_data);
+
+    // Required, *cannot* be NULL.
+    void
+    (*AddHit)(void *in_self,
+            const JPC_CollideShapeResult *in_result);
+} JPC_CollideShapeCollectorVTable;
+
 typedef struct JPC_PhysicsStepListenerVTable
 {
     _JPC_VTABLE_HEADER;
@@ -1481,6 +1509,17 @@ JPC_NarrowPhaseQuery_CastRay(const JPC_NarrowPhaseQuery *in_query,
                              const void *in_broad_phase_layer_filter, // Can be NULL (no filter)
                              const void *in_object_layer_filter, // Can be NULL (no filter)
                              const void *in_body_filter); // Can be NULL (no filter)
+JPC_API void
+JPC_NarrowPhaseQuery_CollideShape(const JPC_NarrowPhaseQuery *in_query,
+                            const JPC_Shape *in_shape,
+                            const float in_shape_scale[3],
+                            const JPC_Real in_center_of_mass_transform[16],
+                            const JPC_Real in_base_offset[3],
+                            void *io_collector,
+                            const void *in_broad_phase_layer_filter,
+                            const void *in_object_layer_filter,
+                            const void *in_body_filter,
+                            const void *in_shape_filter);
 //--------------------------------------------------------------------------------------------------
 //
 // JPC_ShapeSettings
@@ -2412,6 +2451,9 @@ JPC_Character_AddToPhysicsSystem(JPC_Character *in_character, JPC_Activation in_
 JPC_API void
 JPC_Character_RemoveFromPhysicsSystem(JPC_Character *in_character, bool in_lock_bodies);
 
+JPC_API JPC_BodyID
+JPC_Character_GetBodyID(const JPC_Character *in_character);
+
 JPC_API void
 JPC_Character_GetPosition(const JPC_Character *in_character, JPC_Real out_position[3]);
 
@@ -2423,6 +2465,12 @@ JPC_Character_GetLinearVelocity(const JPC_Character *in_character, float out_lin
 
 JPC_API void
 JPC_Character_SetLinearVelocity(JPC_Character *in_character, const float in_linear_velocity[3]);
+
+JPC_API void
+JPC_Character_PostSimulation(JPC_Character *in_character, float inMaxSeperationDistance, bool inLockBodies);
+
+JPC_API bool
+JPC_Character_IsSupported(JPC_Character *in_character);
 //--------------------------------------------------------------------------------------------------
 //
 // JPC_CharacterVirtualSettings
@@ -2477,8 +2525,14 @@ JPC_CharacterVirtual_UpdateGroundVelocity(JPC_CharacterVirtual *in_character);
 JPC_API void
 JPC_CharacterVirtual_GetGroundVelocity(const JPC_CharacterVirtual *in_character, float out_ground_velocity[3]);
 
+JPC_API void
+JPC_CharacterVirtual_GetGroundNormal(const JPC_CharacterVirtual *in_character, float out_ground_normal[3]);
+
 JPC_API JPC_CharacterGroundState
 JPC_CharacterVirtual_GetGroundState(JPC_CharacterVirtual *in_character);
+
+JPC_API bool
+JPC_CharacterVirtual_GetGroundBodyID(const JPC_CharacterVirtual *in_character, JPC_BodyID *body_id);
 
 JPC_API void
 JPC_CharacterVirtual_GetPosition(const JPC_CharacterVirtual *in_character, JPC_Real out_position[3]);
