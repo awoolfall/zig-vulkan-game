@@ -1,0 +1,20 @@
+.{
+    .name = .zig_dx11_engine,
+    .version = "0.0.1",
+    .fingerprint = 0x502d489b2f819fd3,
+    .dependencies = .{
+        .zmath = .{ .path = "libs/zmath" },
+        .zmesh = .{ .path = "libs/zmesh" },
+        .zphysics = .{ .path = "libs/zphysics" },
+        .zstbi = .{ .path = "libs/zstbi" },
+        .znoise = .{ .path = "libs/znoise" },
+        .assimp = .{ .path = "libs/assimp" },
+        .slang = .{ .path = "libs/slang" },
+        .ztracy = .{ .path = "libs/ztracy" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

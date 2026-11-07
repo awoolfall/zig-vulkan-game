@@ -1,0 +1,46 @@
+pub const Engine = @import("engine.zig");
+
+pub const gitrev = @import("build_options").engine_gitrev;
+pub const gitchanged = @import("build_options").engine_gitchanged;
+
+pub const zmath = @import("zmath");
+pub const znoise = @import("znoise");
+pub const zmesh = @import("zmesh");
+pub const ztracy = @import("ztracy");
+
+pub const os = @import("os/os.zig");
+pub const gfx = @import("gfx/gfx.zig");
+pub const assets = @import("asset/asset.zig");
+pub const input = @import("input/input.zig");
+pub const physics = @import("physics/physics.zig");
+pub const ecs = @import("engine/ecs.zig");
+pub const animation = @import("animation/animation.zig");
+pub const serialize = @import("serialize/serialize.zig");
+
+pub const TimeState = @import("engine/time.zig");
+pub const Transform = @import("util/transform.zig");
+pub const Model = @import("asset/model/model.zig");
+pub const Image = @import("asset/image/image.zig");
+pub const Camera = @import("engine/camera.zig");
+pub const ParticleSystem = @import("particles/particle_system.zig");
+pub const ParticleRenderer = @import("particles/particle_renderer.zig");
+pub const AnimationGraph = @import("animation/animation_graph.zig");
+pub const Imui = @import("ui/imui.zig");
+pub const Debug = @import("debug/debug.zig");
+
+pub const util = struct {
+    pub const Rect = @import("util/rect.zig");
+    pub const Ray = @import("util/ray.zig");
+    pub const BoundingBox = @import("util/bounding_box.zig");
+    pub const easings = @import("util/easings.zig");
+    pub const gen = @import("util/gen_list.zig");
+    pub const uri = @import("util/uri.zig");
+};
+
+pub inline fn get() *Engine {
+    return @import("global_engine.zig").__global_engine;
+}
+
+pub fn set_global_engine_ptr(engine_ptr: *Engine) void {
+    @import("global_engine.zig").__global_engine = engine_ptr;
+}

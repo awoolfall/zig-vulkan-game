@@ -1,0 +1,11 @@
+.{
+    .name = .assimp,
+    .fingerprint = 0x72c27c48c3157479,
+    .version = "0.1.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "libs",
+        "src",
+    },
+}

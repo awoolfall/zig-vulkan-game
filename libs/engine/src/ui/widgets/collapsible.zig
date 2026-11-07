@@ -1,0 +1,47 @@
+const eng = @import("self");
+const Imui = eng.Imui;
+const zm = eng.zmath;
+const label = @import("label.zig");
+
+pub fn create(imui: *Imui, text: []const u8, key: anytype) Imui.WidgetSignal(Imui.WidgetId) {
+    const l = imui.push_layout(.X, key ++ .{@src()});
+    const is_open = (imui.get_widget_data(bool, l) catch unreachable)[0];
+
+    if (imui.get_widget(l)) |lw| {
+        lw.children_gap = 8;
+        lw.flags.clickable = true;
+        lw.flags.render = true;
+    }
+    var l_interaction = imui.generate_widget_signals(l);
+
+    _ = label.create(imui, if (is_open.*) "▼" else "▶");
+    _ = label.create(imui, text);
+    const line_widget = Imui.Widget{
+        .key = Imui.DontCareKey,
+        .semantic_size = [2]Imui.SemanticSize{
+            Imui.SemanticSize{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true },
+            Imui.SemanticSize{ .kind = .Pixels, .value = 1.0, .shrinkable = false },
+        },
+        .background_colour = imui.palette().border,
+        .flags = .{
+            .render = true,
+        },
+        .anchor = .{ 0.0, 0.5 },
+        .pivot = .{ 0.0, 0.5 },
+    };
+    _ = imui.add_widget(line_widget, null);
+
+    imui.pop_layout();
+
+    // behaviour
+    if (l_interaction.clicked) {
+        is_open.* = !is_open.*;
+        l_interaction.data_changed = true;
+    }
+
+    return l_interaction;
+}
+
+pub inline fn collapsible_is_open(imui: *Imui, collapsible_widget: Imui.WidgetId) !bool {
+    return (try collapsible_widget.get_widget_data(bool, imui)).@"0".*;
+}
