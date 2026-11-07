@@ -75,8 +75,6 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .link_libc = true,
-            .link_libcpp = (target.result.abi != .msvc),
         }),
     });
 
@@ -259,7 +257,6 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/zphysics.zig"),
             .target = target,
             .optimize = optimize,
-            .link_libc = true,
         }),
     });
     b.installArtifact(tests);
