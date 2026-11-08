@@ -108,7 +108,7 @@ pub const WindowsPlatform = struct {
         if (pop_window_event_from_queue()) |window_event| {
             return window_event;
         } else {
-            return os.WindowEvent{ .EVENTS_CLEARED = {} };
+            return os.WindowEvent{ .events_cleared = {} };
         }
     }
 
@@ -125,7 +125,7 @@ pub const WindowsPlatform = struct {
         _ = w32.ClipCursor(null);
     }
 
-    pub fn confine_cursor(self: *WindowsPlatform, rect: os.Rect) void {
+    pub fn confine_cursor(self: *WindowsPlatform, rect: os.events.Rect) void {
         _ = self;
         const w32rect = w32.RECT{
             .left = rect.x,
@@ -141,7 +141,7 @@ pub const WindowsPlatform = struct {
         if (w32.GetCursorPos(&cursor_pos) == 0) {
             return;
         }
-        self.confine_cursor(os.Rect{
+        self.confine_cursor(os.events.Rect{
             .x = cursor_pos.x,
             .y = cursor_pos.y,
             .width = 1,
@@ -200,13 +200,15 @@ fn create_window(id: u32, options: struct {
 
     w32.DragAcceptFiles(hwnd, w32.TRUE);
 
-    push_window_event_to_queue(os.WindowEvent{ .WINDOW_CREATED = .{
-        .id = id,
-        .window = WindowHandle{
+    push_window_event_to_queue(os.WindowEvent{
+        .window_created = .{
             .id = id,
-            .hwnd = hwnd,
+            .window = WindowHandle.WindowIdentifierExtern{
+                .id = id,
+                .hwnd = hwnd,
+            },
         },
-    } });
+    });
 
     std.debug.assert(eng.get().os.window_thread_hwnd_map[id] == null);
     eng.get().os.window_thread_hwnd_map[id] = hwnd;
@@ -281,19 +283,31 @@ fn window_thread_fn() void {
 }
 
 pub const WindowHandle = struct {
+    pub const WindowIdentifierExtern = extern struct {
+        id: u32,
+        hwnd: w32.HWND,
+    };
+
     id: u32,
     hwnd: w32.HWND,
+
+    pub fn from_window_identifier_extern(id: WindowIdentifierExtern) !WindowHandle {
+        return .{
+            .id = id.id,
+            .hwnd = id.hwnd,
+        };
+    }
 
     pub fn close_window(self: *const WindowHandle) void {
         _ = w32.PostThreadMessageA(eng.get().os.window_thread_id, WM_USER_REQUEST_DESTROY_WINDOW, @intCast(self.id), 0);
     }
 
-    pub fn get_client_size(self: *const WindowHandle) !os.WindowSize {
+    pub fn get_client_size(self: *const WindowHandle) !os.events.WindowSize {
         var rect: w32.RECT = undefined;
         if (w32.GetClientRect(self.hwnd, &rect) == w32.FALSE) {
             return error.FailedToGetClientRect;
         }
-        return os.WindowSize{ .width = rect.right, .height = rect.bottom };
+        return os.events.WindowSize{ .width = rect.right, .height = rect.bottom };
     }
 
     pub fn copy_string_to_clipboard(self: *const WindowHandle, str: []const u8) !void {
@@ -382,22 +396,22 @@ pub const WindowHandle = struct {
     }
 };
 
-fn construct_key_event(w_param: w32.WPARAM, l_param: w32.LPARAM) ?os.KeyEvent {
+fn construct_key_event(w_param: w32.WPARAM, l_param: w32.LPARAM) ?os.events.KeyEvent {
     const key = convert_windows_keycode(w_param);
     if (key == null) {
         return null;
     }
 
-    return os.KeyEvent{
+    return .{
         .keycode = key.?,
         .scan_code = @intCast((l_param >> 16) & 0xff),
         .repeat_count = @intCast(l_param & 0xffff),
     };
 }
 
-fn construct_char_event(w_param: w32.WPARAM, l_param: w32.LPARAM) os.CharEvent {
+fn construct_char_event(w_param: w32.WPARAM, l_param: w32.LPARAM) os.events.CharEvent {
     const utf8_seq = [2:0]u8{ @intCast(w_param), @intCast(w_param >> 8) };
-    return os.CharEvent{
+    return .{
         .utf8_char_seq = utf8_seq,
         .utf8_char_len = if (utf8_seq[1] == 0) 1 else 2,
         .scan_code = @intCast((l_param >> 16) & 0xff),
@@ -405,9 +419,9 @@ fn construct_char_event(w_param: w32.WPARAM, l_param: w32.LPARAM) os.CharEvent {
     };
 }
 
-fn construct_cursor_move_event(w_param: w32.WPARAM, l_param: w32.LPARAM) os.CursorMoveEvent {
+fn construct_cursor_move_event(w_param: w32.WPARAM, l_param: w32.LPARAM) os.events.CursorMoveEvent {
     _ = w_param;
-    return os.CursorMoveEvent{
+    return .{
         .x_coord = @intCast(GET_X_LPARAM(l_param)),
         .y_coord = @intCast(GET_Y_LPARAM(l_param)),
     };
@@ -432,9 +446,7 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
     switch (u_msg) {
         w32.WM_CLOSE => {
             if (eng.get().os.find_hwnd_id(hwnd)) |id| {
-                push_window_event_to_queue(os.WindowEvent{
-                    .WINDOW_REQUESTED_CLOSE = @intCast(id),
-                });
+                push_window_event_to_queue(os.WindowEvent{ .window_requested_close = @intCast(id) });
                 return 0;
             } else {
                 std.log.err("WM_CLOSE recieved for an unknown hwnd", .{});
@@ -443,23 +455,23 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
         w32.WM_DESTROY => {
             if (eng.get().os.find_hwnd_id(hwnd)) |id| {
                 eng.get().os.window_thread_hwnd_map[id] = null;
-                push_window_event_to_queue(os.WindowEvent{ .WINDOW_CLOSED = @intCast(id) });
+                push_window_event_to_queue(os.WindowEvent{ .window_closed = @intCast(id) });
             } else {
                 std.log.err("WM_DESTROY recieved for an unknown hwnd", .{});
             }
         },
 
         w32.WM_SIZE => {
-            push_window_event_to_queue(os.WindowEvent{ .RESIZED = os.WindowSize{
+            push_window_event_to_queue(os.WindowEvent{ .resized = os.events.WindowSize{
                 .width = @intCast(LOWORD(@as(w32.DWORD, @truncate(@as(c_ulonglong, @bitCast(l_param)))))),
                 .height = @intCast(HIWORD(@as(w32.DWORD, @truncate(@as(c_ulonglong, @bitCast(l_param)))))),
             } });
         },
         w32.WM_SETFOCUS => {
-            push_window_event_to_queue(os.WindowEvent{ .GAINED_FOCUS = undefined });
+            push_window_event_to_queue(os.WindowEvent{ .gained_focus = undefined });
         },
         w32.WM_KILLFOCUS => {
-            push_window_event_to_queue(os.WindowEvent{ .LOST_FOCUS = undefined });
+            push_window_event_to_queue(os.WindowEvent{ .lost_focus = undefined });
         },
 
         w32.WM_KEYDOWN => {
@@ -470,9 +482,9 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
 
             // Check if the previous key state bit is set
             if ((l_param & (1 << 30)) != 0) {
-                push_window_event_to_queue(os.WindowEvent{ .KEY_REPEAT = keyevent.? });
+                push_window_event_to_queue(os.WindowEvent{ .key_repeat = keyevent.? });
             } else {
-                push_window_event_to_queue(os.WindowEvent{ .KEY_DOWN = keyevent.? });
+                push_window_event_to_queue(os.WindowEvent{ .key_down = keyevent.? });
             }
         },
         w32.WM_KEYUP => {
@@ -481,27 +493,27 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
                 return 0;
             }
 
-            push_window_event_to_queue(os.WindowEvent{ .KEY_UP = keyevent.? });
+            push_window_event_to_queue(os.WindowEvent{ .key_up = keyevent.? });
         },
         w32.WM_CHAR => {
-            push_window_event_to_queue(os.WindowEvent{ .CHAR = construct_char_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .char = construct_char_event(w_param, l_param) });
         },
 
         w32.WM_MOUSEMOVE => {
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
         },
         w32.WM_LBUTTONDOWN => {
             _ = w32.SetCapture(hwnd);
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_DOWN = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_down = .{
                 .keycode = eng.input.KeyCode.MouseLeft,
                 .repeat_count = 1,
                 .scan_code = 0,
             } });
         },
         w32.WM_LBUTTONUP => {
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_UP = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_up = .{
                 .keycode = eng.input.KeyCode.MouseLeft,
                 .repeat_count = 1,
                 .scan_code = 0,
@@ -510,16 +522,16 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
         },
         w32.WM_MBUTTONDOWN => {
             _ = w32.SetCapture(hwnd);
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_DOWN = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_down = .{
                 .keycode = eng.input.KeyCode.MouseMiddle,
                 .repeat_count = 1,
                 .scan_code = 0,
             } });
         },
         w32.WM_MBUTTONUP => {
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_UP = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_up = .{
                 .keycode = eng.input.KeyCode.MouseMiddle,
                 .repeat_count = 1,
                 .scan_code = 0,
@@ -528,16 +540,16 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
         },
         w32.WM_RBUTTONDOWN => {
             _ = w32.SetCapture(hwnd);
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_DOWN = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_down = .{
                 .keycode = eng.input.KeyCode.MouseRight,
                 .repeat_count = 1,
                 .scan_code = 0,
             } });
         },
         w32.WM_RBUTTONUP => {
-            push_window_event_to_queue(os.WindowEvent{ .CURSOR_MOVED = construct_cursor_move_event(w_param, l_param) });
-            push_window_event_to_queue(os.WindowEvent{ .KEY_UP = os.KeyEvent{
+            push_window_event_to_queue(os.WindowEvent{ .cursor_moved = construct_cursor_move_event(w_param, l_param) });
+            push_window_event_to_queue(os.WindowEvent{ .key_up = .{
                 .keycode = eng.input.KeyCode.MouseRight,
                 .repeat_count = 1,
                 .scan_code = 0,
@@ -548,7 +560,7 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
         w32.WM_INPUT => {
             const mouse_data = get_mouse_raw_data(l_param);
             if (mouse_data != null) {
-                push_window_event_to_queue(os.WindowEvent{ .RAW_MOUSE_MOVED = os.RawMouseMoveEvent{
+                push_window_event_to_queue(os.WindowEvent{ .raw_mouse_moved = .{
                     .x_delta = mouse_data.?.lLastX,
                     .y_delta = mouse_data.?.lLastY,
                 } });
@@ -562,10 +574,10 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
 
             const file_count = w32.DragQueryFileA(w_param, 0xFFFFFFFF, 0, 0);
 
-            const file_paths = alloc.alloc([]u8, file_count) catch |err| break :blk err;
+            const file_paths = alloc.alloc([*:0]u8, file_count) catch |err| break :blk err;
             errdefer alloc.free(file_paths);
 
-            var file_paths_list = std.ArrayList([]u8).initBuffer(file_paths);
+            var file_paths_list = std.ArrayList([*:0]u8).initBuffer(file_paths);
             errdefer for (file_paths_list.items) |path| {
                 alloc.free(path);
             };
@@ -581,7 +593,7 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
                     break :blk error.UnableToGetFilePath;
                 }
 
-                const file_path_buffer = alloc.dupe(u8, file_path_buffer_0) catch |err| break :blk err;
+                const file_path_buffer = alloc.dupeZ(u8, file_path_buffer_0) catch |err| break :blk err;
                 errdefer alloc.free(file_path_buffer);
 
                 // std.mem.replaceScalar(u8, file_path_buffer, '\\', '/');
@@ -589,7 +601,7 @@ export fn window_proc(hwnd: w32.HWND, u_msg: w32.UINT, w_param: w32.WPARAM, l_pa
                 file_paths_list.appendBounded(file_path_buffer) catch |err| break :blk err;
             }
 
-            push_window_event_to_queue(os.WindowEvent{ .DROPPED_FILES = .{ .paths = file_paths } });
+            push_window_event_to_queue(os.WindowEvent{ .dropped_files = .{ .paths = file_paths.ptr, .num_paths = @intCast(file_paths.len) } });
         }) catch |err| {
             std.log.err("Error receiving dropped file: {}", .{err});
         },

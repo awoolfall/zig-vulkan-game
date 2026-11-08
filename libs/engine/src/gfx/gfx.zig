@@ -373,7 +373,7 @@ pub const GfxState = struct {
 
     pub fn received_window_event(self: *Self, event: *const eng.os.WindowEvent) void {
         switch (event.*) {
-            .RESIZED => |new_size| {
+            .resized => |new_size| {
                 self.window_resized(@intCast(new_size.width), @intCast(new_size.height));
             },
             else => {},

@@ -7,7 +7,7 @@ const builtin = @import("builtin");
 var debug_allocator: std.heap.DebugAllocator(.{ .stack_trace_frames = 32 }) = .init;
 
 pub fn main() !void {
-    var gpa, const is_debug = gpa: {
+    const gpa, const is_debug = gpa: {
         if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
@@ -21,7 +21,7 @@ pub fn main() !void {
         }
     };
 
-    const engine = eng.Engine.init_engine(&gpa) orelse return error.FailedToInitEngine;
+    const engine = try eng.Engine.init(gpa);
     defer engine.deinit();
 
     engine.run();

@@ -16,6 +16,11 @@ const OceanResource = @import("ocean/ocean_resource.zig");
 const gitrev = eng.gitrev;
 const gitchanged = eng.gitchanged;
 
+const Resources = .{
+    AppResource,
+    OceanResource,
+};
+
 pub export fn app_deinit() i32 {
     deinit() catch |err| {
         std.log.err("App deinit failed: {}", .{err});
@@ -26,6 +31,18 @@ pub export fn app_deinit() i32 {
 }
 
 fn deinit() !void {}
+
+pub export fn app_register() void {
+    // register app resources
+    inline for (Resources) |T| {
+        eng.get().ecs.register_resource(T) catch unreachable;
+    }
+
+    // register app components
+    inline for (app_ecs.EntityComponents) |T| {
+        eng.get().ecs.register_component(T) catch unreachable;
+    }
+}
 
 pub export fn app_init() i32 {
     init() catch |err| {
@@ -42,22 +59,8 @@ fn init() !void {
     const __tracy_zone = eng.ztracy.ZoneN(@src(), "app init");
     defer __tracy_zone.End();
 
-    // register app resources
-    inline for (.{
-        AppResource,
-        OceanResource,
-    }) |T| {
-        try eng.get().ecs.register_resource(T);
-    }
-
-    // register app components
-    inline for (app_ecs.EntityComponents) |T| {
-        try eng.get().ecs.register_component(T);
-    }
-
     // create standard resources
     try eng.get().ecs.create_resource(eng.Imui);
-    try eng.get().ecs.create_resource(eng.physics.PhysicsSystem);
     try eng.get().ecs.create_resource(eng.Debug);
 
     // create app resources

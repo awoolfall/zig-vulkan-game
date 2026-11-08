@@ -65,9 +65,6 @@ pub fn create(imui: *Imui, options: LineEditOptions, key: anytype) Imui.WidgetSi
         lw.flags.render = true;
         lw.flags.clickable = true;
         lw.flags.hover_effect = false;
-        lw.semantic_size[0].kind = .ParentPercentage;
-        lw.semantic_size[0].value = 1.0;
-        lw.semantic_size[0].shrinkable = true;
         lw.semantic_size[1].kind = .Pixels;
         lw.semantic_size[1].value = 16.0;
         lw.background_colour = imui.palette().secondary;
@@ -84,11 +81,6 @@ pub fn create(imui: *Imui, options: LineEditOptions, key: anytype) Imui.WidgetSi
     const content_box = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(content_box)) |content_box_widget| {
         content_box_widget.layout_axis = null;
-
-        content_box_widget.semantic_size[0].kind = .ParentPercentage;
-        content_box_widget.semantic_size[0].value = 1.0;
-        content_box_widget.semantic_size[1].kind = .ParentPercentage;
-        content_box_widget.semantic_size[1].value = 1.0;
     }
 
     // Text to render

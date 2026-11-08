@@ -65,19 +65,19 @@ pub const InputState = struct {
         const next_frame_data = self.get_next_frame_data();
 
         switch (event.*) {
-            .KEY_DOWN => |k| {
+            .key_down => |k| {
                 const e = @intFromEnum(k.keycode);
                 next_frame_data.key_state[e] = KeyState.DOWN;
             },
-            .KEY_REPEAT => |k| {
+            .key_repeat => |k| {
                 const e = @intFromEnum(k.keycode);
                 next_frame_data.key_state[e] = KeyState.REPEAT;
             },
-            .KEY_UP => |k| {
+            .key_up => |k| {
                 const e = @intFromEnum(k.keycode);
                 next_frame_data.key_state[e] = KeyState.UP;
             },
-            .CHAR => |c| {
+            .char => |c| {
                 for (&next_frame_data.char_events) |*e| {
                     if (e.* == null) {
                         e.* = c.utf8_char_seq;
@@ -85,15 +85,15 @@ pub const InputState = struct {
                     }
                 }
             },
-            .CURSOR_MOVED => |c| {
+            .cursor_moved => |c| {
                 next_frame_data.cursor_position[0] = c.x_coord;
                 next_frame_data.cursor_position[1] = c.y_coord;
             },
-            .RAW_MOUSE_MOVED => |m| {
+            .raw_mouse_moved => |m| {
                 next_frame_data.mouse_delta[0] += @floatFromInt(m.x_delta);
                 next_frame_data.mouse_delta[1] += @floatFromInt(m.y_delta);
             },
-            .LOST_FOCUS => {
+            .lost_focus => {
                 // Force all held or pressed keys to UP. Next frame this will transition to RELEASED
                 for (&next_frame_data.key_state) |*ks| {
                     switch (ks.*) {
@@ -102,14 +102,14 @@ pub const InputState = struct {
                     }
                 }
             },
-            .DROPPED_FILES => |d| {
+            .dropped_files => |d| {
                 const alloc = eng.get().general_allocator;
                 for (next_frame_data.dropped_files) |path| {
                     alloc.free(path);
                 }
-                next_frame_data.dropped_files = alloc.realloc(next_frame_data.dropped_files, d.paths.len) catch unreachable;
-                for (d.paths, 0..) |path, idx| {
-                    next_frame_data.dropped_files[idx] = alloc.dupe(u8, path) catch unreachable;
+                next_frame_data.dropped_files = alloc.realloc(next_frame_data.dropped_files, d.num_paths) catch unreachable;
+                for (0..d.num_paths) |idx| {
+                    next_frame_data.dropped_files[idx] = alloc.dupe(u8, std.mem.span(d.paths[idx])) catch unreachable;
                 }
             },
             else => {},

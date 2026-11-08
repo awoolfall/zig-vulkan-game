@@ -165,6 +165,17 @@ fn editing_update(self: *Self) !void {
         _ = eng.Imui.widgets.label.create(imui, "Resources:");
 
         var resource_iter = eng.get().ecs.resources.iterator();
+
+        var items: std.ArrayList([]const u8) = .empty;
+        defer items.deinit(eng.get().frame_allocator);
+
+        while (resource_iter.next()) |pair| {
+            try items.append(eng.get().frame_allocator, pair.value_ptr.name);
+        }
+
+        _ = create_item_search_widget(imui, items.items, .{@src()});
+
+        resource_iter = eng.get().ecs.resources.iterator();
         while (resource_iter.next()) |pair| {
             if (pair.value_ptr.data) |resource| {
                 const collapsable = eng.Imui.widgets.collapsible.create(imui, pair.value_ptr.name, .{ pair.key_ptr.*, @src() });
@@ -186,4 +197,139 @@ fn editing_update(self: *Self) !void {
             }
         }
     }
+}
+
+const ItemSearchData = struct {
+    options: std.ArrayList([]u8),
+    dropdown_is_open: bool = false,
+
+    pub fn deinit(self: *ItemSearchData, alloc: std.mem.Allocator) void {
+        for (self.options.items) |o| {
+            alloc.free(o);
+        }
+        self.options.deinit(alloc);
+    }
+
+    pub fn init(alloc: std.mem.Allocator) !ItemSearchData {
+        _ = alloc;
+        return ItemSearchData{
+            .options = .empty,
+        };
+    }
+
+    pub fn clone(self: *ItemSearchData, alloc: std.mem.Allocator) !ItemSearchData {
+        var new_options = std.ArrayList([]u8).empty;
+        errdefer new_options.deinit(alloc);
+
+        for (self.options.items) |o| {
+            try new_options.append(alloc, try alloc.dupe(u8, o));
+        }
+
+        return ItemSearchData{
+            .options = new_options,
+            .dropdown_is_open = self.dropdown_is_open,
+        };
+    }
+};
+
+fn create_item_search_widget(imui: *eng.Imui, items: []const []const u8, key: anytype) eng.Imui.WidgetSignal(eng.Imui.widgets.line_edit.TextInputId) {
+    const add_layout = imui.push_layout(.X, .{@src()});
+    defer imui.pop_layout();
+
+    add_layout.get().children_gap = 2.0;
+
+    const data, const data_state = add_layout.get_widget_data(ItemSearchData, imui) catch unreachable;
+
+    if (data_state == .Init) {
+        for (items) |item| {
+            data.options.append(imui.widget_allocator(), imui.widget_allocator().dupe(u8, item) catch unreachable) catch unreachable;
+        }
+    }
+
+    var component_search_line_edit = eng.Imui.widgets.line_edit.create(imui, .{}, key ++ .{@src()});
+    const line_edit_data, _ = component_search_line_edit.id.box.get_widget_data(eng.Imui.widgets.line_edit.TextInputState, imui) catch unreachable;
+
+    if (imui.focus_item) |focus_item| {
+        data.dropdown_is_open = (focus_item == component_search_line_edit.id.box.get().key or
+            focus_item == component_search_line_edit.id.text.get().key);
+    } else {
+        data.dropdown_is_open = false;
+    }
+
+    // if the dropdown should be shown then render it
+    dropdown_is_open: {
+        if (data.dropdown_is_open) {
+            // determine the position of the dropdown options based on the primary combobox rect
+            const dropdown_pos = if (imui.get_widget_from_last_frame(component_search_line_edit.id.box)) |b|
+                .{ b.rect().left, b.rect().bottom + 4 }
+            else
+                break :dropdown_is_open;
+
+            // push the options background layout
+            const options_background = imui.push_priority_floating_layout(.Y, dropdown_pos[0], dropdown_pos[1], key ++ .{@src()});
+            defer imui.pop_layout();
+
+            if (imui.get_widget(options_background)) |options_background_widget| {
+                options_background_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+                options_background_widget.semantic_size[1] = .{ .kind = .ChildrenSize, .value = 1.0, .shrinkable = true };
+
+                options_background_widget.flags.render = true;
+                options_background_widget.border_width_px = .all(1);
+                options_background_widget.padding_px = .all(4);
+                options_background_widget.children_gap = 2;
+                options_background_widget.corner_radii_px = .all(4);
+            }
+
+            // push each of the options into the dropdown menu
+            const lower_line_edit_text = std.ascii.allocLowerString(eng.get().frame_allocator, line_edit_data.text.items) catch unreachable;
+            defer eng.get().frame_allocator.free(lower_line_edit_text);
+
+            var is_first_item = true;
+            for (data.options.items, 0..) |option, i| {
+                const lower_option = std.ascii.allocLowerString(eng.get().frame_allocator, option) catch unreachable;
+                defer eng.get().frame_allocator.free(lower_option);
+
+                //if (fuzzy_distance(option, line_edit_data.text.items) < 0.7) { continue; }
+                if (lower_line_edit_text.len > 0) {
+                    if (std.mem.count(u8, lower_option, lower_line_edit_text) == 0) {
+                        continue;
+                    }
+                }
+
+                const option_background = imui.push_layout(.X, key ++ .{ @src(), i });
+                defer imui.pop_layout();
+
+                // give the option a hover effect
+                if (imui.get_widget(option_background)) |option_background_widget| {
+                    option_background_widget.semantic_size[0] = .{ .kind = .ParentPercentage, .value = 1.0, .shrinkable = true };
+                    option_background_widget.flags.clickable = true;
+                    option_background_widget.flags.render = true;
+                    option_background_widget.padding_px = .all(4);
+                    option_background_widget.corner_radii_px = .all(4);
+                }
+
+                // if the option is clicked then set text field
+                if (imui.generate_widget_signals(option_background).clicked) {
+                    line_edit_data.text.clearRetainingCapacity();
+                    line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                    component_search_line_edit.data_changed = true;
+                }
+
+                // if enter is clicked then set the text field to the first item
+                if (eng.get().input.get_key_down(eng.input.KeyCode.Enter)) {
+                    if (is_first_item) {
+                        line_edit_data.text.clearRetainingCapacity();
+                        line_edit_data.text.appendSlice(imui.widget_allocator(), option) catch unreachable;
+                        imui.focus_item = null;
+                        component_search_line_edit.data_changed = true;
+                    }
+                }
+
+                _ = eng.Imui.widgets.label.create(imui, option);
+                is_first_item = false;
+            }
+        }
+    }
+
+    return component_search_line_edit;
 }

@@ -60,10 +60,10 @@ pub fn start_new_frame(self: *Self) void {
 
 pub fn received_window_event(self: *Self, event: *const eng.os.WindowEvent) void {
     switch (event.*) {
-        .LOST_FOCUS => {
+        .lost_focus => {
             self.is_focused = false;
         },
-        .GAINED_FOCUS => {
+        .gained_focus => {
             self.is_focused = true;
         },
         else => {},

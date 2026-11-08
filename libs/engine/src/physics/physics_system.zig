@@ -7,15 +7,12 @@ const physics = eng.physics;
 
 const Self = @This();
 
-pub const RESOURCE_NAME = "Physics System";
-pub const RESOURCE_UUID = "3a2446a5-f1b8-4553-9328-1b08ae81d59b";
-
 pub const UpdateRateHz = 15;
 pub const UpdateRateS = (1.0 / @as(comptime_float, @floatFromInt(UpdateRateHz)));
 pub const UpdateRateNs = @divFloor(std.time.ns_per_s, UpdateRateHz);
 
 inline fn debug_renderer_enabled() bool {
-    return true;
+    return false; // @TODO fix: singletons and shared libraries are whack
 }
 const DebugRenderer = if (debug_renderer_enabled()) @import("physics_debug_renderer.zig").D3D11DebugRenderer else void;
 

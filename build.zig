@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(app_library);
 
     const exe = b.addExecutable(.{
-        .name = "zig-dx11-game",
+        .name = "zig-vk-game",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,

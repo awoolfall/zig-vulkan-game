@@ -1,4 +1,4 @@
-pub const KeyCode = enum {
+pub const KeyCode = enum(u32) {
     MouseLeft,
     MouseRight,
     MouseMiddle,

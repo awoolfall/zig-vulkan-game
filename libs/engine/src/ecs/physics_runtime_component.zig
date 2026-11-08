@@ -5,7 +5,7 @@ const physics = eng.physics;
 const zphy = physics.zphy;
 const zm = eng.zmath;
 
-pub const COMPONENT_UUID = "";
+pub const COMPONENT_UUID = "8c0591af-15cf-4c29-b457-20654723fc0f";
 pub const COMPONENT_NAME = "Physics Runtime";
 
 const Self = @This();
@@ -46,20 +46,6 @@ pub fn editor_ui(imui: *eng.Imui, entity: eng.ecs.Entity, component: *Self, key:
     _ = entity;
     _ = component;
     _ = key;
-}
-
-pub fn serialize(self: *Self, alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: *std.json.ObjectMap) !void {
-    _ = self;
-    _ = alloc;
-    _ = entity;
-    _ = object;
-}
-
-pub fn deserialize(alloc: std.mem.Allocator, entity: eng.ecs.Entity, object: std.json.ObjectMap) !Self {
-    _ = alloc;
-    _ = entity;
-    _ = object;
-    return .{};
 }
 
 pub fn deinit_runtime_data(self: *Self) void {

@@ -186,7 +186,15 @@ pub const GenericEcsSystem = struct {
     }
 
     pub inline fn get_type_id(comptime T: type) u64 {
-        return std.hash_map.hashString(@typeName(T));
+        if (@hasDecl(T, "COMPONENT_UUID")) {
+            return std.hash_map.hashString(T.COMPONENT_UUID);
+        } else if (@hasDecl(T, "RESOURCE_UUID")) {
+            return std.hash_map.hashString(T.RESOURCE_UUID);
+        } else {
+            // TODO:
+            // @compileError("type does not have a uuid field: " ++ @typeName(T));
+            return 0;
+        }
     }
 
     fn get_component_list(self: *const GenericEcsSystem, comptime T: type) ?*ComponentList(T) {
@@ -231,8 +239,7 @@ pub const GenericEcsSystem = struct {
             }
 
             fn serialize_component(alloc: *const std.mem.Allocator, object: *std.json.ObjectMap, entity: *const Entity, list_ptr: *anyopaque, component_idx: *const gen.GenerationalIndex) bool {
-                // don't serialize components without a UUID
-                if (ComponentType.COMPONENT_UUID.len == 0) {
+                if (!@hasDecl(ComponentType, "serialize")) {
                     return true;
                 }
 
@@ -254,15 +261,19 @@ pub const GenericEcsSystem = struct {
             fn deserialize_component(alloc: *const std.mem.Allocator, ecs: *GenericEcsSystem, object: *const std.json.ObjectMap, entity: *const Entity) bool {
                 if (object.get(ComponentType.COMPONENT_UUID)) |v| {
                     const component = ecs.add_component(ComponentType, entity.*) catch return false;
-                    // deinit default component to replace with the deserialized value
-                    // TODO ideally we dont do this.
-                    component.deinit();
 
-                    const component_object_map = switch (v) {
-                        .object => |obj| obj,
-                        else => return false,
-                    };
-                    component.* = ComponentType.deserialize(alloc.*, entity.*, component_object_map) catch return false;
+                    if (@hasDecl(ComponentType, "deserialize")) {
+                        const component_object_map = switch (v) {
+                            .object => |obj| obj,
+                            else => return false,
+                        };
+
+                        // deinit default component to replace with the deserialized value
+                        // TODO ideally we dont do this.
+                        component.deinit();
+
+                        component.* = ComponentType.deserialize(alloc.*, entity.*, component_object_map) catch return false;
+                    }
 
                     return true;
                 } else {
@@ -290,9 +301,12 @@ pub const GenericEcsSystem = struct {
 
     pub fn register_component(self: *GenericEcsSystem, comptime T: type) !void {
         const type_id = comptime get_type_id(T);
-        std.log.info("register component {s} as {}", .{ @typeName(T), type_id });
 
-        if (self.components.get(type_id) == null) {
+        if (self.components.getPtr(type_id)) |info| {
+            info.functions = generate_component_functions(T);
+        } else {
+            std.log.info("register component {s} as {}", .{ @typeName(T), type_id });
+
             const component_list = try self.alloc.create(ComponentList(T));
             errdefer self.alloc.destroy(component_list);
 
@@ -309,9 +323,6 @@ pub const GenericEcsSystem = struct {
 
             try self.components.put(type_id, component_info);
             errdefer _ = self.components.remove(type_id);
-        } else {
-            std.log.err("Attempted to register component that already exists", .{});
-            unreachable;
         }
     }
 
@@ -377,9 +388,12 @@ pub const GenericEcsSystem = struct {
 
     pub fn register_resource(self: *GenericEcsSystem, comptime ResourceType: type) !void {
         const type_id = comptime get_type_id(ResourceType);
-        std.log.info("register resource {s} as {}", .{ @typeName(ResourceType), type_id });
 
-        if (self.resources.get(type_id) == null) {
+        if (self.resources.getPtr(type_id)) |info| {
+            info.functions = generate_resource_functions(ResourceType);
+        } else {
+            std.log.info("register resource {s} as {}", .{ @typeName(ResourceType), type_id });
+
             const resource_info = ResourceInfo{
                 .name = try self.alloc.dupe(u8, ResourceType.RESOURCE_NAME),
                 .uuid = try self.alloc.dupe(u8, ResourceType.RESOURCE_UUID),
@@ -389,9 +403,6 @@ pub const GenericEcsSystem = struct {
 
             try self.resources.put(type_id, resource_info);
             errdefer _ = self.resources.remove(type_id);
-        } else {
-            std.log.err("Attempted to register resource that already exists", .{});
-            unreachable;
         }
     }
 
