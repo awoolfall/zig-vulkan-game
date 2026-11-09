@@ -161,6 +161,7 @@ fn editing_update(self: *Self) !void {
         background.get().flags.render = true;
         background.get().semantic_size[@intFromEnum(eng.Imui.Axis.X)].minimum_pixel_size = 300.0;
         background.get().padding_px = .all(5.0);
+        background.get().children_gap = 5.0;
 
         _ = eng.Imui.widgets.label.create(imui, "Resources:");
 

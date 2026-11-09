@@ -65,12 +65,12 @@ pub fn create(imui: *Imui, options: LineEditOptions, key: anytype) Imui.WidgetSi
         lw.flags.render = true;
         lw.flags.clickable = true;
         lw.flags.hover_effect = false;
-        lw.semantic_size[1].kind = .Pixels;
-        lw.semantic_size[1].value = 16.0;
+        lw.semantic_size[1].kind = .ChildrenSize;
+        lw.semantic_size[1].value = 1.0;
         lw.background_colour = imui.palette().secondary;
         lw.border_colour = imui.palette().border;
         lw.border_width_px = .all(1);
-        lw.padding_px = .all(4);
+        lw.padding_px = .lr_tb(4.0, 2.0);
         lw.corner_radii_px = .all(4);
     }
     const state, _ = imui.get_widget_data(TextInputState, l) catch |err| {
@@ -81,6 +81,7 @@ pub fn create(imui: *Imui, options: LineEditOptions, key: anytype) Imui.WidgetSi
     const content_box = imui.push_layout(.X, key ++ .{@src()});
     if (imui.get_widget(content_box)) |content_box_widget| {
         content_box_widget.layout_axis = null;
+        content_box_widget.flags.allows_overflow_x = true;
     }
 
     // Text to render

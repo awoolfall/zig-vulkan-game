@@ -89,3 +89,12 @@ pub inline fn width(self: *const Self) f32 {
 pub inline fn height(self: *const Self) f32 {
     return @abs(self.top - self.bottom);
 }
+
+pub fn intersection(self: Self, other: Self) Self {
+    return .{
+        .top = @max(self.top, other.top),
+        .bottom = @min(self.bottom, other.bottom),
+        .left = @max(self.left, other.left),
+        .right = @min(self.right, other.right),
+    };
+}

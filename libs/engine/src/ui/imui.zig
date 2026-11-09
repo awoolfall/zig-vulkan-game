@@ -716,7 +716,7 @@ fn resolve_widget_size_violations_recursive(self: *Self, widget_id: WidgetId, ax
         const child_widget = self.get_widget(child.?) orelse return error.UnableToGetWidget;
         defer child = child_widget.next_sibling;
 
-        if (child_widget.semantic_size[axis].kind == .ParentPercentage) {
+        if (child_widget.semantic_size[axis].kind == .ParentPercentage and !child_widget.flags.get_allow_overflow_flag(axis)) {
             child_widget.computed_size[axis] = widget.content_size(axis) * child_widget.semantic_size[axis].value;
             child_widget.semantic_size[axis].shrinkable = true;
         }
@@ -733,6 +733,17 @@ fn resolve_widget_size_violations_recursive(self: *Self, widget_id: WidgetId, ax
                 while (child != null) {
                     const child_widget = self.get_widget(child.?) orelse return error.UnableToGetWidget;
                     defer child = child_widget.next_sibling;
+
+                    if (child_widget.flags.get_floating_flag(axis)) {
+                        continue;
+                    }
+                    if (child_widget.flags.get_allow_overflow_flag(axis)) {
+                        // @TODO pretty sure we need to use parent visible size here, not just skip.
+                        // currently the overflow computed size contains the children size.
+                        // we need two size values for overflow widgets, a parent visible size and a content children size.
+                        // we need to shrink the parent visible size without changing the content size if the widget is overflow...
+                        continue;
+                    }
 
                     if (child_widget.semantic_size[axis].shrinkable and (child_widget.computed_size[axis].? > child_widget.semantic_size[axis].minimum_pixel_size)) {
                         resizable_children += 1.0;
@@ -845,6 +856,9 @@ fn compute_widget_rects_recursive(self: *Self, widget: WidgetId, axis: usize) !v
 
                 // if child is floating then it does not contribute to the size of the parent
                 if (child_widget.flags.get_floating_flag(axis)) {
+                    continue;
+                }
+                if (child_widget.flags.get_allow_overflow_flag(axis)) {
                     continue;
                 }
 
@@ -979,50 +993,6 @@ fn render_imui_recursive(
 ) void {
     const widget = self.get_widget(widget_id) orelse return;
 
-    const widget_scissor = blk: {
-        var widget_scissor = parent_scissor;
-        // // clamp widget scissor to parent scissor
-        // widget_scissor.left = @max(widget_scissor.left, parent_scissor.left);
-        // widget_scissor.top = @max(widget_scissor.top, parent_scissor.top);
-        // widget_scissor.width = @min(widget_scissor.left + widget_scissor.width, parent_scissor.left + parent_scissor.width) - widget_scissor.left;
-        // widget_scissor.height = @min(widget_scissor.top + widget_scissor.height, parent_scissor.top + parent_scissor.height) - widget_scissor.top;
-
-        // expand scissor if overflow is allowed
-        const swapchain_size = eng.get().gfx.swapchain_size();
-        if (widget.flags.allows_overflow_x) {
-            widget_scissor.right = @floatFromInt(swapchain_size[0]);
-            widget_scissor.left = 0;
-        }
-        if (widget.flags.allows_overflow_y) {
-            widget_scissor.bottom = @floatFromInt(swapchain_size[1]);
-            widget_scissor.top = 0;
-        }
-
-        break :blk widget_scissor;
-    };
-
-    const widget_content_scissor = blk: {
-        var scissor = widget.content_rect();
-        // clamp widget scissor to parent scissor
-        scissor.left = @max(scissor.left, parent_scissor.left);
-        scissor.top = @max(scissor.top, parent_scissor.top);
-        scissor.right = @min(scissor.right, parent_scissor.right);
-        scissor.bottom = @min(scissor.bottom, parent_scissor.bottom);
-
-        // expand scissor if overflow is allowed
-        const swapchain_size = eng.get().gfx.swapchain_size();
-        if (widget.flags.allows_overflow_x) {
-            scissor.right = @floatFromInt(swapchain_size[0]);
-            scissor.left = 0;
-        }
-        if (widget.flags.allows_overflow_y) {
-            scissor.bottom = @floatFromInt(swapchain_size[1]);
-            scissor.top = 0;
-        }
-
-        break :blk scissor;
-    };
-
     var widget_palette = parent_palette;
     if (widget.background_colour) |bc| {
         widget_palette.background = bc;
@@ -1050,11 +1020,11 @@ fn render_imui_recursive(
             }
         }
 
-        self.render_imui_widget(widget, z_index, widget_scissor, p);
+        self.render_imui_widget(widget, z_index, parent_scissor, p);
     }
 
     if (widget.first_child) |c| {
-        self.render_imui_recursive(c, z_index + 1, widget_content_scissor, widget_palette);
+        self.render_imui_recursive(c, z_index + 1, RectPixels.intersection(widget.content_rect(), parent_scissor), widget_palette);
     }
     if (widget.next_sibling) |s| {
         self.render_imui_recursive(s, z_index, parent_scissor, parent_palette);
